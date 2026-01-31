@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AdminHeader } from "~/components/admin-header";
+import { useAdminGuard } from "~/lib/auth-guard";
 import { listDissertations, type DissertationSubmission } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/dissertations";
@@ -15,22 +16,41 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Dissertations() {
+  const { isAuthorized, isPending } = useAdminGuard();
   const [submissions, setSubmissions] = useState<DissertationSubmission[]>([]);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
   const limit = 50;
 
   useEffect(() => {
-    loadSubmissions();
-  }, [offset]);
+    if (isAuthorized) {
+      loadSubmissions();
+    }
+  }, [offset, isAuthorized]);
+
+  if (isPending || isAuthorized === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent"></div>
+          <p className="font-['Satoshi'] text-sm text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthorized) {
+    return null; // Redirect will happen in guard
+  }
 
   const loadSubmissions = async () => {
     try {
       setLoading(true);
-      const response = await listDissertations(limit, offset);
-      setSubmissions(response.submissions as DissertationSubmission[]);
+      const submissionsList = await listDissertations(limit, offset);
+      setSubmissions(Array.isArray(submissionsList) ? submissionsList : []);
     } catch (error: any) {
       toast.error(error.message || "Failed to load submissions");
+      setSubmissions([]); // Set empty array on error
     } finally {
       setLoading(false);
     }
@@ -79,7 +99,8 @@ export default function Dissertations() {
                 </tr>
               </thead>
               <tbody>
-                {submissions.map((sub) => (
+                {submissions && submissions.length > 0 ? (
+                  submissions.map((sub) => (
                   <tr key={sub.id} className="border-b border-gray-200">
                     <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-950">
                       {sub.name}
@@ -113,7 +134,14 @@ export default function Dissertations() {
                       {new Date(sub.created_at).toLocaleDateString()}
                     </td>
                   </tr>
-                ))}
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center font-['Satoshi'] text-sm text-gray-500">
+                      No submissions found
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
             <div className="mt-4 flex gap-4">

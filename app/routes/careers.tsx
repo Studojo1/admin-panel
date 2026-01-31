@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AdminHeader } from "~/components/admin-header";
+import { useAdminGuard } from "~/lib/auth-guard";
 import { listCareers, type CareerApplication } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/careers";
@@ -15,22 +16,41 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Careers() {
+  const { isAuthorized, isPending } = useAdminGuard();
   const [applications, setApplications] = useState<CareerApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
   const limit = 50;
 
   useEffect(() => {
-    loadApplications();
-  }, [offset]);
+    if (isAuthorized) {
+      loadApplications();
+    }
+  }, [offset, isAuthorized]);
+
+  if (isPending || isAuthorized === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent"></div>
+          <p className="font-['Satoshi'] text-sm text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthorized) {
+    return null; // Redirect will happen in guard
+  }
 
   const loadApplications = async () => {
     try {
       setLoading(true);
-      const response = await listCareers(limit, offset);
-      setApplications(response.applications as CareerApplication[]);
+      const applicationsList = await listCareers(limit, offset);
+      setApplications(Array.isArray(applicationsList) ? applicationsList : []);
     } catch (error: any) {
       toast.error(error.message || "Failed to load applications");
+      setApplications([]); // Set empty array on error
     } finally {
       setLoading(false);
     }
@@ -82,7 +102,8 @@ export default function Careers() {
                 </tr>
               </thead>
               <tbody>
-                {applications.map((app) => (
+                {applications && applications.length > 0 ? (
+                  applications.map((app) => (
                   <tr key={app.id} className="border-b border-gray-200">
                     <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-950">
                       {app.name}
@@ -121,7 +142,14 @@ export default function Careers() {
                       {new Date(app.created_at).toLocaleDateString()}
                     </td>
                   </tr>
-                ))}
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-8 text-center font-['Satoshi'] text-sm text-gray-500">
+                      No applications found
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
             <div className="mt-4 flex gap-4">

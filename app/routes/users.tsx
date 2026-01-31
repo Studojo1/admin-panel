@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AdminHeader } from "~/components/admin-header";
+import { useAdminGuard } from "~/lib/auth-guard";
 import { listUsers, updateUser, type AdminUser } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/users";
@@ -15,22 +16,41 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Users() {
+  const { isAuthorized, isPending } = useAdminGuard();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
   const limit = 50;
 
   useEffect(() => {
-    loadUsers();
-  }, [offset]);
+    if (isAuthorized) {
+      loadUsers();
+    }
+  }, [offset, isAuthorized]);
+
+  if (isPending || isAuthorized === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent"></div>
+          <p className="font-['Satoshi'] text-sm text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthorized) {
+    return null; // Redirect will happen in guard
+  }
 
   const loadUsers = async () => {
     try {
       setLoading(true);
-      const response = await listUsers(limit, offset);
-      setUsers(response.users as AdminUser[]);
+      const usersList = await listUsers(limit, offset);
+      setUsers(Array.isArray(usersList) ? usersList : []);
     } catch (error: any) {
       toast.error(error.message || "Failed to load users");
+      setUsers([]); // Set empty array on error
     } finally {
       setLoading(false);
     }
@@ -92,16 +112,17 @@ export default function Users() {
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
+                {users && users.length > 0 ? (
+                  users.map((user) => (
                   <tr key={user.id} className="border-b border-gray-200">
                     <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-950">
-                      {user.name}
+                      {user.name || "—"}
                     </td>
                     <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-950">
-                      {user.email}
+                      {user.email || "—"}
                     </td>
                     <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-950">
-                      {user.phone_number || "-"}
+                      {user.phone_number || "—"}
                     </td>
                     <td className="px-4 py-3">
                       <select
@@ -109,7 +130,7 @@ export default function Users() {
                         onChange={(e) => handleUpdateRole(user.id, e.target.value)}
                         className="rounded-lg border-2 border-neutral-900 bg-white px-2 py-1 font-['Satoshi'] text-sm"
                       >
-                        <option value="">None</option>
+                        <option value="">—</option>
                         <option value="admin">Admin</option>
                       </select>
                     </td>
@@ -137,7 +158,14 @@ export default function Users() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center font-['Satoshi'] text-sm text-gray-500">
+                      No users found
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
             <div className="mt-4 flex gap-4">

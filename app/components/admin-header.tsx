@@ -1,4 +1,5 @@
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
+import { authClient } from "~/lib/auth-client";
 
 const NAV_LINKS = [
   { to: "/", label: "Dashboard" },
@@ -9,6 +10,16 @@ const NAV_LINKS = [
 
 export function AdminHeader() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { data: session } = authClient.useSession();
+
+  const handleSignOut = () => {
+    authClient.signOut({
+      fetchOptions: {
+        onSuccess: () => navigate("/login"),
+      },
+    });
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-neutral-900 bg-white">
@@ -37,6 +48,14 @@ export function AdminHeader() {
               </Link>
             );
           })}
+          {session && (
+            <button
+              onClick={handleSignOut}
+              className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-neutral-900 transition-transform hover:translate-x-[2px] hover:translate-y-[2px]"
+            >
+              Sign Out
+            </button>
+          )}
         </nav>
       </div>
     </header>

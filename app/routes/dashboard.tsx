@@ -1,4 +1,5 @@
 import { AdminHeader } from "~/components/admin-header";
+import { useAdminGuard } from "~/lib/auth-guard";
 import type { Route } from "./+types/dashboard";
 
 export function meta({}: Route.MetaArgs) {
@@ -12,6 +13,23 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Dashboard() {
+  const { isAuthorized, isPending } = useAdminGuard();
+
+  if (isPending || isAuthorized === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent"></div>
+          <p className="font-['Satoshi'] text-sm text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthorized) {
+    return null; // Redirect will happen in guard
+  }
+
   return (
     <>
       <AdminHeader />
