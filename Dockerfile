@@ -12,8 +12,6 @@ ENV VITE_CONTROL_PLANE_URL=${VITE_CONTROL_PLANE_URL}
 COPY package.json bun.lockb* package-lock.json* ./
 RUN bun install --frozen-lockfile || npm ci || true
 COPY . .
-# Ensure public folder is copied to build output
-RUN mkdir -p build/client && cp -r public/* build/client/ 2>/dev/null || true
 RUN bun run build || npm run build
 
 # Run with Node: React Router server uses renderToPipeableStream etc.; Bun's react-dom/server stub lacks them.
