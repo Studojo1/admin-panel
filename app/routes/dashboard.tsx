@@ -76,20 +76,120 @@ function formatMonth(monthStr: string): string {
 }
 
 function SimpleBarChart({ data, maxValue, color }: { data: number[]; maxValue: number; color: string }) {
+  const chartHeight = 120;
   return (
-    <div className="flex h-32 items-end justify-between gap-1">
-      {data.map((value, i) => {
-        const height = maxValue > 0 ? (value / maxValue) * 100 : 0;
-        return (
-          <div key={i} className="flex flex-1 flex-col items-center gap-1">
-            <div
-              className={`w-full rounded-t-lg border-2 border-neutral-900 ${color} transition-all`}
-              style={{ height: `${height}%` }}
-            />
-            <span className="font-['Satoshi'] text-[10px] text-neutral-600">{value}</span>
-          </div>
-        );
-      })}
+    <div className="relative h-32 w-full">
+      <div className="absolute bottom-0 left-0 right-0 flex h-full items-end justify-between gap-1 px-1">
+        {data.map((value, i) => {
+          const height = maxValue > 0 ? (value / maxValue) * chartHeight : 0;
+          return (
+            <div key={i} className="flex flex-1 flex-col items-center gap-1">
+              <div
+                className={`w-full rounded-t-lg border-2 border-neutral-900 ${color} transition-all min-h-[2px]`}
+                style={{ height: `${height}px` }}
+              />
+              <span className="font-['Satoshi'] text-[10px] text-neutral-600">{value}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LineChart({ data, labels }: { data: number[]; labels: string[] }) {
+  const chartHeight = 200;
+  const maxValue = Math.max(...data, 1);
+  const padding = 40;
+  const width = data.length * 40;
+  
+  // Calculate points for the line
+  const points = data.map((value, i) => {
+    const x = i * 40 + 20;
+    const y = chartHeight - (value / maxValue) * chartHeight;
+    return `${x},${y}`;
+  }).join(' ');
+  
+  return (
+    <div className="relative h-64 w-full overflow-x-auto">
+      <svg className="h-full w-full" viewBox={`0 0 ${width} ${chartHeight + padding}`} preserveAspectRatio="xMidYMid meet">
+        {/* Grid lines */}
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+          const y = chartHeight - (ratio * chartHeight);
+          const value = maxValue * (1 - ratio);
+          return (
+            <g key={ratio}>
+              <line
+                x1="0"
+                y1={y}
+                x2={width}
+                y2={y}
+                stroke="#e5e7eb"
+                strokeWidth="1"
+                strokeDasharray="4 4"
+              />
+              <text
+                x="5"
+                y={y + 4}
+                className="font-['Satoshi'] text-xs fill-neutral-500"
+                textAnchor="start"
+              >
+                {Math.round(value)}
+              </text>
+            </g>
+          );
+        })}
+        
+        {/* Line */}
+        <polyline
+          points={points}
+          fill="none"
+          stroke="#8b5cf6"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        
+        {/* Data points */}
+        {data.map((value, i) => {
+          const x = i * 40 + 20;
+          const y = chartHeight - (value / maxValue) * chartHeight;
+          return (
+            <g key={i}>
+              <circle
+                cx={x}
+                cy={y}
+                r="4"
+                fill="#8b5cf6"
+                stroke="#171717"
+                strokeWidth="2"
+              />
+              {/* Value label */}
+              {value > 0 && (
+                <text
+                  x={x}
+                  y={y - 8}
+                  className="font-['Satoshi'] text-[10px] fill-neutral-700 font-medium"
+                  textAnchor="middle"
+                >
+                  {Math.round(value)}
+                </text>
+              )}
+              {/* Month label */}
+              {labels[i] && (
+                <text
+                  x={x}
+                  y={chartHeight + 20}
+                  className="font-['Satoshi'] text-[10px] fill-neutral-600"
+                  textAnchor="middle"
+                >
+                  {labels[i].slice(0, 3)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
@@ -104,43 +204,47 @@ function PieChart({ data }: { data: { label: string; value: number; color: strin
     );
   }
 
-  let currentAngle = 0;
+  let currentAngle = -90; // Start at top
   const radius = 80;
   const centerX = 100;
   const centerY = 100;
 
   return (
-    <svg viewBox="0 0 200 200" className="h-64 w-full">
-      {data.map((item, i) => {
-        const percentage = (item.value / total) * 100;
-        const angle = (item.value / total) * 360;
-        const startAngle = currentAngle;
-        const endAngle = currentAngle + angle;
-        currentAngle = endAngle;
+    <div className="flex items-center justify-center">
+      <svg viewBox="0 0 200 200" className="h-64 w-64">
+        {data.map((item, i) => {
+          if (item.value === 0) return null;
+          const angle = (item.value / total) * 360;
+          const startAngle = currentAngle;
+          const endAngle = currentAngle + angle;
+          currentAngle = endAngle;
 
-        const x1 = centerX + radius * Math.cos((startAngle * Math.PI) / 180);
-        const y1 = centerY + radius * Math.sin((startAngle * Math.PI) / 180);
-        const x2 = centerX + radius * Math.cos((endAngle * Math.PI) / 180);
-        const y2 = centerY + radius * Math.sin((endAngle * Math.PI) / 180);
-        const largeArc = angle > 180 ? 1 : 0;
+          const startRad = (startAngle * Math.PI) / 180;
+          const endRad = (endAngle * Math.PI) / 180;
+          const x1 = centerX + radius * Math.cos(startRad);
+          const y1 = centerY + radius * Math.sin(startRad);
+          const x2 = centerX + radius * Math.cos(endRad);
+          const y2 = centerY + radius * Math.sin(endRad);
+          const largeArc = angle > 180 ? 1 : 0;
 
-        return (
-          <g key={i}>
-            <path
-              d={`M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`}
-              fill={item.color}
-              stroke="#171717"
-              strokeWidth="2"
-              className="transition-opacity hover:opacity-80"
-            />
-          </g>
-        );
-      })}
-      <circle cx={centerX} cy={centerY} r={40} fill="white" stroke="#171717" strokeWidth="2" />
-      <text x={centerX} y={centerY} textAnchor="middle" dominantBaseline="middle" className="font-['Clash_Display'] text-sm font-bold fill-neutral-900">
-        {formatCurrency(total)}
-      </text>
-    </svg>
+          return (
+            <g key={i}>
+              <path
+                d={`M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`}
+                fill={item.color}
+                stroke="#171717"
+                strokeWidth="2"
+                className="transition-opacity hover:opacity-80"
+              />
+            </g>
+          );
+        })}
+        <circle cx={centerX} cy={centerY} r={40} fill="white" stroke="#171717" strokeWidth="2" />
+        <text x={centerX} y={centerY} textAnchor="middle" dominantBaseline="middle" className="font-['Clash_Display'] text-sm font-bold fill-neutral-900">
+          {formatCurrency(total)}
+        </text>
+      </svg>
+    </div>
   );
 }
 
@@ -313,8 +417,8 @@ export default function Dashboard() {
                     <div>
                       <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">Revenue (₹)</div>
                       <SimpleBarChart
-                        data={stats.monthly_metrics.map((m) => m.revenue / 100)}
-                        maxValue={maxRevenue / 100}
+                        data={stats.monthly_metrics.map((m) => Math.round(m.revenue / 100))}
+                        maxValue={Math.max(1, Math.round(maxRevenue / 100))}
                         color="bg-amber-500"
                       />
                       <div className="mt-2 flex justify-between font-['Satoshi'] text-xs text-neutral-500">
@@ -391,13 +495,10 @@ export default function Dashboard() {
                   <h2 className="mb-6 font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl">
                     Revenue Trend
                   </h2>
-                  <div className="h-64">
-                    <SimpleBarChart
-                      data={stats.monthly_metrics.map((m) => m.revenue / 100)}
-                      maxValue={maxRevenue / 100}
-                      color="bg-purple-500"
-                    />
-                  </div>
+                  <LineChart
+                    data={stats.monthly_metrics.map((m) => Math.round(m.revenue / 100))}
+                    labels={stats.monthly_metrics.map((m) => formatMonth(m.month))}
+                  />
                   <div className="mt-4 text-center font-['Satoshi'] text-sm text-neutral-600">
                     Monthly revenue over last 12 months
                   </div>
@@ -410,7 +511,7 @@ export default function Dashboard() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5, delay: 0.4 }}
-                  className="rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+                  className="rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] overflow-hidden"
                 >
                   <div className="border-b-2 border-neutral-900 bg-neutral-50 px-6 py-4 md:px-8">
                     <h2 className="font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl">
