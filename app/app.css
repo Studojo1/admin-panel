@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Clash Display", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-satoshi: "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --font-clash: "Clash Display", ui-sans-serif, system-ui, sans-serif;
+
+  /* Studojo design system – reference colors */
+  --color-studojo-ink: #171717;
+  --color-studojo-muted: #525252;
+  --color-studojo-surface: #ffffff;
+  --color-studojo-surface-muted: #f5f5f5;
+
+  /* Brand – neo‑brutalist palette */
+  --color-studojo-purple: #8b5cf6;
+  --color-studojo-purple-light: #dab2ff;
+  --color-studojo-purple-bg: #faf5fe;
+  --color-studojo-purple-300: #dab2ff;
+  --color-studojo-green: #10b981;
+  --color-studojo-green-bg: #d0fae4;
+  --color-studojo-emerald-300: #5ee9b5;
+  --color-studojo-emerald-500: #10b981;
+  --color-studojo-orange: #f59e0b;
+  --color-studojo-orange-bg: #fef3c6;
+  --color-studojo-amber-400: #fbbf24;
+  --color-studojo-amber-500: #f59e0b;
+  --color-studojo-pink: #ec4899;
+  --color-studojo-pink-bg: #fdf2f8;
+  --color-studojo-pink-300: #fda5d5;
+  --color-studojo-yellow: #eab308;
+  --color-studojo-yellow-bg: #fefce8;
+  --color-studojo-yellow-500: #eab308;
+  --color-studojo-violet-500: #8b5cf6;
+  --color-studojo-teal: #14b8a6;
+  --color-studojo-neutral-900: #171717;
+  --shadow-brutal: 4px 4px 0px 0px rgba(25, 26, 35, 1);
+  --shadow-brutal-lg: 6px 6px 0px 0px rgba(25, 26, 35, 1);
+  --shadow-brutal-xl: 8px 8px 0px 0px rgba(25, 26, 35, 1);
+
+  --font-size-stat-value: 2.5rem;
+  --font-size-stat-value-mobile: 2rem;
+  --font-size-stat-label: 1rem;
+  --section-padding-y: 4rem;
+  --section-padding-y-mobile: 2.5rem;
+  --section-padding-x: 2rem;
+  --section-max-width: 80rem;
+  --stat-gap: 3rem;
+  --stat-gap-mobile: 2rem;
+  --radius-card: 1rem;
+  --radius-pill: 9999px;
+  --shadow-card: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-top: 4rem;
+}
+
+html,
+body {
+  @apply bg-white text-[var(--color-studojo-ink)] antialiased;
+  font-family: var(--font-sans);
+}
+
+[data-scroll-container] {
+  scroll-behavior: smooth;
+}
+
