@@ -161,6 +161,10 @@ export interface AdminUser {
   banned?: boolean;
   ban_reason?: string;
   ban_expires?: string;
+  full_name?: string;
+  college?: string;
+  year_of_study?: string;
+  course?: string;
   created_at: string;
   updated_at: string;
 }
@@ -234,8 +238,15 @@ async function adminFetch<T>(
   return response.json();
 }
 
-export async function listUsers(limit = 50, offset = 0): Promise<AdminUser[]> {
-  const response = await adminFetch<{ users: AdminUser[] }>(`/v1/admin/users?limit=${limit}&offset=${offset}`);
+export async function listUsers(limit = 50, offset = 0, search?: string): Promise<AdminUser[]> {
+  const params = new URLSearchParams({
+    limit: limit.toString(),
+    offset: offset.toString(),
+  });
+  if (search) {
+    params.append("search", search);
+  }
+  const response = await adminFetch<{ users: AdminUser[] }>(`/v1/admin/users?${params.toString()}`);
   return response.users || [];
 }
 
@@ -266,5 +277,52 @@ export async function listDissertations(limit = 50, offset = 0): Promise<Dissert
 export async function listCareers(limit = 50, offset = 0): Promise<CareerApplication[]> {
   const response = await adminFetch<{ applications: CareerApplication[] }>(`/v1/admin/careers?limit=${limit}&offset=${offset}`);
   return response.applications || [];
+}
+
+export interface MonthMetric {
+  month: string;
+  users_count: number;
+  orders_count: number;
+  revenue: number;
+}
+
+export interface AssignmentOrder {
+  job_id: string;
+  user_id: string;
+  user_name: string;
+  created_at: string;
+  status: string;
+  amount: number;
+  download_url?: string;
+}
+
+export interface RevenueBreakdown {
+  total: number;
+  assignments: number;
+  dissertations: number;
+  careers: number;
+}
+
+export interface DashboardStats {
+  total_users: number;
+  total_dissertations: number;
+  total_careers: number;
+  users_last_7_days: number;
+  users_last_30_days: number;
+  dissertations_last_7_days: number;
+  dissertations_last_30_days: number;
+  careers_last_7_days: number;
+  careers_last_30_days: number;
+  banned_users: number;
+  active_users: number;
+  completed_payments: number;
+  pending_payments: number;
+  monthly_metrics: MonthMetric[];
+  assignment_orders: AssignmentOrder[];
+  revenue_breakdown: RevenueBreakdown;
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  return adminFetch<DashboardStats>(`/v1/admin/stats`);
 }
 

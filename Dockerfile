@@ -12,6 +12,8 @@ ENV VITE_CONTROL_PLANE_URL=${VITE_CONTROL_PLANE_URL}
 COPY package.json bun.lockb* package-lock.json* ./
 RUN bun install --frozen-lockfile || npm ci || true
 COPY . .
+# Ensure public folder is copied to build output
+RUN mkdir -p build/client && cp -r public/* build/client/ 2>/dev/null || true
 RUN bun run build || npm run build
 
 # Run with Node: React Router server uses renderToPipeableStream etc.; Bun's react-dom/server stub lacks them.
@@ -23,6 +25,8 @@ COPY --from=production-dependencies-env /src/node_modules /src/node_modules
 # Install typescript globally (needed for tsconfig)
 RUN npm install -g typescript
 COPY --from=build-env /src/build ./build
+# Ensure public assets are available
+COPY --from=build-env /src/public ./public
 EXPOSE 3001
 CMD ["npx", "react-router-serve", "./build/server/index.js"]
 
