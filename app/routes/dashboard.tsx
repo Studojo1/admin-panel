@@ -1,11 +1,38 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+} from "chart.js";
+import { Bar, Line, Doughnut } from "react-chartjs-2";
 import { AdminHeader, StatCard } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getDashboardStats, getControlPlaneUrl, getToken, type DashboardStats } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/dashboard";
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+);
 
 const floatY = [0, -24, -12, -30, 0];
 const floatX = [0, 12, -18, 8, 0];
@@ -75,178 +102,67 @@ function formatMonth(monthStr: string): string {
   return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
 
-function SimpleBarChart({ data, maxValue, color }: { data: number[]; maxValue: number; color: string }) {
-  const chartHeight = 120;
-  return (
-    <div className="relative h-32 w-full">
-      <div className="absolute bottom-0 left-0 right-0 flex h-full items-end justify-between gap-1 px-1">
-        {data.map((value, i) => {
-          const height = maxValue > 0 ? (value / maxValue) * chartHeight : 0;
-          return (
-            <div key={i} className="flex flex-1 flex-col items-center gap-1">
-              <div
-                className={`w-full rounded-t-lg border-2 border-neutral-900 ${color} transition-all min-h-[2px]`}
-                style={{ height: `${height}px` }}
-              />
-              <span className="font-['Satoshi'] text-[10px] text-neutral-600">{value}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function LineChart({ data, labels }: { data: number[]; labels: string[] }) {
-  const chartHeight = 200;
-  const maxValue = Math.max(...data, 1);
-  const padding = 40;
-  const width = data.length * 40;
-  
-  // Calculate points for the line
-  const points = data.map((value, i) => {
-    const x = i * 40 + 20;
-    const y = chartHeight - (value / maxValue) * chartHeight;
-    return `${x},${y}`;
-  }).join(' ');
-  
-  return (
-    <div className="relative h-64 w-full overflow-x-auto">
-      <svg className="h-full w-full" viewBox={`0 0 ${width} ${chartHeight + padding}`} preserveAspectRatio="xMidYMid meet">
-        {/* Grid lines */}
-        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-          const y = chartHeight - (ratio * chartHeight);
-          const value = maxValue * (1 - ratio);
-          return (
-            <g key={ratio}>
-              <line
-                x1="0"
-                y1={y}
-                x2={width}
-                y2={y}
-                stroke="#e5e7eb"
-                strokeWidth="1"
-                strokeDasharray="4 4"
-              />
-              <text
-                x="5"
-                y={y + 4}
-                className="font-['Satoshi'] text-xs fill-neutral-500"
-                textAnchor="start"
-              >
-                {Math.round(value)}
-              </text>
-            </g>
-          );
-        })}
-        
-        {/* Line */}
-        <polyline
-          points={points}
-          fill="none"
-          stroke="#8b5cf6"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        
-        {/* Data points */}
-        {data.map((value, i) => {
-          const x = i * 40 + 20;
-          const y = chartHeight - (value / maxValue) * chartHeight;
-          return (
-            <g key={i}>
-              <circle
-                cx={x}
-                cy={y}
-                r="4"
-                fill="#8b5cf6"
-                stroke="#171717"
-                strokeWidth="2"
-              />
-              {/* Value label */}
-              {value > 0 && (
-                <text
-                  x={x}
-                  y={y - 8}
-                  className="font-['Satoshi'] text-[10px] fill-neutral-700 font-medium"
-                  textAnchor="middle"
-                >
-                  {Math.round(value)}
-                </text>
-              )}
-              {/* Month label */}
-              {labels[i] && (
-                <text
-                  x={x}
-                  y={chartHeight + 20}
-                  className="font-['Satoshi'] text-[10px] fill-neutral-600"
-                  textAnchor="middle"
-                >
-                  {labels[i].slice(0, 3)}
-                </text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
-function PieChart({ data }: { data: { label: string; value: number; color: string }[] }) {
-  const total = data.reduce((sum, d) => sum + d.value, 0);
-  if (total === 0) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <p className="font-['Satoshi'] text-sm text-neutral-500">No revenue data</p>
-      </div>
-    );
-  }
-
-  let currentAngle = -90; // Start at top
-  const radius = 80;
-  const centerX = 100;
-  const centerY = 100;
-
-  return (
-    <div className="flex items-center justify-center">
-      <svg viewBox="0 0 200 200" className="h-64 w-64">
-        {data.map((item, i) => {
-          if (item.value === 0) return null;
-          const angle = (item.value / total) * 360;
-          const startAngle = currentAngle;
-          const endAngle = currentAngle + angle;
-          currentAngle = endAngle;
-
-          const startRad = (startAngle * Math.PI) / 180;
-          const endRad = (endAngle * Math.PI) / 180;
-          const x1 = centerX + radius * Math.cos(startRad);
-          const y1 = centerY + radius * Math.sin(startRad);
-          const x2 = centerX + radius * Math.cos(endRad);
-          const y2 = centerY + radius * Math.sin(endRad);
-          const largeArc = angle > 180 ? 1 : 0;
-
-          return (
-            <g key={i}>
-              <path
-                d={`M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`}
-                fill={item.color}
-                stroke="#171717"
-                strokeWidth="2"
-                className="transition-opacity hover:opacity-80"
-              />
-            </g>
-          );
-        })}
-        <circle cx={centerX} cy={centerY} r={40} fill="white" stroke="#171717" strokeWidth="2" />
-        <text x={centerX} y={centerY} textAnchor="middle" dominantBaseline="middle" className="font-['Clash_Display'] text-sm font-bold fill-neutral-900">
-          {formatCurrency(total)}
-        </text>
-      </svg>
-    </div>
-  );
-}
+const chartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: {
+      display: false,
+    },
+    tooltip: {
+      backgroundColor: "rgba(0, 0, 0, 0.8)",
+      padding: 12,
+      titleFont: {
+        family: "'Satoshi', sans-serif",
+        size: 14,
+        weight: "bold" as const,
+      },
+      bodyFont: {
+        family: "'Satoshi', sans-serif",
+        size: 13,
+      },
+      borderColor: "#171717",
+      borderWidth: 2,
+      cornerRadius: 8,
+      displayColors: true,
+    },
+  },
+  scales: {
+    x: {
+      grid: {
+        display: false,
+      },
+      ticks: {
+        font: {
+          family: "'Satoshi', sans-serif",
+          size: 11,
+        },
+        color: "#6b7280",
+      },
+      border: {
+        color: "#e5e7eb",
+        width: 1,
+      },
+    },
+    y: {
+      grid: {
+        color: "#e5e7eb",
+        lineWidth: 1,
+      },
+      ticks: {
+        font: {
+          family: "'Satoshi', sans-serif",
+          size: 11,
+        },
+        color: "#6b7280",
+      },
+      border: {
+        color: "#e5e7eb",
+        width: 1,
+      },
+    },
+  },
+};
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -299,7 +215,7 @@ export default function Dashboard() {
   const handleDownload = async (jobId: string) => {
     try {
       const baseUrl = getControlPlaneUrl();
-      const token = await import("~/lib/api").then((m) => m.getToken());
+      const token = await getToken();
       const response = await fetch(`${baseUrl}/v1/jobs/${jobId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -326,9 +242,50 @@ export default function Dashboard() {
     }
   };
 
-  const maxUsers = stats?.monthly_metrics.length ? Math.max(...stats.monthly_metrics.map((m) => m.users_count)) : 1;
-  const maxOrders = stats?.monthly_metrics.length ? Math.max(...stats.monthly_metrics.map((m) => m.orders_count)) : 1;
-  const maxRevenue = stats?.monthly_metrics.length ? Math.max(...stats.monthly_metrics.map((m) => m.revenue)) : 1;
+  if (!stats) {
+    return null;
+  }
+
+  const monthlyLabels = stats.monthly_metrics.map((m) => formatMonth(m.month));
+  const usersData = stats.monthly_metrics.map((m) => m.users_count);
+  const ordersData = stats.monthly_metrics.map((m) => m.orders_count);
+  const revenueData = stats.monthly_metrics.map((m) => Math.round(m.revenue / 100));
+
+  const revenueBreakdownData = {
+    labels: ["Assignments", "Dissertations", "Careers"],
+    datasets: [
+      {
+        data: [
+          Math.round(stats.revenue_breakdown.assignments / 100),
+          Math.round(stats.revenue_breakdown.dissertations / 100),
+          Math.round(stats.revenue_breakdown.careers / 100),
+        ],
+        backgroundColor: ["#8b5cf6", "#10b981", "#f59e0b"],
+        borderColor: "#171717",
+        borderWidth: 2,
+      },
+    ],
+  };
+
+  const revenueTrendData = {
+    labels: monthlyLabels,
+    datasets: [
+      {
+        label: "Revenue (₹)",
+        data: revenueData,
+        borderColor: "#8b5cf6",
+        backgroundColor: "rgba(139, 92, 246, 0.1)",
+        borderWidth: 3,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: "#8b5cf6",
+        pointBorderColor: "#171717",
+        pointBorderWidth: 2,
+      },
+    ],
+  };
 
   return (
     <>
@@ -363,7 +320,7 @@ export default function Dashboard() {
                 <p className="font-['Satoshi'] text-sm text-gray-600">Loading stats...</p>
               </div>
             </div>
-          ) : stats ? (
+          ) : (
             <div className="relative z-10 space-y-12">
               {/* Main Stats Grid */}
               <motion.div
@@ -392,38 +349,95 @@ export default function Dashboard() {
                   <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
                     <div>
                       <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">New Users</div>
-                      <SimpleBarChart
-                        data={stats.monthly_metrics.map((m) => m.users_count)}
-                        maxValue={maxUsers}
-                        color="bg-purple-500"
-                      />
-                      <div className="mt-2 flex justify-between font-['Satoshi'] text-xs text-neutral-500">
-                        <span>{formatMonth(stats.monthly_metrics[0]?.month || "")}</span>
-                        <span>{formatMonth(stats.monthly_metrics[stats.monthly_metrics.length - 1]?.month || "")}</span>
+                      <div className="h-32">
+                        <Bar
+                          data={{
+                            labels: monthlyLabels,
+                            datasets: [
+                              {
+                                label: "Users",
+                                data: usersData,
+                                backgroundColor: "#8b5cf6",
+                                borderColor: "#171717",
+                                borderWidth: 2,
+                              },
+                            ],
+                          }}
+                          options={{
+                            ...chartOptions,
+                            plugins: {
+                              ...chartOptions.plugins,
+                              tooltip: {
+                                ...chartOptions.plugins.tooltip,
+                                callbacks: {
+                                  label: (context) => `${context.parsed.y} users`,
+                                },
+                              },
+                            },
+                          }}
+                        />
                       </div>
                     </div>
                     <div>
                       <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">Assignment Orders</div>
-                      <SimpleBarChart
-                        data={stats.monthly_metrics.map((m) => m.orders_count)}
-                        maxValue={maxOrders}
-                        color="bg-emerald-500"
-                      />
-                      <div className="mt-2 flex justify-between font-['Satoshi'] text-xs text-neutral-500">
-                        <span>{formatMonth(stats.monthly_metrics[0]?.month || "")}</span>
-                        <span>{formatMonth(stats.monthly_metrics[stats.monthly_metrics.length - 1]?.month || "")}</span>
+                      <div className="h-32">
+                        <Bar
+                          data={{
+                            labels: monthlyLabels,
+                            datasets: [
+                              {
+                                label: "Orders",
+                                data: ordersData,
+                                backgroundColor: "#10b981",
+                                borderColor: "#171717",
+                                borderWidth: 2,
+                              },
+                            ],
+                          }}
+                          options={{
+                            ...chartOptions,
+                            plugins: {
+                              ...chartOptions.plugins,
+                              tooltip: {
+                                ...chartOptions.plugins.tooltip,
+                                callbacks: {
+                                  label: (context) => `${context.parsed.y} orders`,
+                                },
+                              },
+                            },
+                          }}
+                        />
                       </div>
                     </div>
                     <div>
                       <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">Revenue (₹)</div>
-                      <SimpleBarChart
-                        data={stats.monthly_metrics.map((m) => Math.round(m.revenue / 100))}
-                        maxValue={Math.max(1, Math.round(maxRevenue / 100))}
-                        color="bg-amber-500"
-                      />
-                      <div className="mt-2 flex justify-between font-['Satoshi'] text-xs text-neutral-500">
-                        <span>{formatMonth(stats.monthly_metrics[0]?.month || "")}</span>
-                        <span>{formatMonth(stats.monthly_metrics[stats.monthly_metrics.length - 1]?.month || "")}</span>
+                      <div className="h-32">
+                        <Bar
+                          data={{
+                            labels: monthlyLabels,
+                            datasets: [
+                              {
+                                label: "Revenue",
+                                data: revenueData,
+                                backgroundColor: "#f59e0b",
+                                borderColor: "#171717",
+                                borderWidth: 2,
+                              },
+                            ],
+                          }}
+                          options={{
+                            ...chartOptions,
+                            plugins: {
+                              ...chartOptions.plugins,
+                              tooltip: {
+                                ...chartOptions.plugins.tooltip,
+                                callbacks: {
+                                  label: (context) => `₹${context.parsed.y}`,
+                                },
+                              },
+                            },
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -441,25 +455,39 @@ export default function Dashboard() {
                   <h2 className="mb-6 font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl">
                     Revenue Breakdown
                   </h2>
-                  <PieChart
-                    data={[
-                      {
-                        label: "Assignments",
-                        value: stats.revenue_breakdown.assignments,
-                        color: "#8b5cf6",
-                      },
-                      {
-                        label: "Dissertations",
-                        value: stats.revenue_breakdown.dissertations,
-                        color: "#10b981",
-                      },
-                      {
-                        label: "Careers",
-                        value: stats.revenue_breakdown.careers,
-                        color: "#f59e0b",
-                      },
-                    ]}
-                  />
+                  <div className="h-64">
+                    <Doughnut
+                      data={revenueBreakdownData}
+                      options={{
+                        ...chartOptions,
+                        plugins: {
+                          ...chartOptions.plugins,
+                          legend: {
+                            display: true,
+                            position: "bottom" as const,
+                            labels: {
+                              font: {
+                                family: "'Satoshi', sans-serif",
+                                size: 12,
+                              },
+                              padding: 15,
+                              usePointStyle: true,
+                            },
+                          },
+                          tooltip: {
+                            ...chartOptions.plugins.tooltip,
+                            callbacks: {
+                              label: (context) => {
+                                const label = context.label || "";
+                                const value = context.parsed || 0;
+                                return `${label}: ₹${value}`;
+                              },
+                            },
+                          },
+                        },
+                      }}
+                    />
+                  </div>
                   <div className="mt-6 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -495,10 +523,23 @@ export default function Dashboard() {
                   <h2 className="mb-6 font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl">
                     Revenue Trend
                   </h2>
-                  <LineChart
-                    data={stats.monthly_metrics.map((m) => Math.round(m.revenue / 100))}
-                    labels={stats.monthly_metrics.map((m) => formatMonth(m.month))}
-                  />
+                  <div className="h-64">
+                    <Line
+                      data={revenueTrendData}
+                      options={{
+                        ...chartOptions,
+                        plugins: {
+                          ...chartOptions.plugins,
+                          tooltip: {
+                            ...chartOptions.plugins.tooltip,
+                            callbacks: {
+                              label: (context) => `₹${context.parsed.y}`,
+                            },
+                          },
+                        },
+                      }}
+                    />
+                  </div>
                   <div className="mt-4 text-center font-['Satoshi'] text-sm text-neutral-600">
                     Monthly revenue over last 12 months
                   </div>
@@ -612,7 +653,7 @@ export default function Dashboard() {
                 </div>
               </motion.div>
             </div>
-          ) : null}
+          )}
         </div>
       </main>
     </>
