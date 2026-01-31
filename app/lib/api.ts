@@ -1,4 +1,27 @@
 export function getControlPlaneUrl(): string {
+  // In browser, detect the API URL from the current page's protocol and host
+  if (typeof window !== "undefined") {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    
+    // If we're on admin.studojo.pro, use api.studojo.pro
+    if (hostname.startsWith("admin.")) {
+      const baseHost = hostname.replace(/^admin\./, "");
+      return `${protocol}//api.${baseHost}`;
+    }
+    
+    // For local development, use the env var or default
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      const url = import.meta.env?.VITE_CONTROL_PLANE_URL;
+      return (typeof url === "string" && url) ? url : "http://localhost:8080";
+    }
+    
+    // Default: try to construct API URL from current host
+    // e.g., admin.studojo.com -> api.studojo.com
+    return `${protocol}//api.${hostname.replace(/^admin\./, "")}`;
+  }
+  
+  // Server-side or fallback
   const url = import.meta.env?.VITE_CONTROL_PLANE_URL;
   return (typeof url === "string" && url) ? url : "http://localhost:8080";
 }

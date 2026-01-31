@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { authClient } from "~/lib/auth-client";
+import { getControlPlaneUrl } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/login";
 
@@ -62,7 +63,7 @@ export default function AdminLogin() {
         return;
       }
 
-      const controlPlaneUrl = import.meta.env?.VITE_CONTROL_PLANE_URL || "http://localhost:8080";
+      const controlPlaneUrl = getControlPlaneUrl();
       const response = await fetch(`${controlPlaneUrl}/v1/admin/users?limit=1`, {
         headers: {
           Authorization: `Bearer ${tokenData.token}`,
