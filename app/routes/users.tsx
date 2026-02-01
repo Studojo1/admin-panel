@@ -200,6 +200,7 @@ export default function Users() {
                                 className="rounded-lg border-2 border-neutral-900 bg-white px-3 py-1.5 font-['Satoshi'] text-sm font-medium transition-colors hover:bg-neutral-50 focus:outline-none"
                               >
                                 <option value="">User</option>
+                                <option value="ops">Ops</option>
                                 <option value="admin">Admin</option>
                               </select>
                             </td>

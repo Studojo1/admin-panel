@@ -283,6 +283,7 @@ export interface MonthMetric {
   month: string;
   users_count: number;
   orders_count: number;
+  dissertations_count: number;
   revenue: number;
 }
 

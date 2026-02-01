@@ -166,9 +166,23 @@ export function UserDetailModal({
                     <label className="mb-1 block font-['Satoshi'] text-xs font-medium text-neutral-600">
                       Role
                     </label>
-                    <p className="font-['Satoshi'] text-base font-normal text-neutral-900">
-                      {user.role || "User"}
-                    </p>
+                    <select
+                      value={user.role || ""}
+                      onChange={async (e) => {
+                        try {
+                          await updateUser(user.id, { role: e.target.value || null });
+                          toast.success("Role updated");
+                          onUpdate();
+                        } catch (error: any) {
+                          toast.error(error.message || "Failed to update role");
+                        }
+                      }}
+                      className="mt-1 rounded-lg border-2 border-neutral-900 bg-white px-3 py-1.5 font-['Satoshi'] text-sm font-medium transition-colors hover:bg-neutral-50 focus:outline-none"
+                    >
+                      <option value="">User</option>
+                      <option value="ops">Ops</option>
+                      <option value="admin">Admin</option>
+                    </select>
                   </div>
                   <div>
                     <label className="mb-1 block font-['Satoshi'] text-xs font-medium text-neutral-600">

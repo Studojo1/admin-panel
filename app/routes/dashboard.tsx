@@ -249,6 +249,7 @@ export default function Dashboard() {
   const monthlyLabels = stats.monthly_metrics.map((m) => formatMonth(m.month));
   const usersData = stats.monthly_metrics.map((m) => m.users_count);
   const ordersData = stats.monthly_metrics.map((m) => m.orders_count);
+  const dissertationsData = stats.monthly_metrics.map((m) => m.dissertations_count);
   const revenueData = stats.monthly_metrics.map((m) => Math.round(m.revenue / 100));
 
   const revenueBreakdownData = {
@@ -346,7 +347,7 @@ export default function Dashboard() {
                   <h2 className="mb-6 font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl">
                     Monthly Metrics (Last 12 Months)
                   </h2>
-                  <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-4">
                     <div>
                       <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">New Users</div>
                       <div className="h-32">
@@ -402,6 +403,37 @@ export default function Dashboard() {
                                 ...chartOptions.plugins.tooltip,
                                 callbacks: {
                                   label: (context) => `${context.parsed.y} orders`,
+                                },
+                              },
+                            },
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">Dissertations</div>
+                      <div className="h-32">
+                        <Bar
+                          data={{
+                            labels: monthlyLabels,
+                            datasets: [
+                              {
+                                label: "Dissertations",
+                                data: dissertationsData,
+                                backgroundColor: "#06b6d4",
+                                borderColor: "#171717",
+                                borderWidth: 2,
+                              },
+                            ],
+                          }}
+                          options={{
+                            ...chartOptions,
+                            plugins: {
+                              ...chartOptions.plugins,
+                              tooltip: {
+                                ...chartOptions.plugins.tooltip,
+                                callbacks: {
+                                  label: (context) => `${context.parsed.y} dissertations`,
                                 },
                               },
                             },
