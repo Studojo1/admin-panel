@@ -7,6 +7,7 @@ import { getUserFromRequest } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 import type { Route } from "./+types/$id";
+import { getToken } from "~/lib/api";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -97,7 +98,15 @@ export default function EditPartnerUser({ data }: Route.ComponentProps) {
 
   const loadCompanies = async () => {
     try {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Not authenticated");
+      }
+
       const response = await fetch("/api/companies", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
         credentials: "include",
       });
 
@@ -123,6 +132,13 @@ export default function EditPartnerUser({ data }: Route.ComponentProps) {
 
     setLoading(true);
     try {
+      const token = await getToken();
+      if (!token) {
+        toast.error("Not authenticated");
+        setLoading(false);
+        return;
+      }
+
       const body: any = {
         company_id: companyId,
         email: email.trim(),
@@ -143,6 +159,7 @@ export default function EditPartnerUser({ data }: Route.ComponentProps) {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         credentials: "include",
         body: JSON.stringify(body),

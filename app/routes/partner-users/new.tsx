@@ -4,6 +4,7 @@ import { useAdminGuard } from "~/lib/auth-guard";
 import { toast } from "sonner";
 import { AdminHeader } from "~/components/admin-header";
 import type { Route } from "./+types/new";
+import { getToken } from "~/lib/api";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -39,7 +40,15 @@ export default function NewPartnerUser() {
 
   const loadCompanies = async () => {
     try {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Not authenticated");
+      }
+
       const response = await fetch("/api/companies", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
         credentials: "include",
       });
 
@@ -65,10 +74,18 @@ export default function NewPartnerUser() {
 
     setLoading(true);
     try {
+      const token = await getToken();
+      if (!token) {
+        toast.error("Not authenticated");
+        setLoading(false);
+        return;
+      }
+
       const response = await fetch("/api/partner-users", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         credentials: "include",
         body: JSON.stringify({

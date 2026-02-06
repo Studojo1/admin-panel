@@ -47,8 +47,10 @@ export function useAdminGuard() {
         }
       } catch (error) {
         console.error("Admin check failed:", error);
+        // Don't redirect on network errors - just mark as unauthorized
+        // This prevents the "signing out" loop
         checkedRef.current = true;
-        navigate("/login?redirect=" + encodeURIComponent(window.location.pathname), { replace: true });
+        setIsAuthorized(false);
       }
     };
 

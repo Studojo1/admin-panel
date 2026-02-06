@@ -38,10 +38,11 @@ export async function loader({ request }: Route.LoaderArgs) {
       c.name as company_name
     FROM company_users cu
     JOIN companies c ON cu.company_id = c.id
+    WHERE c.is_deleted = false
   `;
 
   if (search) {
-    query = sql`${query} WHERE cu.name ILIKE ${`%${search}%`} OR cu.email ILIKE ${`%${search}%`} OR c.name ILIKE ${`%${search}%`}`;
+    query = sql`${query} AND (cu.name ILIKE ${`%${search}%`} OR cu.email ILIKE ${`%${search}%`} OR c.name ILIKE ${`%${search}%`})`;
   }
 
   query = sql`${query} ORDER BY cu.created_at DESC LIMIT 100`;

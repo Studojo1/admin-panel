@@ -1,4 +1,4 @@
-import { jwtVerify } from "jose";
+import { jwtVerify, importJWK } from "jose";
 import db from "./db.server";
 import { sql } from "drizzle-orm";
 
@@ -19,19 +19,18 @@ export async function verifyToken(token: string): Promise<string | null> {
     const jwks = jwksResult.rows[0] as any;
     const publicKey = jwks.public_key;
 
-    // Import the public key
-    const key = await crypto.subtle.importKey(
-      "jwk",
-      JSON.parse(publicKey),
-      {
-        name: "RS256",
-        hash: "SHA-256",
-      },
-      false,
-      ["verify"]
-    );
+    // Parse stored JWK
+    const jwk = JSON.parse(publicKey);
 
-    // Verify the token
+    // Determine algorithm based on key type/curve (Better Auth uses Ed25519 here)
+    const alg =
+      jwk.alg ||
+      (jwk.kty === "OKP" && jwk.crv === "Ed25519" ? "EdDSA" : "RS256");
+
+    // Import JWK with explicit algorithm
+    const key = await importJWK(jwk, alg);
+
+    // Verify the token using the imported JWK
     const { payload } = await jwtVerify(token, key);
 
     // Return user ID from token

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AdminHeader } from "~/components/admin-header";
 import { FiPlus } from "react-icons/fi";
 import type { Route } from "./+types/partner-users";
+import { getToken } from "~/lib/api";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -41,9 +42,17 @@ export default function PartnerUsers() {
   const loadUsers = async () => {
     try {
       setLoading(true);
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Not authenticated");
+      }
+
       const response = await fetch(
         `/api/partner-users${search ? `?search=${encodeURIComponent(search)}` : ""}`,
         {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
           credentials: "include",
         }
       );
