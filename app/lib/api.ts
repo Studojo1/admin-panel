@@ -4,7 +4,7 @@ export function getControlPlaneUrl(): string {
     const protocol = window.location.protocol;
     const hostname = window.location.hostname;
     
-    // If we're on admin.studojo.pro, use api.studojo.pro
+    // If we're on admin.studojo.com, use api.studojo.com
     if (hostname.startsWith("admin.")) {
       const baseHost = hostname.replace(/^admin\./, "");
       return `${protocol}//api.${baseHost}`;
@@ -42,7 +42,7 @@ function getFrontendUrl(): string {
       return `http://${host}:3000`;
     }
     
-    // Handle production subdomain: admin.studojo.pro -> studojo.pro
+    // Handle production subdomain: admin.studojo.com -> studojo.com
     if (host.startsWith("admin.")) {
       const baseHost = host.replace(/^admin\./, "");
       return `${protocol}//${baseHost}`;

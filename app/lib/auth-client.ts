@@ -19,7 +19,7 @@ const getAuthBaseURL = (): string => {
       return `http://${host}:3000`; // Main frontend port
     }
     
-    // Handle production subdomain: admin.studojo.pro -> studojo.pro
+    // Handle production subdomain: admin.studojo.com -> studojo.com
     if (host.startsWith("admin.")) {
       const baseHost = host.replace(/^admin\./, "");
       return `${protocol}//${baseHost}`;
