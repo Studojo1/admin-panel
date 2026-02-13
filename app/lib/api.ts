@@ -65,30 +65,50 @@ function getFrontendUrl(): string {
  * 2. Try to fetch token from frontend's share-token endpoint (OAuth-like)
  */
 export async function getToken(): Promise<string | null> {
-  // First, try to get token directly from Better Auth
-  const { data, error } = await authClient.token();
-  if (!error && data?.token) {
-    return data.token;
+  // First, check if we have a stored token
+  if (typeof window !== "undefined") {
+    const storedToken = sessionStorage.getItem("admin_token");
+    if (storedToken) {
+      // Verify token is still valid by checking expiration
+      try {
+        const payload = JSON.parse(atob(storedToken.split('.')[1]));
+        const exp = payload.exp * 1000; // Convert to milliseconds
+        if (exp > Date.now()) {
+          return storedToken;
+        } else {
+          // Token expired, remove it
+          sessionStorage.removeItem("admin_token");
+        }
+      } catch (e) {
+        // Invalid token format, remove it
+        sessionStorage.removeItem("admin_token");
+      }
+    }
+  }
+
+  // Try to get token directly from Better Auth
+  try {
+    const { data, error } = await authClient.token();
+    if (!error && data?.token) {
+      // Store token for future use
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("admin_token", data.token);
+      }
+      return data.token;
+    }
+  } catch (error) {
+    console.debug("Failed to get token from Better Auth:", error);
   }
 
   // If that fails, try to get token from frontend via share-token endpoint
   // This allows the admin panel to get credentials from the frontend
   // Works like OAuth - if user is logged into frontend, we can share the token
-  // Note: Cookies won't be shared across different ports (3000 vs 3001)
-  // So we need to use a different approach - maybe store token in localStorage
-  // or use a popup/redirect flow
   try {
     const frontendUrl = getFrontendUrl();
     
-    // Try to fetch token from frontend
-    // Since cookies don't work cross-origin, we might need to:
-    // 1. Open frontend in iframe/popup to get token
-    // 2. Or redirect user to frontend to authenticate, then redirect back with token
-    // 3. Or use localStorage/sessionStorage if both apps are on same domain
-    
     const response = await fetch(`${frontendUrl}/api/auth/share-token`, {
       method: "GET",
-      credentials: "include", // Try to include cookies (won't work cross-origin)
+      credentials: "include", // Include cookies for same-origin requests
       mode: "cors", // Enable CORS
       headers: {
         "Content-Type": "application/json",
@@ -105,23 +125,10 @@ export async function getToken(): Promise<string | null> {
         return data.token;
       }
     } else {
-      // If request failed, check if we have a stored token
-      if (typeof window !== "undefined") {
-        const storedToken = sessionStorage.getItem("admin_token");
-        if (storedToken) {
-          return storedToken;
-        }
-      }
+      console.debug("share-token endpoint returned:", response.status, await response.text().catch(() => ""));
     }
   } catch (error) {
     console.debug("Failed to get token from frontend:", error);
-    // Fallback to stored token
-    if (typeof window !== "undefined") {
-      const storedToken = sessionStorage.getItem("admin_token");
-      if (storedToken) {
-        return storedToken;
-      }
-    }
   }
 
   return null;
@@ -221,16 +228,28 @@ async function adminFetch<T>(
   const token = await getToken();
   const base = getControlPlaneUrl();
   
+  if (!token) {
+    throw new Error("No authentication token available. Please sign in.");
+  }
+  
   const response = await fetch(`${base}${endpoint}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
+      Authorization: `Bearer ${token}`,
       ...options.headers,
     },
+    credentials: "include",
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      // Clear stored token if unauthorized
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("admin_token");
+      }
+      throw new Error("Authentication failed. Please sign in again.");
+    }
     const error = await response.json().catch(() => ({ error: { message: "Unknown error" } }));
     throw new Error(error.error?.message || `HTTP ${response.status}`);
   }
