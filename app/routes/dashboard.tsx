@@ -303,18 +303,28 @@ export default function Dashboard() {
       if (!response.ok) throw new Error("Failed to fetch job");
       const job = await response.json();
       if (job.result) {
-        const blob = new Blob([JSON.stringify(job.result, null, 2)], {
-          type: "application/json",
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `assignment-${jobId}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        toast.success("Download started");
+        if (job.result.download_url) {
+          const a = document.createElement("a");
+          a.href = job.result.download_url;
+          a.download = `assignment-${jobId}.docx`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          toast.success("Download started");
+        } else {
+          const blob = new Blob([JSON.stringify(job.result, null, 2)], {
+            type: "application/json",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `assignment-${jobId}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          toast.success("Download started (JSON debug)");
+        }
       } else {
         toast.error("No result available for this assignment");
       }

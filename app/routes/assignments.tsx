@@ -261,7 +261,7 @@ export default function Assignments() {
                               onClick={() => handleDownload(order.job_id)}
                               className="rounded-lg border-2 border-neutral-900 bg-purple-500 px-3 py-1.5 font-['Satoshi'] text-xs font-medium text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
                             >
-                              Download v2
+                              Download
                             </button>
                           )}
                         </td>
