@@ -136,7 +136,9 @@ export default function Users() {
           <div className="mt-8 flex items-center justify-center py-20">
             <div className="text-center">
               <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent"></div>
-              <p className="font-['Satoshi'] text-sm text-gray-600">Loading users...</p>
+              <p className="font-['Satoshi'] text-sm text-gray-600">
+                Loading users...
+              </p>
             </div>
           </div>
         ) : (
@@ -196,12 +198,15 @@ export default function Users() {
                             <td className="px-4 py-4">
                               <select
                                 value={user.role || ""}
-                                onChange={(e) => handleUpdateRole(user.id, e.target.value)}
+                                onChange={(e) =>
+                                  handleUpdateRole(user.id, e.target.value)
+                                }
                                 className="rounded-lg border-2 border-neutral-900 bg-white px-3 py-1.5 font-['Satoshi'] text-sm font-medium transition-colors hover:bg-neutral-50 focus:outline-none"
                               >
                                 <option value="">User</option>
                                 <option value="ops">Ops</option>
                                 <option value="admin">Admin</option>
+                                <option value="dev">Dev</option>
                               </select>
                             </td>
                             <td className="px-4 py-4">
@@ -224,11 +229,11 @@ export default function Users() {
                                   View
                                 </button>
                                 <button
-                                  onClick={() => handleBanUser(user.id, !user.banned)}
+                                  onClick={() =>
+                                    handleBanUser(user.id, !user.banned)
+                                  }
                                   className={`rounded-lg border-2 border-neutral-900 px-3 py-1.5 font-['Satoshi'] text-xs font-medium text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none ${
-                                    user.banned
-                                      ? "bg-green-500"
-                                      : "bg-red-500"
+                                    user.banned ? "bg-green-500" : "bg-red-500"
                                   }`}
                                 >
                                   {user.banned ? "Unban" : "Ban"}
@@ -243,7 +248,8 @@ export default function Users() {
                 </div>
                 <div className="mt-6 flex items-center justify-between">
                   <p className="font-['Satoshi'] text-sm text-neutral-600">
-                    Showing {users.length} {users.length === 1 ? "user" : "users"}
+                    Showing {users.length}{" "}
+                    {users.length === 1 ? "user" : "users"}
                     {search && ` matching "${search}"`}
                   </p>
                   <div className="flex gap-4">
@@ -271,7 +277,9 @@ export default function Users() {
                 className="mt-8 rounded-2xl border-2 border-neutral-900 bg-white p-12 text-center shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
               >
                 <p className="font-['Satoshi'] text-base text-neutral-600">
-                  {search ? `No users found matching "${search}"` : "No users found"}
+                  {search
+                    ? `No users found matching "${search}"`
+                    : "No users found"}
                 </p>
               </motion.div>
             )}
