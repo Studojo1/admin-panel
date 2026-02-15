@@ -106,7 +106,10 @@ export function UserDetailModal({
               </section>
 
               {/* Profile Information */}
-              {(user.full_name || user.college || user.year_of_study || user.course) && (
+              {(user.full_name ||
+                user.college ||
+                user.year_of_study ||
+                user.course) && (
                 <section>
                   <h3 className="mb-4 font-['Satoshi'] text-sm font-bold uppercase tracking-wide text-neutral-500">
                     Profile Information
@@ -170,7 +173,9 @@ export function UserDetailModal({
                       value={user.role || ""}
                       onChange={async (e) => {
                         try {
-                          await updateUser(user.id, { role: e.target.value || null });
+                          await updateUser(user.id, {
+                            role: e.target.value || null,
+                          });
                           toast.success("Role updated");
                           onUpdate();
                         } catch (error: any) {
@@ -182,6 +187,7 @@ export function UserDetailModal({
                       <option value="">User</option>
                       <option value="ops">Ops</option>
                       <option value="admin">Admin</option>
+                      <option value="dev">Dev</option>
                     </select>
                   </div>
                   <div>
@@ -279,4 +285,3 @@ export function UserDetailModal({
     </AnimatePresence>
   );
 }
-
