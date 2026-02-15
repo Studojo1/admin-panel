@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AdminHeader, SearchInput } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
-import { getDashboardStats, getControlPlaneUrl, getToken, type AssignmentOrder } from "~/lib/api";
+import {
+  getDashboardStats,
+  getControlPlaneUrl,
+  getToken,
+  type AssignmentOrder,
+} from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/assignments";
 
@@ -25,7 +30,9 @@ export default function Assignments() {
   const [assignments, setAssignments] = useState<AssignmentOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [filteredAssignments, setFilteredAssignments] = useState<AssignmentOrder[]>([]);
+  const [filteredAssignments, setFilteredAssignments] = useState<
+    AssignmentOrder[]
+  >([]);
 
   useEffect(() => {
     if (isAuthorized) {
@@ -44,8 +51,8 @@ export default function Assignments() {
             a.user_name.toLowerCase().includes(searchLower) ||
             a.user_id.toLowerCase().includes(searchLower) ||
             a.job_id.toLowerCase().includes(searchLower) ||
-            a.status.toLowerCase().includes(searchLower)
-        )
+            a.status.toLowerCase().includes(searchLower),
+        ),
       );
     }
   }, [search, assignments]);
@@ -81,7 +88,8 @@ export default function Assignments() {
     try {
       const baseUrl = getControlPlaneUrl();
       const token = await getToken();
-      const response = await fetch(`${baseUrl}/v1/jobs/${jobId}`, {
+      // Use admin-specific endpoint to bypass ownership check
+      const response = await fetch(`${baseUrl}/v1/admin/jobs/${jobId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -89,7 +97,9 @@ export default function Assignments() {
       if (!response.ok) throw new Error("Failed to fetch job");
       const job = await response.json();
       if (job.result) {
-        const blob = new Blob([JSON.stringify(job.result, null, 2)], { type: "application/json" });
+        const blob = new Blob([JSON.stringify(job.result, null, 2)], {
+          type: "application/json",
+        });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -128,7 +138,7 @@ export default function Assignments() {
           <SearchInput
             onSearch={setSearch}
             placeholder="Search by user name, user ID, job ID, or status..."
-            debounceTime={300}
+            debounceMs={300}
           />
         </div>
 
@@ -136,7 +146,9 @@ export default function Assignments() {
           <div className="mt-12 flex items-center justify-center py-20">
             <div className="text-center">
               <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent"></div>
-              <p className="font-['Satoshi'] text-sm text-gray-600">Loading assignments...</p>
+              <p className="font-['Satoshi'] text-sm text-gray-600">
+                Loading assignments...
+              </p>
             </div>
           </div>
         ) : (
@@ -152,7 +164,8 @@ export default function Assignments() {
                   All Assignments
                 </h2>
                 <span className="font-['Satoshi'] text-sm text-neutral-600">
-                  {filteredAssignments.length} {filteredAssignments.length === 1 ? "order" : "orders"}
+                  {filteredAssignments.length}{" "}
+                  {filteredAssignments.length === 1 ? "order" : "orders"}
                 </span>
               </div>
             </div>
@@ -160,12 +173,24 @@ export default function Assignments() {
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b-2 border-neutral-900 bg-neutral-50">
-                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">User</th>
-                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Job ID</th>
-                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Date</th>
-                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Status</th>
-                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Amount</th>
-                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Actions</th>
+                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                      User
+                    </th>
+                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                      Job ID
+                    </th>
+                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                      Date
+                    </th>
+                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                      Amount
+                    </th>
+                    <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -173,7 +198,9 @@ export default function Assignments() {
                     <tr>
                       <td colSpan={6} className="px-4 py-12 text-center">
                         <p className="font-['Satoshi'] text-sm text-neutral-500">
-                          {search ? "No assignments found matching your search." : "No assignments found."}
+                          {search
+                            ? "No assignments found matching your search."
+                            : "No assignments found."}
                         </p>
                       </td>
                     </tr>
@@ -233,4 +260,3 @@ export default function Assignments() {
     </>
   );
 }
-

@@ -17,7 +17,12 @@ import {
 import { Bar, Line, Doughnut } from "react-chartjs-2";
 import { AdminHeader, StatCard } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
-import { getDashboardStats, getControlPlaneUrl, getToken, type DashboardStats } from "~/lib/api";
+import {
+  getDashboardStats,
+  getControlPlaneUrl,
+  getToken,
+  type DashboardStats,
+} from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/dashboard";
 
@@ -31,7 +36,7 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
 );
 
 const floatY = [0, -24, -12, -30, 0];
@@ -39,18 +44,91 @@ const floatX = [0, 12, -18, 8, 0];
 const floatRotate = [0, 6, -8, 4, 0];
 
 const BACKGROUND_SHAPES = [
-  { className: "right-0 top-20 h-32 w-32 rounded-full md:h-40 md:w-40 bg-yellow-500", shadow: "6px_6px" as const, duration: 18, delay: 0 },
-  { className: "left-0 top-1/3 h-24 w-24 md:h-32 md:w-32 bg-emerald-300", shadow: "4px_4px" as const, rotate: 12, duration: 22, delay: 1 },
-  { className: "bottom-20 right-1/4 h-20 w-20 md:h-24 md:w-24 bg-violet-500", shadow: "4px_4px" as const, duration: 20, delay: 2 },
-  { className: "bottom-1/4 left-0 h-16 w-16 md:h-28 md:w-28 bg-pink-300", shadow: "4px_4px" as const, rotate: 45, duration: 24, delay: 0.5 },
-  { className: "top-1/2 right-1/3 h-14 w-14 md:h-20 md:w-20 bg-amber-400", shadow: "3px_3px" as const, rotate: -12, duration: 19, delay: 1.5 },
-  { className: "top-12 left-1/4 h-16 w-16 md:h-20 md:w-20 rounded-full bg-teal-300", shadow: "4px_4px" as const, duration: 21, delay: 0.8 },
-  { className: "bottom-1/3 right-0 h-20 w-20 md:h-24 md:w-24 bg-rose-300", shadow: "4px_4px" as const, rotate: -20, duration: 23, delay: 1.2 },
-  { className: "top-1/4 right-1/5 h-12 w-12 md:h-16 md:w-16 rounded-2xl bg-indigo-300", shadow: "3px_3px" as const, rotate: 15, duration: 17, delay: 2.5 },
-  { className: "bottom-32 left-1/3 h-14 w-14 md:h-18 md:w-18 rounded-full bg-lime-300", shadow: "3px_3px" as const, duration: 25, delay: 0.3 },
-  { className: "top-2/3 left-1/5 h-20 w-20 md:h-28 md:w-28 bg-orange-200", shadow: "4px_4px" as const, rotate: -15, duration: 20, delay: 1.8 },
-  { className: "top-16 right-1/4 h-10 w-10 md:h-14 md:w-14 rounded-2xl bg-cyan-300", shadow: "3px_3px" as const, rotate: 25, duration: 26, delay: 0.6 },
-  { className: "bottom-12 left-1/2 h-12 w-12 md:h-16 md:w-16 bg-fuchsia-200", shadow: "3px_3px" as const, rotate: -8, duration: 22, delay: 2.2 },
+  {
+    className:
+      "right-0 top-20 h-32 w-32 rounded-full md:h-40 md:w-40 bg-yellow-500",
+    shadow: "6px_6px" as const,
+    duration: 18,
+    delay: 0,
+  },
+  {
+    className: "left-0 top-1/3 h-24 w-24 md:h-32 md:w-32 bg-emerald-300",
+    shadow: "4px_4px" as const,
+    rotate: 12,
+    duration: 22,
+    delay: 1,
+  },
+  {
+    className: "bottom-20 right-1/4 h-20 w-20 md:h-24 md:w-24 bg-violet-500",
+    shadow: "4px_4px" as const,
+    duration: 20,
+    delay: 2,
+  },
+  {
+    className: "bottom-1/4 left-0 h-16 w-16 md:h-28 md:w-28 bg-pink-300",
+    shadow: "4px_4px" as const,
+    rotate: 45,
+    duration: 24,
+    delay: 0.5,
+  },
+  {
+    className: "top-1/2 right-1/3 h-14 w-14 md:h-20 md:w-20 bg-amber-400",
+    shadow: "3px_3px" as const,
+    rotate: -12,
+    duration: 19,
+    delay: 1.5,
+  },
+  {
+    className:
+      "top-12 left-1/4 h-16 w-16 md:h-20 md:w-20 rounded-full bg-teal-300",
+    shadow: "4px_4px" as const,
+    duration: 21,
+    delay: 0.8,
+  },
+  {
+    className: "bottom-1/3 right-0 h-20 w-20 md:h-24 md:w-24 bg-rose-300",
+    shadow: "4px_4px" as const,
+    rotate: -20,
+    duration: 23,
+    delay: 1.2,
+  },
+  {
+    className:
+      "top-1/4 right-1/5 h-12 w-12 md:h-16 md:w-16 rounded-2xl bg-indigo-300",
+    shadow: "3px_3px" as const,
+    rotate: 15,
+    duration: 17,
+    delay: 2.5,
+  },
+  {
+    className:
+      "bottom-32 left-1/3 h-14 w-14 md:h-18 md:w-18 rounded-full bg-lime-300",
+    shadow: "3px_3px" as const,
+    duration: 25,
+    delay: 0.3,
+  },
+  {
+    className: "top-2/3 left-1/5 h-20 w-20 md:h-28 md:w-28 bg-orange-200",
+    shadow: "4px_4px" as const,
+    rotate: -15,
+    duration: 20,
+    delay: 1.8,
+  },
+  {
+    className:
+      "top-16 right-1/4 h-10 w-10 md:h-14 md:w-14 rounded-2xl bg-cyan-300",
+    shadow: "3px_3px" as const,
+    rotate: 25,
+    duration: 26,
+    delay: 0.6,
+  },
+  {
+    className: "bottom-12 left-1/2 h-12 w-12 md:h-16 md:w-16 bg-fuchsia-200",
+    shadow: "3px_3px" as const,
+    rotate: -8,
+    duration: 22,
+    delay: 2.2,
+  },
 ];
 
 function FloatShape({
@@ -216,7 +294,8 @@ export default function Dashboard() {
     try {
       const baseUrl = getControlPlaneUrl();
       const token = await getToken();
-      const response = await fetch(`${baseUrl}/v1/jobs/${jobId}`, {
+      // Use admin-specific endpoint to bypass ownership check
+      const response = await fetch(`${baseUrl}/v1/admin/jobs/${jobId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -224,7 +303,9 @@ export default function Dashboard() {
       if (!response.ok) throw new Error("Failed to fetch job");
       const job = await response.json();
       if (job.result) {
-        const blob = new Blob([JSON.stringify(job.result, null, 2)], { type: "application/json" });
+        const blob = new Blob([JSON.stringify(job.result, null, 2)], {
+          type: "application/json",
+        });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -249,8 +330,12 @@ export default function Dashboard() {
   const monthlyLabels = stats.monthly_metrics.map((m) => formatMonth(m.month));
   const usersData = stats.monthly_metrics.map((m) => m.users_count);
   const ordersData = stats.monthly_metrics.map((m) => m.orders_count);
-  const dissertationsData = stats.monthly_metrics.map((m) => m.dissertations_count);
-  const revenueData = stats.monthly_metrics.map((m) => Math.round(m.revenue / 100));
+  const dissertationsData = stats.monthly_metrics.map(
+    (m) => m.dissertations_count,
+  );
+  const revenueData = stats.monthly_metrics.map((m) =>
+    Math.round(m.revenue / 100),
+  );
 
   const revenueBreakdownData = {
     labels: ["Assignments", "Dissertations", "Careers"],
@@ -293,7 +378,10 @@ export default function Dashboard() {
       <AdminHeader />
       <main className="relative min-h-screen overflow-hidden bg-purple-50">
         {/* Background Animation */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+        <div
+          className="absolute inset-0 overflow-hidden pointer-events-none"
+          aria-hidden="true"
+        >
           {BACKGROUND_SHAPES.map((shape, i) => (
             <FloatShape key={i} {...shape} />
           ))}
@@ -318,7 +406,9 @@ export default function Dashboard() {
             <div className="relative z-10 mt-12 flex items-center justify-center py-20">
               <div className="text-center">
                 <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent"></div>
-                <p className="font-['Satoshi'] text-sm text-gray-600">Loading stats...</p>
+                <p className="font-['Satoshi'] text-sm text-gray-600">
+                  Loading stats...
+                </p>
               </div>
             </div>
           ) : (
@@ -330,10 +420,30 @@ export default function Dashboard() {
                 transition={{ duration: 0.5, delay: 0.1 }}
                 className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4"
               >
-                <StatCard value={stats.total_users} label="Total Users" color="purple" delay={0} />
-                <StatCard value={stats.total_dissertations} label="Dissertations" color="green" delay={0.1} />
-                <StatCard value={stats.total_careers} label="Career Applications" color="orange" delay={0.2} />
-                <StatCard value={formatCurrency(stats.revenue_breakdown.total)} label="Total Revenue" color="pink" delay={0.3} />
+                <StatCard
+                  value={stats.total_users}
+                  label="Total Users"
+                  color="purple"
+                  delay={0}
+                />
+                <StatCard
+                  value={stats.total_dissertations}
+                  label="Dissertations"
+                  color="green"
+                  delay={0.1}
+                />
+                <StatCard
+                  value={stats.total_careers}
+                  label="Career Applications"
+                  color="orange"
+                  delay={0.2}
+                />
+                <StatCard
+                  value={formatCurrency(stats.revenue_breakdown.total)}
+                  label="Total Revenue"
+                  color="pink"
+                  delay={0.3}
+                />
               </motion.div>
 
               {/* Month-by-Month Metrics */}
@@ -349,7 +459,9 @@ export default function Dashboard() {
                   </h2>
                   <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-4">
                     <div>
-                      <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">New Users</div>
+                      <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">
+                        New Users
+                      </div>
                       <div className="h-32">
                         <Bar
                           data={{
@@ -371,7 +483,8 @@ export default function Dashboard() {
                               tooltip: {
                                 ...chartOptions.plugins.tooltip,
                                 callbacks: {
-                                  label: (context) => `${context.parsed.y} users`,
+                                  label: (context) =>
+                                    `${context.parsed.y} users`,
                                 },
                               },
                             },
@@ -380,7 +493,9 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div>
-                      <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">Assignment Orders</div>
+                      <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">
+                        Assignment Orders
+                      </div>
                       <div className="h-32">
                         <Bar
                           data={{
@@ -402,7 +517,8 @@ export default function Dashboard() {
                               tooltip: {
                                 ...chartOptions.plugins.tooltip,
                                 callbacks: {
-                                  label: (context) => `${context.parsed.y} orders`,
+                                  label: (context) =>
+                                    `${context.parsed.y} orders`,
                                 },
                               },
                             },
@@ -411,7 +527,9 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div>
-                      <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">Dissertations</div>
+                      <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">
+                        Dissertations
+                      </div>
                       <div className="h-32">
                         <Bar
                           data={{
@@ -433,7 +551,8 @@ export default function Dashboard() {
                               tooltip: {
                                 ...chartOptions.plugins.tooltip,
                                 callbacks: {
-                                  label: (context) => `${context.parsed.y} dissertations`,
+                                  label: (context) =>
+                                    `${context.parsed.y} dissertations`,
                                 },
                               },
                             },
@@ -442,7 +561,9 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div>
-                      <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">Revenue (₹)</div>
+                      <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">
+                        Revenue (₹)
+                      </div>
                       <div className="h-32">
                         <Bar
                           data={{
@@ -524,7 +645,9 @@ export default function Dashboard() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="h-4 w-4 rounded bg-purple-500"></div>
-                        <span className="font-['Satoshi'] text-sm text-neutral-700">Assignments</span>
+                        <span className="font-['Satoshi'] text-sm text-neutral-700">
+                          Assignments
+                        </span>
                       </div>
                       <span className="font-['Satoshi'] text-sm font-medium text-neutral-900">
                         {formatCurrency(stats.revenue_breakdown.assignments)}
@@ -533,7 +656,9 @@ export default function Dashboard() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="h-4 w-4 rounded bg-emerald-500"></div>
-                        <span className="font-['Satoshi'] text-sm text-neutral-700">Dissertations</span>
+                        <span className="font-['Satoshi'] text-sm text-neutral-700">
+                          Dissertations
+                        </span>
                       </div>
                       <span className="font-['Satoshi'] text-sm font-medium text-neutral-900">
                         {formatCurrency(stats.revenue_breakdown.dissertations)}
@@ -542,7 +667,9 @@ export default function Dashboard() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="h-4 w-4 rounded bg-amber-500"></div>
-                        <span className="font-['Satoshi'] text-sm text-neutral-700">Careers</span>
+                        <span className="font-['Satoshi'] text-sm text-neutral-700">
+                          Careers
+                        </span>
                       </div>
                       <span className="font-['Satoshi'] text-sm font-medium text-neutral-900">
                         {formatCurrency(stats.revenue_breakdown.careers)}
@@ -579,77 +706,96 @@ export default function Dashboard() {
               </motion.div>
 
               {/* Assignment Orders */}
-              {stats.assignment_orders && stats.assignment_orders.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.4 }}
-                  className="rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] overflow-hidden"
-                >
-                  <div className="border-b-2 border-neutral-900 bg-neutral-50 px-6 py-4 md:px-8">
-                    <h2 className="font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl">
-                      Recent Assignment Orders
-                    </h2>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr className="border-b-2 border-neutral-900 bg-neutral-50">
-                          <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">User</th>
-                          <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Date</th>
-                          <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Status</th>
-                          <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Amount</th>
-                          <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {stats.assignment_orders.map((order, index) => (
-                          <motion.tr
-                            key={order.job_id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.2, delay: index * 0.02 }}
-                            className="border-b border-neutral-200 transition-colors hover:bg-neutral-50"
-                          >
-                            <td className="px-4 py-3 font-['Satoshi'] text-sm font-medium text-neutral-900">
-                              {order.user_name}
-                            </td>
-                            <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-700">
-                              {new Date(order.created_at).toLocaleDateString()}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span
-                                className={`inline-block rounded-lg px-3 py-1 font-['Satoshi'] text-xs font-medium ${
-                                  order.status === "COMPLETED"
-                                    ? "bg-green-100 text-green-700"
-                                    : order.status === "FAILED"
-                                      ? "bg-red-100 text-red-700"
-                                      : "bg-amber-100 text-amber-700"
-                                }`}
-                              >
-                                {order.status}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 font-['Satoshi'] text-sm font-medium text-neutral-900">
-                              {formatCurrency(order.amount)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {order.status === "COMPLETED" && order.download_url && (
-                                <button
-                                  onClick={() => handleDownload(order.job_id)}
-                                  className="rounded-lg border-2 border-neutral-900 bg-purple-500 px-3 py-1.5 font-['Satoshi'] text-xs font-medium text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+              {stats.assignment_orders &&
+                stats.assignment_orders.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.4 }}
+                    className="rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] overflow-hidden"
+                  >
+                    <div className="border-b-2 border-neutral-900 bg-neutral-50 px-6 py-4 md:px-8">
+                      <h2 className="font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl">
+                        Recent Assignment Orders
+                      </h2>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="border-b-2 border-neutral-900 bg-neutral-50">
+                            <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                              User
+                            </th>
+                            <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                              Date
+                            </th>
+                            <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                              Status
+                            </th>
+                            <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                              Amount
+                            </th>
+                            <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">
+                              Actions
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stats.assignment_orders.map((order, index) => (
+                            <motion.tr
+                              key={order.job_id}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{
+                                duration: 0.2,
+                                delay: index * 0.02,
+                              }}
+                              className="border-b border-neutral-200 transition-colors hover:bg-neutral-50"
+                            >
+                              <td className="px-4 py-3 font-['Satoshi'] text-sm font-medium text-neutral-900">
+                                {order.user_name}
+                              </td>
+                              <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-700">
+                                {new Date(
+                                  order.created_at,
+                                ).toLocaleDateString()}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span
+                                  className={`inline-block rounded-lg px-3 py-1 font-['Satoshi'] text-xs font-medium ${
+                                    order.status === "COMPLETED"
+                                      ? "bg-green-100 text-green-700"
+                                      : order.status === "FAILED"
+                                        ? "bg-red-100 text-red-700"
+                                        : "bg-amber-100 text-amber-700"
+                                  }`}
                                 >
-                                  Download
-                                </button>
-                              )}
-                            </td>
-                          </motion.tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </motion.div>
-              )}
+                                  {order.status}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 font-['Satoshi'] text-sm font-medium text-neutral-900">
+                                {formatCurrency(order.amount)}
+                              </td>
+                              <td className="px-4 py-3">
+                                {order.status === "COMPLETED" &&
+                                  order.download_url && (
+                                    <button
+                                      onClick={() =>
+                                        handleDownload(order.job_id)
+                                      }
+                                      className="rounded-lg border-2 border-neutral-900 bg-purple-500 px-3 py-1.5 font-['Satoshi'] text-xs font-medium text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+                                    >
+                                      Download
+                                    </button>
+                                  )}
+                              </td>
+                            </motion.tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </motion.div>
+                )}
 
               {/* Quick Actions */}
               <motion.div
@@ -665,22 +811,34 @@ export default function Dashboard() {
                     to="/users"
                     className="group rounded-2xl border-2 border-neutral-900 bg-purple-50 p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]"
                   >
-                    <div className="font-['Clash_Display'] text-xl font-medium text-neutral-900">Manage Users</div>
-                    <div className="mt-2 font-['Satoshi'] text-sm text-neutral-600">View and manage user accounts</div>
+                    <div className="font-['Clash_Display'] text-xl font-medium text-neutral-900">
+                      Manage Users
+                    </div>
+                    <div className="mt-2 font-['Satoshi'] text-sm text-neutral-600">
+                      View and manage user accounts
+                    </div>
                   </Link>
                   <Link
                     to="/dissertations"
                     className="group rounded-2xl border-2 border-neutral-900 bg-emerald-50 p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]"
                   >
-                    <div className="font-['Clash_Display'] text-xl font-medium text-neutral-900">Dissertations</div>
-                    <div className="mt-2 font-['Satoshi'] text-sm text-neutral-600">Review dissertation submissions</div>
+                    <div className="font-['Clash_Display'] text-xl font-medium text-neutral-900">
+                      Dissertations
+                    </div>
+                    <div className="mt-2 font-['Satoshi'] text-sm text-neutral-600">
+                      Review dissertation submissions
+                    </div>
                   </Link>
                   <Link
                     to="/careers"
                     className="group rounded-2xl border-2 border-neutral-900 bg-amber-50 p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]"
                   >
-                    <div className="font-['Clash_Display'] text-xl font-medium text-neutral-900">Career Applications</div>
-                    <div className="mt-2 font-['Satoshi'] text-sm text-neutral-600">Manage career applications</div>
+                    <div className="font-['Clash_Display'] text-xl font-medium text-neutral-900">
+                      Career Applications
+                    </div>
+                    <div className="mt-2 font-['Satoshi'] text-sm text-neutral-600">
+                      Manage career applications
+                    </div>
                   </Link>
                 </div>
               </motion.div>

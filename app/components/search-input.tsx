@@ -2,15 +2,17 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
 type SearchInputProps = {
-  value: string;
-  onChange: (value: string) => void;
+  value?: string;
+  onChange?: (value: string) => void;
+  onSearch?: (value: string) => void;
   placeholder?: string;
   debounceMs?: number;
 };
 
 export function SearchInput({
-  value,
+  value = "",
   onChange,
+  onSearch,
   placeholder = "Search...",
   debounceMs = 300,
 }: SearchInputProps) {
@@ -18,11 +20,14 @@ export function SearchInput({
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      onChange(localValue);
+      // Call onChange if provided
+      onChange?.(localValue);
+      // Call onSearch if provided (supporting the usage in assignments.tsx)
+      onSearch?.(localValue);
     }, debounceMs);
 
     return () => clearTimeout(timer);
-  }, [localValue, debounceMs, onChange]);
+  }, [localValue, debounceMs, onChange, onSearch]);
 
   useEffect(() => {
     setLocalValue(value);
@@ -58,4 +63,3 @@ export function SearchInput({
     </motion.div>
   );
 }
-
