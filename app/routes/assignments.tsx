@@ -97,18 +97,32 @@ export default function Assignments() {
       if (!response.ok) throw new Error("Failed to fetch job");
       const job = await response.json();
       if (job.result) {
-        const blob = new Blob([JSON.stringify(job.result, null, 2)], {
-          type: "application/json",
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `assignment-${jobId}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        toast.success("Download started");
+        // If we have a download URL, download the file directly
+        if (job.result.download_url) {
+          const a = document.createElement("a");
+          a.href = job.result.download_url;
+          // Let the browser/server determine the filename from the URL or headers
+          // But we can suggest one
+          a.download = `assignment-${jobId}.docx`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          toast.success("Download started");
+        } else {
+          // Fallback: download the JSON result
+          const blob = new Blob([JSON.stringify(job.result, null, 2)], {
+            type: "application/json",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `assignment-${jobId}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          toast.success("Download started (JSON debug)");
+        }
       } else {
         toast.error("No result available for this assignment");
       }
