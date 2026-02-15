@@ -96,9 +96,11 @@ export default function Assignments() {
       });
       if (!response.ok) throw new Error("Failed to fetch job");
       const job = await response.json();
+      console.log("Job response:", job);
       if (job.result) {
         // If we have a download URL, download the file directly
         if (job.result.download_url) {
+          console.log("Found download_url:", job.result.download_url);
           const a = document.createElement("a");
           a.href = job.result.download_url;
           // Let the browser/server determine the filename from the URL or headers
@@ -107,8 +109,9 @@ export default function Assignments() {
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
-          toast.success("Download started");
+          toast.success("Starting direct download...");
         } else {
+          console.log("No download_url found, falling back to JSON");
           // Fallback: download the JSON result
           const blob = new Blob([JSON.stringify(job.result, null, 2)], {
             type: "application/json",
