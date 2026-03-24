@@ -340,23 +340,20 @@ export default function Dashboard() {
   const monthlyLabels = stats.monthly_metrics.map((m) => formatMonth(m.month));
   const usersData = stats.monthly_metrics.map((m) => m.users_count);
   const ordersData = stats.monthly_metrics.map((m) => m.orders_count);
-  const dissertationsData = stats.monthly_metrics.map(
-    (m) => m.dissertations_count,
-  );
   const revenueData = stats.monthly_metrics.map((m) =>
     Math.round(m.revenue / 100),
   );
 
   const revenueBreakdownData = {
-    labels: ["Assignments", "Dissertations", "Careers"],
+    labels: ["Assignments", "Careers", "Outreach"],
     datasets: [
       {
         data: [
           Math.round(stats.revenue_breakdown.assignments / 100),
-          Math.round(stats.revenue_breakdown.dissertations / 100),
           Math.round(stats.revenue_breakdown.careers / 100),
+          Math.round((stats.revenue_breakdown as any).outreach / 100 || 0),
         ],
-        backgroundColor: ["#8b5cf6", "#10b981", "#f59e0b"],
+        backgroundColor: ["#8b5cf6", "#f59e0b", "#10b981"],
         borderColor: "#171717",
         borderWidth: 2,
       },
@@ -437,8 +434,8 @@ export default function Dashboard() {
                   delay={0}
                 />
                 <StatCard
-                  value={stats.total_dissertations}
-                  label="Dissertations"
+                  value={stats.total_orders || 0}
+                  label="Total Orders"
                   color="green"
                   delay={0.1}
                 />
@@ -538,7 +535,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <div className="mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600">
-                        Dissertations
+                        Outreach Orders
                       </div>
                       <div className="h-32">
                         <Bar
@@ -546,8 +543,8 @@ export default function Dashboard() {
                             labels: monthlyLabels,
                             datasets: [
                               {
-                                label: "Dissertations",
-                                data: dissertationsData,
+                                label: "Outreach",
+                                data: ordersData,
                                 backgroundColor: "#06b6d4",
                                 borderColor: "#171717",
                                 borderWidth: 2,
@@ -562,7 +559,7 @@ export default function Dashboard() {
                                 ...chartOptions.plugins.tooltip,
                                 callbacks: {
                                   label: (context) =>
-                                    `${context.parsed.y} dissertations`,
+                                    `${context.parsed.y} orders`,
                                 },
                               },
                             },
@@ -667,11 +664,11 @@ export default function Dashboard() {
                       <div className="flex items-center gap-2">
                         <div className="h-4 w-4 rounded bg-emerald-500"></div>
                         <span className="font-['Satoshi'] text-sm text-neutral-700">
-                          Dissertations
+                          Outreach
                         </span>
                       </div>
                       <span className="font-['Satoshi'] text-sm font-medium text-neutral-900">
-                        {formatCurrency(stats.revenue_breakdown.dissertations)}
+                        {formatCurrency((stats.revenue_breakdown as any).outreach || 0)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
