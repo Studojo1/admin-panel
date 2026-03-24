@@ -6,8 +6,7 @@ const NAV_LINKS = [
   { to: "/", label: "Dashboard" },
   { to: "/users", label: "Users" },
   { to: "/partner-users", label: "Partner Users" },
-  { to: "/assignments", label: "Assignments" },
-  { to: "/dissertations", label: "Dissertations" },
+  { to: "/outreach-orders", label: "Outreach" },
   { to: "/careers", label: "Careers" },
 ] as const;
 

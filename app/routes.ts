@@ -10,8 +10,7 @@ export default [
   route("api/partner-users", "routes/api.partner-users.tsx"),
   route("api/partner-users/:id", "routes/api.partner-users.$id.tsx"),
   route("api/companies", "routes/api.companies.tsx"),
-  route("assignments", "routes/assignments.tsx"),
-  route("dissertations", "routes/dissertations.tsx"),
+  route("outreach-orders", "routes/outreach-orders.tsx"),
   route("careers", "routes/careers.tsx"),
 ] satisfies RouteConfig;
 

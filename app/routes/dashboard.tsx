@@ -829,14 +829,14 @@ export default function Dashboard() {
                     </div>
                   </Link>
                   <Link
-                    to="/dissertations"
+                    to="/outreach-orders"
                     className="group rounded-2xl border-2 border-neutral-900 bg-emerald-50 p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]"
                   >
                     <div className="font-['Clash_Display'] text-xl font-medium text-neutral-900">
-                      Dissertations
+                      Outreach Orders
                     </div>
                     <div className="mt-2 font-['Satoshi'] text-sm text-neutral-600">
-                      Review dissertation submissions
+                      Monitor paid outreach campaigns
                     </div>
                   </Link>
                   <Link

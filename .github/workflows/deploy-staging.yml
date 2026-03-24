@@ -1,0 +1,90 @@
+name: Build and Deploy (Staging)
+
+on:
+  push:
+    branches: [staging]
+
+env:
+  REGISTRY: acrstudojo-dhfsdrfhf6a6bbg2.azurecr.io
+  APP_NAME: admin-panel
+  IMAGE_TAG: staging-${{ github.sha }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.AZURE_CLIENT_ID }}
+          password: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.APP_NAME }}:${{ env.IMAGE_TAG }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.APP_NAME }}:buildcache-staging
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.APP_NAME }}:buildcache-staging,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Construct Azure Credentials
+        id: azure_creds
+        run: |
+          if [ -z "${{ secrets.AZURE_CREDENTIALS }}" ]; then
+            echo "creds<<EOF" >> $GITHUB_OUTPUT
+            echo '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}' >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "creds<<EOF" >> $GITHUB_OUTPUT
+            echo "${{ secrets.AZURE_CREDENTIALS }}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ steps.azure_creds.outputs.creds }}
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: "latest"
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ secrets.AKS_RESOURCE_GROUP }} \
+            --name ${{ secrets.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl set image deployment/${{ env.APP_NAME }} ${{ env.APP_NAME }}=${{ env.REGISTRY }}/${{ env.APP_NAME }}:${{ env.IMAGE_TAG }} -n staging
+          kubectl rollout status deployment/${{ env.APP_NAME }} -n staging --timeout=10m || {
+            echo "Rollout failed or timed out. Checking pod status..."
+            kubectl get pods -n staging -l app=${{ env.APP_NAME }} -o wide
+            echo ""
+            echo "Recent pod events:"
+            LATEST_POD=$(kubectl get pods -n staging -l app=${{ env.APP_NAME }} --sort-by=.metadata.creationTimestamp -o jsonpath='{{.items[-1].metadata.name}}' 2>/dev/null || echo "")
+            if [ -n "$LATEST_POD" ]; then
+              kubectl get events -n staging --field-selector involvedObject.name=$LATEST_POD --sort-by='.lastTimestamp' | tail -20 || true
+              echo ""
+              echo "Pod logs:"
+              kubectl logs -n staging $LATEST_POD --tail=50 || true
+            fi
+            exit 1
+          }

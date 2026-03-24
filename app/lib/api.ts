@@ -176,23 +176,104 @@ export interface AdminUser {
   updated_at: string;
 }
 
-export interface DissertationSubmission {
-  id: string;
-  name: string;
-  email: string;
-  phone_number: string;
-  dissertation_title: string;
-  data_type: string;
-  current_stage: string;
-  additional_notes?: string;
-  form_data?: Record<string, any>;
-  razorpay_order_id?: string;
-  razorpay_payment_id?: string;
-  payment_status: string;
-  amount: number;
+// ─��� Outreach Types ──────────────────────────────────────────────────────────
+
+export interface OutreachMonthlyMetric {
+  month: string;
+  orders_created: number;
+  revenue_cents: number;
+  emails_sent: number;
+  emails_replied: number;
+}
+
+export interface OutreachOverview {
+  total_orders: number;
+  active_orders: number;
+  completed_orders: number;
+  stuck_orders: number;
+  total_revenue_cents: number;
+  total_emails_sent: number;
+  total_emails_replied: number;
+  total_emails_bounced: number;
+  reply_rate_pct: number;
+  orders_by_status: Record<string, number>;
+  monthly_metrics: OutreachMonthlyMetric[];
+}
+
+export interface OutreachUserRow {
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  total_orders: number;
+  active_order_status: string | null;
+  active_order_id: number | null;
+  active_order_updated_at: string | null;
+  is_stuck: boolean;
+  total_paid_cents: number;
+  total_credits: number;
+  used_credits: number;
+  total_emails_sent: number;
+  total_emails_replied: number;
+  total_emails_bounced: number;
+  total_leads: number;
+  created_at: string | null;
+}
+
+export interface OutreachOrderDetail {
+  id: number;
   status: string;
-  created_at: string;
-  updated_at: string;
+  leads_collected: number | null;
+  leads_target: number | null;
+  is_stuck: boolean;
+  action_log: Array<{ timestamp: string; action: string; detail?: string }>;
+  created_at: string | null;
+  updated_at: string | null;
+  campaign: {
+    id: number;
+    name: string;
+    status: string;
+    daily_limit: number;
+    created_at: string | null;
+    email_stats: {
+      queued: number;
+      scheduled: number;
+      sent: number;
+      replied: number;
+      bounced: number;
+      failed: number;
+    };
+    style_breakdown: Record<string, number>;
+  } | null;
+}
+
+export interface OutreachUserDetail {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    created_at: string | null;
+  };
+  credits: {
+    total: number;
+    used: number;
+    available: number;
+  };
+  payments: Array<{
+    id: number;
+    amount_cents: number;
+    currency: string;
+    tier: string;
+    status: string;
+    credits_granted: number;
+    created_at: string | null;
+  }>;
+  orders: OutreachOrderDetail[];
+  lead_summary: {
+    total: number;
+    with_email: number;
+    email_verified: number;
+    avg_score: number;
+  };
 }
 
 export interface CareerApplication {
@@ -288,9 +369,28 @@ export async function updateUser(
   });
 }
 
-export async function listDissertations(limit = 50, offset = 0): Promise<DissertationSubmission[]> {
-  const response = await adminFetch<{ submissions: DissertationSubmission[] }>(`/v1/admin/dissertations?limit=${limit}&offset=${offset}`);
-  return response.submissions || [];
+// ── Outreach API Functions ───────────────────────────────────────────────────
+
+export async function getOutreachOverview(): Promise<OutreachOverview> {
+  return adminFetch<OutreachOverview>(`/v1/outreach/admin/outreach/overview`);
+}
+
+export async function listOutreachUsers(
+  limit = 50,
+  offset = 0,
+  search?: string,
+  statusFilter?: string,
+): Promise<{ users: OutreachUserRow[]; total: number }> {
+  const params = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
+  if (search) params.append("search", search);
+  if (statusFilter) params.append("status_filter", statusFilter);
+  return adminFetch<{ users: OutreachUserRow[]; total: number }>(
+    `/v1/outreach/admin/outreach/users?${params.toString()}`,
+  );
+}
+
+export async function getOutreachUserDetail(userId: string): Promise<OutreachUserDetail> {
+  return adminFetch<OutreachUserDetail>(`/v1/outreach/admin/outreach/users/${userId}/detail`);
 }
 
 export async function listCareers(limit = 50, offset = 0): Promise<CareerApplication[]> {
@@ -304,23 +404,6 @@ export interface MonthMetric {
   orders_count: number;
   dissertations_count: number;
   revenue: number;
-}
-
-export interface AssignmentOrder {
-  job_id: string;
-  user_id: string;
-  user_name: string;
-  created_at: string;
-  status: string;
-  amount: number;
-  download_url?: string;
-}
-
-export interface RevenueBreakdown {
-  total: number;
-  assignments: number;
-  dissertations: number;
-  careers: number;
 }
 
 export interface DashboardStats {
@@ -338,8 +421,21 @@ export interface DashboardStats {
   completed_payments: number;
   pending_payments: number;
   monthly_metrics: MonthMetric[];
-  assignment_orders: AssignmentOrder[];
-  revenue_breakdown: RevenueBreakdown;
+  assignment_orders: Array<{
+    job_id: string;
+    user_id: string;
+    user_name: string;
+    created_at: string;
+    status: string;
+    amount: number;
+    download_url?: string;
+  }>;
+  revenue_breakdown: {
+    total: number;
+    assignments: number;
+    dissertations: number;
+    careers: number;
+  };
 }
 
 export async function getDashboardStats(): Promise<DashboardStats> {
