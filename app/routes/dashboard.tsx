@@ -434,8 +434,8 @@ export default function Dashboard() {
                   delay={0}
                 />
                 <StatCard
-                  value={stats.total_orders || 0}
-                  label="Total Orders"
+                  value={stats.completed_payments}
+                  label="Paid Orders"
                   color="green"
                   delay={0.1}
                 />
