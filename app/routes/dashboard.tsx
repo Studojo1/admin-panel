@@ -441,8 +441,8 @@ export default function Dashboard() {
                   delay={0}
                 />
                 <StatCard
-                  value={outreach?.total_orders ?? 0}
-                  label="Outreach Orders"
+                  value={outreach?.paid_orders ?? 0}
+                  label="Paid Outreach Orders"
                   color="green"
                   delay={0.1}
                 />

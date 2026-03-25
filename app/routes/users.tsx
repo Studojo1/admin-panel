@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader, SearchInput, UserDetailModal } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
@@ -26,11 +26,24 @@ export default function Users() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const limit = 50;
 
+  const loadUsers = useCallback(async () => {
+    try {
+      setLoading(true);
+      const usersList = await listUsers(limit, offset, search || undefined);
+      setUsers(Array.isArray(usersList) ? usersList : []);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to load users");
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [offset, search]);
+
   useEffect(() => {
     if (isAuthorized) {
       loadUsers();
     }
-  }, [offset, isAuthorized, search]);
+  }, [isAuthorized, loadUsers]);
 
   if (isPending || isAuthorized === null) {
     return (
@@ -46,19 +59,6 @@ export default function Users() {
   if (!isAuthorized) {
     return null; // Redirect will happen in guard
   }
-
-  const loadUsers = async () => {
-    try {
-      setLoading(true);
-      const usersList = await listUsers(limit, offset, search || undefined);
-      setUsers(Array.isArray(usersList) ? usersList : []);
-    } catch (error: any) {
-      toast.error(error.message || "Failed to load users");
-      setUsers([]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleViewDetails = async (userId: string) => {
     try {

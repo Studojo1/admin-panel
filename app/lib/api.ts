@@ -188,6 +188,7 @@ export interface OutreachMonthlyMetric {
 
 export interface OutreachOverview {
   total_orders: number;
+  paid_orders: number;
   active_orders: number;
   completed_orders: number;
   stuck_orders: number;
