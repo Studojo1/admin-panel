@@ -19,9 +19,11 @@ import { AdminHeader, StatCard } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import {
   getDashboardStats,
+  getOutreachOverview,
   getControlPlaneUrl,
   getToken,
   type DashboardStats,
+  type OutreachOverview,
 } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/dashboard";
@@ -255,6 +257,7 @@ export function meta({}: Route.MetaArgs) {
 export default function Dashboard() {
   const { isAuthorized, isPending } = useAdminGuard();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [outreach, setOutreach] = useState<OutreachOverview | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -281,8 +284,12 @@ export default function Dashboard() {
   const loadStats = async () => {
     try {
       setLoading(true);
-      const data = await getDashboardStats();
+      const [data, outreachData] = await Promise.all([
+        getDashboardStats(),
+        getOutreachOverview().catch(() => null),
+      ]);
       setStats(data);
+      setOutreach(outreachData);
     } catch (error: any) {
       toast.error(error.message || "Failed to load dashboard stats");
     } finally {
@@ -434,8 +441,8 @@ export default function Dashboard() {
                   delay={0}
                 />
                 <StatCard
-                  value={stats.completed_payments}
-                  label="Paid Orders"
+                  value={outreach?.total_orders ?? 0}
+                  label="Outreach Orders"
                   color="green"
                   delay={0.1}
                 />
