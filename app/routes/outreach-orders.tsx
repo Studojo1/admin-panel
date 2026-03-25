@@ -66,7 +66,7 @@ function formatStatus(s: string): string {
 }
 
 function formatCurrency(cents: number): string {
-  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 0 })}`;
+  return `₹${(cents / 100).toLocaleString("en-IN")}`;
 }
 
 function formatMonth(monthStr: string): string {

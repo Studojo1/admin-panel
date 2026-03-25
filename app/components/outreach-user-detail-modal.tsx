@@ -46,7 +46,7 @@ function fmtDate(d: string | null): string {
 }
 
 function fmtCurrency(cents: number): string {
-  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+  return `₹${(cents / 100).toLocaleString("en-IN")}`;
 }
 
 const STYLE_COLORS: Record<string, string> = {
