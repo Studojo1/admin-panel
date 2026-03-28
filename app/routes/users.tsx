@@ -25,7 +25,7 @@ export default function Users() {
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const limit = 50;
+  const limit = 200;
 
   const ROLE_PRIORITY: Record<string, number> = { admin: 0, ops: 1, dev: 2 };
   const sortUsers = (list: AdminUser[]) =>
@@ -271,8 +271,9 @@ export default function Users() {
                 </div>
                 <div className="mt-6 flex items-center justify-between">
                   <p className="font-['Satoshi'] text-sm text-neutral-600">
-                    Showing {offset + 1}–{Math.min(offset + users.length, total)} of {total}{" "}
-                    {total === 1 ? "user" : "users"}
+                    Showing {offset + 1}–{offset + users.length}
+                    {total > 0 ? ` of ${total}` : ""}{" "}
+                    {(total || users.length) === 1 ? "user" : "users"}
                     {search && ` matching "${search}"`}
                   </p>
                   <div className="flex gap-4">
@@ -285,7 +286,7 @@ export default function Users() {
                     </button>
                     <button
                       onClick={() => setOffset(offset + limit)}
-                      disabled={offset + users.length >= total}
+                      disabled={total > 0 ? offset + users.length >= total : users.length < limit}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:opacity-50 disabled:cursor-not-allowed hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
                       Next
