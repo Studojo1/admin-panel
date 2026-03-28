@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader, SearchInput, UserDetailModal } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
@@ -27,6 +27,11 @@ export default function Users() {
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const limit = 50;
+
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value);
+    setOffset(0);
+  }, []);
 
   const ROLE_PRIORITY: Record<string, number> = { admin: 0, ops: 1, dev: 2 };
   const sortUsers = (list: AdminUser[]) =>
@@ -138,10 +143,7 @@ export default function Users() {
         >
           <SearchInput
             value={search}
-            onChange={(value) => {
-              setSearch(value);
-              setOffset(0); // Reset to first page when searching
-            }}
+            onChange={handleSearchChange}
             placeholder="Search by name, email, phone, college, or course..."
           />
         </motion.div>
@@ -278,8 +280,6 @@ export default function Users() {
                     {total > 0 ? ` of ${total}` : ""}{" "}
                     {(total || users.length) === 1 ? "user" : "users"}
                     {search && ` matching "${search}"`}
-                    {" "}
-                    <span className="text-xs text-neutral-400">[debug: hasMore={String(hasMore)}, len={users.length}, total={total}]</span>
                   </p>
                   <div className="flex gap-4">
                     <button
