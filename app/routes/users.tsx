@@ -24,9 +24,18 @@ export default function Users() {
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const limit = 50;
+
+  const ROLE_FILTERS = [
+    { label: "All Users", value: "" },
+    { label: "Admin", value: "admin" },
+    { label: "Ops", value: "ops" },
+    { label: "Dev", value: "dev" },
+    { label: "Regular", value: "none" },
+  ];
 
   const handleSearchChange = useCallback((value: string) => {
     setSearch(value);
@@ -45,7 +54,7 @@ export default function Users() {
     if (isAuthorized) {
       loadUsers();
     }
-  }, [offset, isAuthorized, search]);
+  }, [offset, isAuthorized, search, roleFilter]);
 
   if (isPending || isAuthorized === null) {
     return (
@@ -65,7 +74,7 @@ export default function Users() {
   const loadUsers = async () => {
     try {
       setLoading(true);
-      const { users: usersList, total: totalCount, hasMore: more } = await listUsers(limit, offset, search || undefined);
+      const { users: usersList, total: totalCount, hasMore: more } = await listUsers(limit, offset, search || undefined, roleFilter || undefined);
       setUsers(sortUsers(Array.isArray(usersList) ? usersList : []));
       setTotal(totalCount);
       setHasMore(more);
@@ -134,12 +143,34 @@ export default function Users() {
           </p>
         </motion.div>
 
+        {/* Role Filter Buttons */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.05 }}
+          className="mt-6 flex flex-wrap gap-2"
+        >
+          {ROLE_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              onClick={() => { setRoleFilter(f.value); setOffset(0); }}
+              className={`rounded-lg border-2 border-neutral-900 px-4 py-1.5 font-['Satoshi'] text-sm font-medium transition-all ${
+                roleFilter === f.value
+                  ? "bg-violet-600 text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]"
+                  : "bg-white text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </motion.div>
+
         {/* Search Bar */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.1 }}
-          className="mt-8"
+          className="mt-4"
         >
           <SearchInput
             value={search}

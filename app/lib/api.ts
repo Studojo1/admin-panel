@@ -257,14 +257,13 @@ async function adminFetch<T>(
   return response.json();
 }
 
-export async function listUsers(limit = 50, offset = 0, search?: string): Promise<{ users: AdminUser[]; total: number; hasMore: boolean }> {
+export async function listUsers(limit = 50, offset = 0, search?: string, role?: string): Promise<{ users: AdminUser[]; total: number; hasMore: boolean }> {
   const params = new URLSearchParams({
     limit: (limit + 1).toString(), // fetch one extra to detect if another page exists
     offset: offset.toString(),
   });
-  if (search) {
-    params.append("search", search);
-  }
+  if (search) params.append("search", search);
+  if (role) params.append("role", role);
   const response = await adminFetch<{ users: AdminUser[]; total: number }>(`/v1/admin/users?${params.toString()}`);
   const all = response.users || [];
   const hasMore = all.length > limit;
