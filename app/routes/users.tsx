@@ -25,7 +25,7 @@ export default function Users() {
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const limit = 200;
+  const limit = 50;
 
   const ROLE_PRIORITY: Record<string, number> = { admin: 0, ops: 1, dev: 2 };
   const sortUsers = (list: AdminUser[]) =>
