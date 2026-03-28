@@ -13,5 +13,7 @@ export default [
   route("assignments", "routes/assignments.tsx"),
   route("dissertations", "routes/dissertations.tsx"),
   route("careers", "routes/careers.tsx"),
+  route("settings", "routes/settings.tsx"),
+  route("api/settings", "routes/api.settings.tsx"),
 ] satisfies RouteConfig;
 
