@@ -20,6 +20,7 @@ export default function Users() {
   const { isAuthorized, isPending } = useAdminGuard();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState("");
@@ -59,13 +60,15 @@ export default function Users() {
   const loadUsers = async () => {
     try {
       setLoading(true);
-      const { users: usersList, total: totalCount } = await listUsers(limit, offset, search || undefined);
+      const { users: usersList, total: totalCount, hasMore: more } = await listUsers(limit, offset, search || undefined);
       setUsers(sortUsers(Array.isArray(usersList) ? usersList : []));
       setTotal(totalCount);
+      setHasMore(more);
     } catch (error: any) {
       toast.error(error.message || "Failed to load users");
       setUsers([]);
       setTotal(0);
+      setHasMore(false);
     } finally {
       setLoading(false);
     }
@@ -286,7 +289,7 @@ export default function Users() {
                     </button>
                     <button
                       onClick={() => setOffset(offset + limit)}
-                      disabled={total > 0 ? offset + users.length >= total : users.length < limit}
+                      disabled={!hasMore}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:opacity-50 disabled:cursor-not-allowed hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
                       Next
