@@ -257,7 +257,7 @@ async function adminFetch<T>(
   return response.json();
 }
 
-export async function listUsers(limit = 50, offset = 0, search?: string): Promise<AdminUser[]> {
+export async function listUsers(limit = 50, offset = 0, search?: string): Promise<{ users: AdminUser[]; total: number }> {
   const params = new URLSearchParams({
     limit: limit.toString(),
     offset: offset.toString(),
@@ -265,8 +265,8 @@ export async function listUsers(limit = 50, offset = 0, search?: string): Promis
   if (search) {
     params.append("search", search);
   }
-  const response = await adminFetch<{ users: AdminUser[] }>(`/v1/admin/users?${params.toString()}`);
-  return response.users || [];
+  const response = await adminFetch<{ users: AdminUser[]; total: number }>(`/v1/admin/users?${params.toString()}`);
+  return { users: response.users || [], total: response.total ?? 0 };
 }
 
 export async function getUser(id: string): Promise<AdminUser> {
