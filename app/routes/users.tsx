@@ -278,6 +278,8 @@ export default function Users() {
                     {total > 0 ? ` of ${total}` : ""}{" "}
                     {(total || users.length) === 1 ? "user" : "users"}
                     {search && ` matching "${search}"`}
+                    {" "}
+                    <span className="text-xs text-neutral-400">[debug: hasMore={String(hasMore)}, len={users.length}, total={total}]</span>
                   </p>
                   <div className="flex gap-4">
                     <button
