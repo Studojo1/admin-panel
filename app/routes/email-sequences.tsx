@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
@@ -6,7 +6,9 @@ import {
   listScheduledEmails,
   cancelScheduledEmail,
   triggerEmail,
+  listUsers,
   type ScheduledEmail,
+  type AdminUser,
 } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/email-sequences";
@@ -87,6 +89,14 @@ export default function EmailSequences() {
   const [triggerName, setTriggerName] = useState("");
   const [triggering, setTriggering] = useState(false);
 
+  // User search state
+  const [userQuery, setUserQuery] = useState("");
+  const [userResults, setUserResults] = useState<AdminUser[]>([]);
+  const [userSearching, setUserSearching] = useState(false);
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const userSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   const load = useCallback(async () => {
     if (!isAuthorized) return;
     try {
@@ -120,6 +130,29 @@ export default function EmailSequences() {
     }
   };
 
+  const handleUserSearch = (q: string) => {
+    setUserQuery(q);
+    setShowUserDropdown(true);
+    if (userSearchRef.current) clearTimeout(userSearchRef.current);
+    if (!q.trim()) { setUserResults([]); return; }
+    userSearchRef.current = setTimeout(async () => {
+      try {
+        setUserSearching(true);
+        const res = await listUsers(8, 0, q.trim());
+        setUserResults(res.users);
+      } catch { setUserResults([]); } finally { setUserSearching(false); }
+    }, 300);
+  };
+
+  const selectUser = (u: AdminUser) => {
+    setTriggerUserID(u.id);
+    setTriggerEmail2(u.email);
+    setTriggerName(u.name || u.full_name || "");
+    setUserQuery(`${u.name || u.email} (${u.email})`);
+    setShowUserDropdown(false);
+    setUserResults([]);
+  };
+
   const handleTrigger = async () => {
     if (!triggerUserID.trim()) {
       toast.error("User ID is required");
@@ -135,7 +168,7 @@ export default function EmailSequences() {
       await triggerEmail(triggerRouting, event);
       toast.success("Email triggered successfully");
       setTriggerOpen(false);
-      setTriggerUserID(""); setTriggerEmail2(""); setTriggerName("");
+      setTriggerUserID(""); setTriggerEmail2(""); setTriggerName(""); setUserQuery("");
       setTimeout(load, 1500); // reload after short delay so new scheduled rows appear
     } catch (err: any) {
       toast.error(err.message || "Failed to trigger email");
@@ -244,18 +277,66 @@ export default function EmailSequences() {
                   </select>
                 </div>
 
-                {/* User ID */}
-                <div>
+                {/* User search */}
+                <div className="relative sm:col-span-2" ref={dropdownRef}>
                   <label className="mb-1 block font-['Satoshi'] text-xs font-semibold text-neutral-600">
-                    User ID
+                    Search user
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. abc123"
-                    value={triggerUserID}
-                    onChange={(e) => setTriggerUserID(e.target.value)}
+                    placeholder="Type name or email…"
+                    value={userQuery}
+                    onChange={(e) => handleUserSearch(e.target.value)}
+                    onFocus={() => userQuery && setShowUserDropdown(true)}
                     className="w-full rounded-lg border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm placeholder:text-neutral-400 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] focus:outline-none focus:ring-2 focus:ring-violet-400"
                   />
+                  {/* Selected user pill */}
+                  {triggerUserID && (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 font-['Satoshi'] text-xs text-violet-700">
+                        <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+                        {triggerEmail2} · ID: {triggerUserID.slice(0, 8)}…
+                      </span>
+                      <button
+                        onClick={() => { setTriggerUserID(""); setTriggerEmail2(""); setTriggerName(""); setUserQuery(""); }}
+                        className="font-['Satoshi'] text-xs text-neutral-400 hover:text-red-500"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                  {/* Dropdown */}
+                  <AnimatePresence>
+                    {showUserDropdown && (userResults.length > 0 || userSearching) && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute z-50 mt-1 w-full rounded-lg border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+                      >
+                        {userSearching ? (
+                          <div className="px-4 py-3 font-['Satoshi'] text-xs text-neutral-400">Searching…</div>
+                        ) : (
+                          userResults.map((u) => (
+                            <button
+                              key={u.id}
+                              onMouseDown={() => selectUser(u)}
+                              className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-violet-50 first:rounded-t-lg last:rounded-b-lg"
+                            >
+                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-100 font-['Satoshi'] text-xs font-bold text-violet-700">
+                                {(u.name || u.email || "?")[0].toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="font-['Satoshi'] text-sm font-medium text-neutral-900">{u.name || u.full_name || "—"}</div>
+                                <div className="font-['Satoshi'] text-xs text-neutral-400">{u.email}</div>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 {/* Email (only for signup) */}
