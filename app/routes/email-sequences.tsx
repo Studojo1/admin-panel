@@ -5,6 +5,7 @@ import { useAdminGuard } from "~/lib/auth-guard";
 import {
   listScheduledEmails,
   cancelScheduledEmail,
+  triggerEmail,
   type ScheduledEmail,
 } from "~/lib/api";
 import { toast } from "sonner";
@@ -78,6 +79,14 @@ export default function EmailSequences() {
   const [offset, setOffset] = useState(0);
   const limit = 100;
 
+  // Trigger form state
+  const [triggerOpen, setTriggerOpen] = useState(false);
+  const [triggerRouting, setTriggerRouting] = useState("event.user.signup");
+  const [triggerUserID, setTriggerUserID] = useState("");
+  const [triggerEmail2, setTriggerEmail2] = useState("");
+  const [triggerName, setTriggerName] = useState("");
+  const [triggering, setTriggering] = useState(false);
+
   const load = useCallback(async () => {
     if (!isAuthorized) return;
     try {
@@ -108,6 +117,30 @@ export default function EmailSequences() {
       toast.error(err.message || "Failed to cancel email");
     } finally {
       setCancelling(null);
+    }
+  };
+
+  const handleTrigger = async () => {
+    if (!triggerUserID.trim()) {
+      toast.error("User ID is required");
+      return;
+    }
+    try {
+      setTriggering(true);
+      let event: Record<string, unknown> = { user_id: triggerUserID.trim() };
+      if (triggerRouting === "event.user.signup") {
+        if (!triggerEmail2.trim()) { toast.error("Email is required for signup event"); return; }
+        event = { user_id: triggerUserID.trim(), email: triggerEmail2.trim(), name: triggerName.trim() || "User" };
+      }
+      await triggerEmail(triggerRouting, event);
+      toast.success("Email triggered successfully");
+      setTriggerOpen(false);
+      setTriggerUserID(""); setTriggerEmail2(""); setTriggerName("");
+      setTimeout(load, 1500); // reload after short delay so new scheduled rows appear
+    } catch (err: any) {
+      toast.error(err.message || "Failed to trigger email");
+    } finally {
+      setTriggering(false);
     }
   };
 
@@ -153,7 +186,14 @@ export default function EmailSequences() {
             </p>
           </div>
 
-          {/* Status tabs */}
+          <button
+            onClick={() => setTriggerOpen((v) => !v)}
+            className="rounded-lg border-2 border-neutral-900 bg-violet-500 px-4 py-2 font-['Satoshi'] text-sm font-bold text-white shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+          >
+            + Trigger Email
+          </button>
+
+            {/* Status tabs */}
           <div className="flex gap-2 flex-wrap">
             {STATUS_FILTERS.map((f) => (
               <button
@@ -173,6 +213,100 @@ export default function EmailSequences() {
             ))}
           </div>
         </motion.div>
+
+        {/* Trigger email panel */}
+        <AnimatePresence>
+          {triggerOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+              className="mb-6 rounded-xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+            >
+              <h2 className="mb-4 font-['Satoshi'] text-lg font-bold text-neutral-900">
+                Trigger Email
+              </h2>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Routing key */}
+                <div>
+                  <label className="mb-1 block font-['Satoshi'] text-xs font-semibold text-neutral-600">
+                    Email type
+                  </label>
+                  <select
+                    value={triggerRouting}
+                    onChange={(e) => setTriggerRouting(e.target.value)}
+                    className="w-full rounded-lg border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] focus:outline-none focus:ring-2 focus:ring-violet-400"
+                  >
+                    <option value="event.user.signup">Welcome (signup)</option>
+                    <option value="event.resume.optimized">Resume optimized</option>
+                    <option value="event.internship.applied">Internship applied</option>
+                  </select>
+                </div>
+
+                {/* User ID */}
+                <div>
+                  <label className="mb-1 block font-['Satoshi'] text-xs font-semibold text-neutral-600">
+                    User ID
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. abc123"
+                    value={triggerUserID}
+                    onChange={(e) => setTriggerUserID(e.target.value)}
+                    className="w-full rounded-lg border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm placeholder:text-neutral-400 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] focus:outline-none focus:ring-2 focus:ring-violet-400"
+                  />
+                </div>
+
+                {/* Email (only for signup) */}
+                {triggerRouting === "event.user.signup" && (
+                  <>
+                    <div>
+                      <label className="mb-1 block font-['Satoshi'] text-xs font-semibold text-neutral-600">
+                        Email address
+                      </label>
+                      <input
+                        type="email"
+                        placeholder="user@example.com"
+                        value={triggerEmail2}
+                        onChange={(e) => setTriggerEmail2(e.target.value)}
+                        className="w-full rounded-lg border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm placeholder:text-neutral-400 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block font-['Satoshi'] text-xs font-semibold text-neutral-600">
+                        Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Jeremy"
+                        value={triggerName}
+                        onChange={(e) => setTriggerName(e.target.value)}
+                        className="w-full rounded-lg border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm placeholder:text-neutral-400 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={handleTrigger}
+                  disabled={triggering}
+                  className="rounded-lg border-2 border-neutral-900 bg-violet-500 px-5 py-2 font-['Satoshi'] text-sm font-bold text-white shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
+                >
+                  {triggering ? "Sending…" : "Send now"}
+                </button>
+                <button
+                  onClick={() => setTriggerOpen(false)}
+                  className="rounded-lg border-2 border-neutral-900 bg-white px-5 py-2 font-['Satoshi'] text-sm font-medium text-neutral-700 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:bg-neutral-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Search */}
         <motion.div

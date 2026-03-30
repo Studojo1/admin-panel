@@ -387,3 +387,13 @@ export async function cancelScheduledEmail(id: string): Promise<{ status: string
   });
 }
 
+export async function triggerEmail(
+  routingKey: string,
+  event: Record<string, unknown>
+): Promise<{ message: string }> {
+  return adminFetch<{ message: string }>(`/v1/admin/emails/trigger`, {
+    method: "POST",
+    body: JSON.stringify({ routing_key: routingKey, event }),
+  });
+}
+
