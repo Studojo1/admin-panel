@@ -6,6 +6,8 @@ import {
   listScheduledEmails,
   cancelScheduledEmail,
   triggerEmail,
+  bulkSendPreview,
+  bulkSend,
   listUsers,
   type ScheduledEmail,
   type AdminUser,
@@ -31,6 +33,25 @@ const EMAIL_TYPE_LABELS: Record<string, string> = {
   "internship-applied": "Internship applied",
   "password-changed": "Password changed",
 };
+
+const BULK_TYPE_LABELS: Record<string, string> = {
+  welcome: "Welcome",
+  nurture_day3: "Day 3 — Applying the wrong way",
+  nurture_day7: "Day 7 — Still looking?",
+  nurture_day14: "Day 14 — Social proof",
+  nurture_day30: "Day 30 — Personal check-in",
+};
+
+const DAYS_OPTIONS = [
+  { label: "All users", value: 0 },
+  { label: "Last 24 hours", value: 1 },
+  { label: "Last 3 days", value: 3 },
+  { label: "Last 7 days", value: 7 },
+  { label: "Last 14 days", value: 14 },
+  { label: "Last 30 days", value: 30 },
+  { label: "Last 60 days", value: 60 },
+  { label: "Last 90 days", value: 90 },
+] as const;
 
 const STATUS_FILTERS = [
   { label: "Pending", value: "pending" },
@@ -177,6 +198,46 @@ export default function EmailSequences() {
     }
   };
 
+  // Bulk send state
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkType, setBulkType] = useState("welcome");
+  const [bulkDays, setBulkDays] = useState(0); // 0 = all
+  const [bulkPreviewCount, setBulkPreviewCount] = useState<number | null>(null);
+  const [bulkPreviewing, setBulkPreviewing] = useState(false);
+  const [bulkSending, setBulkSending] = useState(false);
+
+  const handleBulkPreview = async () => {
+    try {
+      setBulkPreviewing(true);
+      const res = await bulkSendPreview(bulkDays);
+      setBulkPreviewCount(res.count);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to preview");
+    } finally {
+      setBulkPreviewing(false);
+    }
+  };
+
+  const handleBulkSend = async () => {
+    if (bulkPreviewCount === null || bulkPreviewCount === 0) {
+      toast.error("No users to send to");
+      return;
+    }
+    if (!confirm(`Send "${BULK_TYPE_LABELS[bulkType] || bulkType}" to ${bulkPreviewCount} user${bulkPreviewCount !== 1 ? "s" : ""}?`)) return;
+    try {
+      setBulkSending(true);
+      const res = await bulkSend(bulkType, bulkDays);
+      toast.success(res.message || `Sending to ${res.total} users`);
+      setBulkOpen(false);
+      setBulkPreviewCount(null);
+      setTimeout(load, 2000);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to send");
+    } finally {
+      setBulkSending(false);
+    }
+  };
+
   const filtered = search.trim()
     ? emails.filter(
         (e) =>
@@ -219,12 +280,20 @@ export default function EmailSequences() {
             </p>
           </div>
 
-          <button
-            onClick={() => setTriggerOpen((v) => !v)}
-            className="rounded-lg border-2 border-neutral-900 bg-violet-500 px-4 py-2 font-['Satoshi'] text-sm font-bold text-white shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
-          >
-            + Trigger Email
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setTriggerOpen((v) => !v); setBulkOpen(false); }}
+              className="rounded-lg border-2 border-neutral-900 bg-violet-500 px-4 py-2 font-['Satoshi'] text-sm font-bold text-white shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+            >
+              + Trigger Email
+            </button>
+            <button
+              onClick={() => { setBulkOpen((v) => !v); setTriggerOpen(false); setBulkPreviewCount(null); }}
+              className="rounded-lg border-2 border-neutral-900 bg-amber-500 px-4 py-2 font-['Satoshi'] text-sm font-bold text-white shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+            >
+              Bulk Send
+            </button>
+          </div>
 
             {/* Status tabs */}
           <div className="flex gap-2 flex-wrap">
@@ -380,6 +449,90 @@ export default function EmailSequences() {
                 </button>
                 <button
                   onClick={() => setTriggerOpen(false)}
+                  className="rounded-lg border-2 border-neutral-900 bg-white px-5 py-2 font-['Satoshi'] text-sm font-medium text-neutral-700 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:bg-neutral-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Bulk send panel */}
+        <AnimatePresence>
+          {bulkOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+              className="mb-6 rounded-xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+            >
+              <h2 className="mb-4 font-['Satoshi'] text-lg font-bold text-neutral-900">
+                Bulk Send Email
+              </h2>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block font-['Satoshi'] text-xs font-semibold text-neutral-600">
+                    Email type
+                  </label>
+                  <select
+                    value={bulkType}
+                    onChange={(e) => { setBulkType(e.target.value); setBulkPreviewCount(null); }}
+                    className="w-full rounded-lg border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] focus:outline-none focus:ring-2 focus:ring-violet-400"
+                  >
+                    {Object.entries(BULK_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block font-['Satoshi'] text-xs font-semibold text-neutral-600">
+                    Users signed up
+                  </label>
+                  <select
+                    value={bulkDays}
+                    onChange={(e) => { setBulkDays(Number(e.target.value)); setBulkPreviewCount(null); }}
+                    className="w-full rounded-lg border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] focus:outline-none focus:ring-2 focus:ring-violet-400"
+                  >
+                    {DAYS_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Preview count */}
+              {bulkPreviewCount !== null && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="mt-4 rounded-lg border-2 border-amber-300 bg-amber-50 px-4 py-3"
+                >
+                  <p className="font-['Satoshi'] text-sm text-amber-900">
+                    <span className="font-bold">{bulkPreviewCount}</span> user{bulkPreviewCount !== 1 ? "s" : ""} will receive{" "}
+                    <span className="font-bold">{BULK_TYPE_LABELS[bulkType] || bulkType}</span>
+                  </p>
+                </motion.div>
+              )}
+
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={handleBulkPreview}
+                  disabled={bulkPreviewing}
+                  className="rounded-lg border-2 border-neutral-900 bg-white px-5 py-2 font-['Satoshi'] text-sm font-medium text-neutral-700 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:bg-neutral-50 disabled:opacity-50"
+                >
+                  {bulkPreviewing ? "Counting..." : "Preview count"}
+                </button>
+                <button
+                  onClick={handleBulkSend}
+                  disabled={bulkSending || bulkPreviewCount === null || bulkPreviewCount === 0}
+                  className="rounded-lg border-2 border-neutral-900 bg-amber-500 px-5 py-2 font-['Satoshi'] text-sm font-bold text-white shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
+                >
+                  {bulkSending ? "Sending..." : "Send to all"}
+                </button>
+                <button
+                  onClick={() => { setBulkOpen(false); setBulkPreviewCount(null); }}
                   className="rounded-lg border-2 border-neutral-900 bg-white px-5 py-2 font-['Satoshi'] text-sm font-medium text-neutral-700 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:bg-neutral-50"
                 >
                   Cancel

@@ -397,3 +397,26 @@ export async function triggerEmail(
   });
 }
 
+export async function bulkSendPreview(
+  withinDays: number
+): Promise<{ count: number; within_days: number }> {
+  const params = new URLSearchParams();
+  if (withinDays > 0) params.append("within_days", withinDays.toString());
+  return adminFetch<{ count: number; within_days: number }>(
+    `/v1/admin/emails/bulk-send/preview?${params.toString()}`
+  );
+}
+
+export async function bulkSend(
+  emailType: string,
+  withinDays: number
+): Promise<{ message: string; total: number }> {
+  return adminFetch<{ message: string; total: number }>(
+    `/v1/admin/emails/bulk-send`,
+    {
+      method: "POST",
+      body: JSON.stringify({ email_type: emailType, within_days: withinDays }),
+    }
+  );
+}
+
