@@ -15,5 +15,6 @@ export default [
   route("careers", "routes/careers.tsx"),
   route("settings", "routes/settings.tsx"),
   route("api/settings", "routes/api.settings.tsx"),
+  route("email-sequences", "routes/email-sequences.tsx"),
 ] satisfies RouteConfig;
 

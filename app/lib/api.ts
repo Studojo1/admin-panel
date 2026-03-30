@@ -351,3 +351,39 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   return adminFetch<DashboardStats>(`/v1/admin/stats`);
 }
 
+export interface ScheduledEmail {
+  id: string;
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  email_type: string;
+  scheduled_at: string;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export interface ScheduledEmailsResponse {
+  emails: ScheduledEmail[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function listScheduledEmails(
+  status?: "pending" | "sent" | "due" | "",
+  limit = 100,
+  offset = 0,
+  userID?: string
+): Promise<ScheduledEmailsResponse> {
+  const params = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
+  if (status) params.append("status", status);
+  if (userID) params.append("user_id", userID);
+  return adminFetch<ScheduledEmailsResponse>(`/v1/admin/emails/scheduled?${params.toString()}`);
+}
+
+export async function cancelScheduledEmail(id: string): Promise<{ status: string }> {
+  return adminFetch<{ status: string }>(`/v1/admin/emails/scheduled/${id}`, {
+    method: "DELETE",
+  });
+}
+

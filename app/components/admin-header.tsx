@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { to: "/dissertations", label: "Dissertations" },
   { to: "/careers", label: "Careers" },
   { to: "/settings", label: "Settings" },
+  { to: "/email-sequences", label: "Emails" },
 ] as const;
 
 export function AdminHeader() {
