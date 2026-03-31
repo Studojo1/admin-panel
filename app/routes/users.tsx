@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader, SearchInput, UserDetailModal } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
@@ -19,42 +19,31 @@ export function meta({}: Route.MetaArgs) {
 export default function Users() {
   const { isAuthorized, isPending } = useAdminGuard();
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState("");
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const limit = 50;
 
-  const ROLE_FILTERS = [
-    { label: "All Users", value: "" },
-    { label: "Admin", value: "admin" },
-    { label: "Ops", value: "ops" },
-    { label: "Dev", value: "dev" },
-    { label: "Regular", value: "none" },
-  ];
-
-  const handleSearchChange = useCallback((value: string) => {
-    setSearch(value);
-    setOffset(0);
-  }, []);
-
-  const ROLE_PRIORITY: Record<string, number> = { admin: 0, ops: 1, dev: 2 };
-  const sortUsers = (list: AdminUser[]) =>
-    [...list].sort((a, b) => {
-      const pa = a.role ? (ROLE_PRIORITY[a.role] ?? 3) : 4;
-      const pb = b.role ? (ROLE_PRIORITY[b.role] ?? 3) : 4;
-      return pa !== pb ? pa - pb : new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
+  const loadUsers = useCallback(async () => {
+    try {
+      setLoading(true);
+      const usersList = await listUsers(limit, offset, search || undefined);
+      setUsers(Array.isArray(usersList) ? usersList : []);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to load users");
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [offset, search]);
 
   useEffect(() => {
     if (isAuthorized) {
       loadUsers();
     }
-  }, [offset, isAuthorized, search, roleFilter]);
+  }, [isAuthorized, loadUsers]);
 
   if (isPending || isAuthorized === null) {
     return (
@@ -70,23 +59,6 @@ export default function Users() {
   if (!isAuthorized) {
     return null; // Redirect will happen in guard
   }
-
-  const loadUsers = async () => {
-    try {
-      setLoading(true);
-      const { users: usersList, total: totalCount, hasMore: more } = await listUsers(limit, offset, search || undefined, roleFilter || undefined);
-      setUsers(sortUsers(Array.isArray(usersList) ? usersList : []));
-      setTotal(totalCount);
-      setHasMore(more);
-    } catch (error: any) {
-      toast.error(error.message || "Failed to load users");
-      setUsers([]);
-      setTotal(0);
-      setHasMore(false);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleViewDetails = async (userId: string) => {
     try {
@@ -143,38 +115,19 @@ export default function Users() {
           </p>
         </motion.div>
 
-        {/* Role Filter Buttons */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.05 }}
-          className="mt-6 flex flex-wrap gap-2"
-        >
-          {ROLE_FILTERS.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => { setRoleFilter(f.value); setOffset(0); }}
-              className={`rounded-lg border-2 border-neutral-900 px-4 py-1.5 font-['Satoshi'] text-sm font-medium transition-all ${
-                roleFilter === f.value
-                  ? "bg-violet-600 text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]"
-                  : "bg-white text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </motion.div>
-
         {/* Search Bar */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.1 }}
-          className="mt-4"
+          className="mt-8"
         >
           <SearchInput
             value={search}
-            onChange={handleSearchChange}
+            onChange={(value) => {
+              setSearch(value);
+              setOffset(0); // Reset to first page when searching
+            }}
             placeholder="Search by name, email, phone, college, or course..."
           />
         </motion.div>
@@ -243,30 +196,18 @@ export default function Users() {
                               {user.college || "—"}
                             </td>
                             <td className="px-4 py-4">
-                              <div className="flex flex-col gap-1">
-                                {user.role && (
-                                  <span className={`inline-block rounded-md px-2 py-0.5 font-['Satoshi'] text-xs font-bold uppercase tracking-wide ${
-                                    user.role === "admin" ? "bg-violet-100 text-violet-700" :
-                                    user.role === "ops" ? "bg-amber-100 text-amber-700" :
-                                    user.role === "dev" ? "bg-blue-100 text-blue-700" :
-                                    "bg-neutral-100 text-neutral-700"
-                                  }`}>
-                                    {user.role}
-                                  </span>
-                                )}
-                                <select
-                                  value={user.role || ""}
-                                  onChange={(e) =>
-                                    handleUpdateRole(user.id, e.target.value)
-                                  }
-                                  className="rounded-lg border-2 border-neutral-900 bg-white px-3 py-1.5 font-['Satoshi'] text-sm font-medium transition-colors hover:bg-neutral-50 focus:outline-none"
-                                >
-                                  <option value="">User</option>
-                                  <option value="ops">Ops</option>
-                                  <option value="admin">Admin</option>
-                                  <option value="dev">Dev</option>
-                                </select>
-                              </div>
+                              <select
+                                value={user.role || ""}
+                                onChange={(e) =>
+                                  handleUpdateRole(user.id, e.target.value)
+                                }
+                                className="rounded-lg border-2 border-neutral-900 bg-white px-3 py-1.5 font-['Satoshi'] text-sm font-medium transition-colors hover:bg-neutral-50 focus:outline-none"
+                              >
+                                <option value="">User</option>
+                                <option value="ops">Ops</option>
+                                <option value="admin">Admin</option>
+                                <option value="dev">Dev</option>
+                              </select>
                             </td>
                             <td className="px-4 py-4">
                               {user.banned ? (
@@ -307,9 +248,8 @@ export default function Users() {
                 </div>
                 <div className="mt-6 flex items-center justify-between">
                   <p className="font-['Satoshi'] text-sm text-neutral-600">
-                    Showing {offset + 1}–{offset + users.length}
-                    {total > 0 ? ` of ${total}` : ""}{" "}
-                    {(total || users.length) === 1 ? "user" : "users"}
+                    Showing {users.length}{" "}
+                    {users.length === 1 ? "user" : "users"}
                     {search && ` matching "${search}"`}
                   </p>
                   <div className="flex gap-4">
@@ -322,7 +262,7 @@ export default function Users() {
                     </button>
                     <button
                       onClick={() => setOffset(offset + limit)}
-                      disabled={!hasMore}
+                      disabled={users.length < limit}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:opacity-50 disabled:cursor-not-allowed hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
                       Next

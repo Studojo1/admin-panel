@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
+import { getToken } from "~/lib/api";
 import type { Route } from "./+types/chat-logs";
 
 export function meta({}: Route.MetaArgs) {
@@ -60,7 +61,12 @@ export default function ChatLogs() {
     try {
       const params = new URLSearchParams({ limit: limit.toString(), offset: off.toString() });
       if (src) params.append("source", src);
-      const res = await fetch(`/api/chat-logs?${params}`);
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      const res = await fetch(`/api/chat-logs?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setLogs(data.logs || []);
@@ -108,9 +114,9 @@ export default function ChatLogs() {
           </p>
         </motion.div>
 
-        {/* Stats row */}
+        {/* Stats */}
         {stats && (
-          <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-8">
+          <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
             {[
               { label: "Total (30d)", value: stats.total, color: "bg-violet-500" },
               { label: "Last 24h", value: stats.last_24h, color: "bg-pink-500" },
@@ -119,7 +125,7 @@ export default function ChatLogs() {
               { label: "NLP", value: stats.nlp_count, color: "bg-emerald-500" },
               { label: "LLM", value: stats.llm_count, color: "bg-blue-500" },
               { label: "Escalated", value: stats.escalation_count, color: "bg-red-500" },
-              { label: "Avg Confidence", value: `${parseFloat(stats.avg_confidence || "0").toFixed(2)}`, color: "bg-orange-500" },
+              { label: "Avg Conf.", value: parseFloat(stats.avg_confidence || "0").toFixed(2), color: "bg-orange-500" },
             ].map((stat, i) => (
               <motion.div
                 key={stat.label}
@@ -135,7 +141,7 @@ export default function ChatLogs() {
           </div>
         )}
 
-        {/* Filters + refresh */}
+        {/* Filters */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex gap-2">
             {SOURCE_FILTERS.map((f) => (
@@ -144,7 +150,7 @@ export default function ChatLogs() {
                 onClick={() => { setSourceFilter(f.value); setOffset(0); }}
                 className={`rounded-lg border-2 px-3 py-1.5 font-['Satoshi'] text-sm font-medium transition-all ${
                   sourceFilter === f.value
-                    ? "border-neutral-900 bg-neutral-900 text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,0.3)]"
+                    ? "border-neutral-900 bg-neutral-900 text-white"
                     : "border-neutral-300 bg-white text-neutral-700 hover:border-neutral-500"
                 }`}
               >
@@ -155,20 +161,18 @@ export default function ChatLogs() {
           <button
             onClick={() => fetchLogs(offset, sourceFilter)}
             disabled={loading}
-            className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-1.5 font-['Satoshi'] text-sm font-medium shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:bg-neutral-50 disabled:opacity-50"
+            className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-1.5 font-['Satoshi'] text-sm font-medium shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] hover:bg-neutral-50 disabled:opacity-50"
           >
             {loading ? "Loading..." : "Refresh"}
           </button>
         </div>
 
-        {/* Error */}
         {error && (
           <div className="mb-4 rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 font-['Satoshi'] text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {/* Logs table */}
         {loading && !logs.length ? (
           <div className="flex h-48 items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-neutral-900 border-t-violet-500" />
@@ -178,8 +182,8 @@ export default function ChatLogs() {
             <p className="font-['Satoshi'] text-neutral-400">No chat logs found.</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
-            <table className="w-full">
+          <div className="overflow-x-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+            <table className="w-full min-w-[700px]">
               <thead>
                 <tr className="border-b-2 border-neutral-900 bg-neutral-50">
                   {["Time", "Session", "Source", "Conf.", "User Message", "Bot Response"].map((h) => (
@@ -209,7 +213,7 @@ export default function ChatLogs() {
                         })}
                       </td>
                       <td className="px-4 py-3 font-['Satoshi'] text-xs text-neutral-400">
-                        {log.session_id.slice(0, 18)}...
+                        {log.session_id.slice(0, 18)}…
                       </td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2 py-0.5 font-['Satoshi'] text-xs font-semibold ${SOURCE_COLORS[log.source] || "bg-neutral-100 text-neutral-600"}`}>

@@ -12,11 +12,12 @@ export default [
   route("api/companies", "routes/api.companies.tsx"),
   route("assignments", "routes/assignments.tsx"),
   route("dissertations", "routes/dissertations.tsx"),
+  route("outreach-orders", "routes/outreach-orders.tsx"),
+  route("outreach", "routes/outreach.tsx"),
   route("careers", "routes/careers.tsx"),
   route("settings", "routes/settings.tsx"),
   route("api/settings", "routes/api.settings.tsx"),
   route("email-sequences", "routes/email-sequences.tsx"),
-  route("outreach", "routes/outreach.tsx"),
   route("chat-logs", "routes/chat-logs.tsx"),
   route("api/chat-logs", "routes/api.chat-logs.tsx"),
 ] satisfies RouteConfig;
