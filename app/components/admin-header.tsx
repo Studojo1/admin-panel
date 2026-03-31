@@ -7,9 +7,14 @@ const NAV_LINKS = [
   { to: "/", label: "Dashboard" },
   { to: "/users", label: "Users" },
   { to: "/partner-users", label: "Partner Users" },
-  { to: "/outreach-orders", label: "Outreach" },
-  { to: "/chat-logs", label: "Chat Logs" },
+  { to: "/assignments", label: "Assignments" },
+  { to: "/dissertations", label: "Dissertations" },
+  { to: "/outreach-orders", label: "Outreach Orders" },
+  { to: "/outreach", label: "Outreach Stats" },
   { to: "/careers", label: "Careers" },
+  { to: "/chat-logs", label: "Chat Logs" },
+  { to: "/email-sequences", label: "Emails" },
+  { to: "/settings", label: "Settings" },
 ] as const;
 
 export function AdminHeader() {
