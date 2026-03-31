@@ -3,14 +3,14 @@
 FROM oven/bun:1 AS production-dependencies-env
 WORKDIR /src
 COPY package.json bun.lockb* package-lock.json* ./
-RUN bun install --frozen-lockfile --production || npm ci --only=production || true
+RUN bun install --production || npm ci --only=production || true
 
 FROM oven/bun:1 AS build-env
 WORKDIR /src
 ARG VITE_CONTROL_PLANE_URL=http://localhost:8080
 ENV VITE_CONTROL_PLANE_URL=${VITE_CONTROL_PLANE_URL}
 COPY package.json bun.lockb* package-lock.json* ./
-RUN bun install --frozen-lockfile || npm ci || true
+RUN bun install || npm ci || true
 COPY . .
 RUN bun run build || npm run build
 
