@@ -420,3 +420,84 @@ export async function bulkSend(
   );
 }
 
+// ── Outreach Admin ──────────────────────────────────────────────────────
+
+async function outreachAdminFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = await getToken();
+  const base = getControlPlaneUrl();
+
+  if (!token) throw new Error("No authentication token available. Please sign in.");
+
+  const response = await fetch(`${base}/job-outreach${endpoint}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...options.headers,
+    },
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      if (typeof window !== "undefined") sessionStorage.removeItem("admin_token");
+      throw new Error("Authentication failed. Please sign in again.");
+    }
+    const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+    throw new Error(error.detail || error.error?.message || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export interface OutreachOverview {
+  total_orders: number;
+  paid_orders: number;
+  active_orders: number;
+  completed_orders: number;
+  stuck_orders: number;
+  total_revenue_cents: number;
+  total_emails_sent: number;
+  total_emails_replied: number;
+  total_emails_bounced: number;
+  reply_rate_pct: number;
+  orders_by_status: Record<string, number>;
+  monthly_metrics: {
+    month: string;
+    orders_created: number;
+    revenue_cents: number;
+    emails_sent: number;
+    emails_replied: number;
+  }[];
+}
+
+export interface OutreachUser {
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  total_orders: number;
+  active_order_status: string | null;
+  active_order_id: string | null;
+  active_order_updated_at: string | null;
+  is_stuck: boolean;
+  total_paid_cents: number;
+  total_credits: number;
+  used_credits: number;
+  total_emails_sent: number;
+  total_emails_replied: number;
+  total_emails_bounced: number;
+  total_leads: number;
+  created_at: string | null;
+}
+
+export async function getOutreachOverview(): Promise<OutreachOverview> {
+  return outreachAdminFetch<OutreachOverview>("/api/v1/admin/outreach/overview");
+}
+
+export async function getOutreachUsers(limit = 50, offset = 0, search = "", statusFilter = ""): Promise<{ users: OutreachUser[]; total: number }> {
+  const params = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
+  if (search) params.append("search", search);
+  if (statusFilter) params.append("status_filter", statusFilter);
+  return outreachAdminFetch<{ users: OutreachUser[]; total: number }>(`/api/v1/admin/outreach/users?${params}`);
+}
+

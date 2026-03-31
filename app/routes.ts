@@ -16,5 +16,8 @@ export default [
   route("settings", "routes/settings.tsx"),
   route("api/settings", "routes/api.settings.tsx"),
   route("email-sequences", "routes/email-sequences.tsx"),
+  route("outreach", "routes/outreach.tsx"),
+  route("chat-logs", "routes/chat-logs.tsx"),
+  route("api/chat-logs", "routes/api.chat-logs.tsx"),
 ] satisfies RouteConfig;
 
