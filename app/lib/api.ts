@@ -443,3 +443,96 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   return adminFetch<DashboardStats>(`/v1/admin/stats`);
 }
 
+export interface DissertationSubmission {
+  id: string;
+  name: string;
+  email: string;
+  phone_number: string;
+  dissertation_title: string;
+  data_type: string;
+  current_stage: string;
+  additional_notes?: string;
+  form_data?: Record<string, any>;
+  razorpay_order_id?: string;
+  razorpay_payment_id?: string;
+  payment_status: string;
+  amount: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listDissertations(limit = 50, offset = 0): Promise<DissertationSubmission[]> {
+  const response = await adminFetch<{ submissions: DissertationSubmission[] }>(`/v1/admin/dissertations?limit=${limit}&offset=${offset}`);
+  return response.submissions || [];
+}
+
+export interface ScheduledEmail {
+  id: string;
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  email_type: string;
+  scheduled_at: string;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export interface ScheduledEmailsResponse {
+  emails: ScheduledEmail[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function listScheduledEmails(
+  status?: "pending" | "sent" | "due" | "",
+  limit = 100,
+  offset = 0,
+  userID?: string
+): Promise<ScheduledEmailsResponse> {
+  const params = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
+  if (status) params.append("status", status);
+  if (userID) params.append("user_id", userID);
+  return adminFetch<ScheduledEmailsResponse>(`/v1/admin/emails/scheduled?${params.toString()}`);
+}
+
+export async function cancelScheduledEmail(id: string): Promise<{ status: string }> {
+  return adminFetch<{ status: string }>(`/v1/admin/emails/scheduled/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function triggerEmail(
+  routingKey: string,
+  event: Record<string, unknown>
+): Promise<{ message: string }> {
+  return adminFetch<{ message: string }>(`/v1/admin/emails/trigger`, {
+    method: "POST",
+    body: JSON.stringify({ routing_key: routingKey, event }),
+  });
+}
+
+export async function bulkSendPreview(
+  withinDays: number
+): Promise<{ count: number; within_days: number }> {
+  const params = new URLSearchParams();
+  if (withinDays > 0) params.append("within_days", withinDays.toString());
+  return adminFetch<{ count: number; within_days: number }>(
+    `/v1/admin/emails/bulk-send/preview?${params.toString()}`
+  );
+}
+
+export async function bulkSend(
+  emailType: string,
+  withinDays: number
+): Promise<{ message: string; total: number }> {
+  return adminFetch<{ message: string; total: number }>(
+    `/v1/admin/emails/bulk-send`,
+    {
+      method: "POST",
+      body: JSON.stringify({ email_type: emailType, within_days: withinDays }),
+    }
+  );
+}
+
