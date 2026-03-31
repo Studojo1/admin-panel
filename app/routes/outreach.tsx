@@ -17,9 +17,9 @@ import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import {
   getOutreachOverview,
-  getOutreachUsers,
+  listOutreachUsers,
   type OutreachOverview,
-  type OutreachUser,
+  type OutreachUserRow,
 } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/outreach";
@@ -61,7 +61,7 @@ function StatusBadge({ status, stuck }: { status: string | null; stuck?: boolean
 export default function Outreach() {
   const { isAuthorized, isPending } = useAdminGuard();
   const [overview, setOverview] = useState<OutreachOverview | null>(null);
-  const [users, setUsers] = useState<OutreachUser[]>([]);
+  const [users, setUsers] = useState<OutreachUserRow[]>([]);
   const [usersTotal, setUsersTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(true);
@@ -86,7 +86,7 @@ export default function Outreach() {
   const fetchUsers = async (off = 0, q = "", sf = "") => {
     setUsersLoading(true);
     try {
-      const data = await getOutreachUsers(limit, off, q, sf);
+      const data = await listOutreachUsers(limit, off, q, sf);
       setUsers(data.users || []);
       setUsersTotal(data.total || 0);
     } catch (e: any) {
