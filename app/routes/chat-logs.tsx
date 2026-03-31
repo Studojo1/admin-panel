@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
+import { getToken } from "~/lib/api";
 import type { Route } from "./+types/chat-logs";
 
 export function meta({}: Route.MetaArgs) {
@@ -60,7 +61,10 @@ export default function ChatLogs() {
     try {
       const params = new URLSearchParams({ limit: limit.toString(), offset: off.toString() });
       if (src) params.append("source", src);
-      const res = await fetch(`/api/chat-logs?${params}`);
+      const token = await getToken();
+      const res = await fetch(`/api/chat-logs?${params}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setLogs(data.logs || []);
