@@ -23,5 +23,6 @@ export default [
   route("analytics", "routes/analytics.tsx"),
   route("utm-builder", "routes/utm-builder.tsx"),
   route("api/posthog", "routes/api.posthog.tsx"),
+  route("api/analytics", "routes/api.analytics.tsx"),
 ] satisfies RouteConfig;
 

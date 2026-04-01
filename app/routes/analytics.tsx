@@ -249,24 +249,23 @@ export default function Analytics() {
     }
 
     try {
-      const [statsRes, signupsCountRes, dailyEventsRes, dailyNewUsersRes, topRes] = await Promise.all([
+      const [statsRes, signupsCountRes, dailyEventsRes, dailySignupsPgRes, topRes] = await Promise.all([
         // Visitors, payments, campaigns from events
         safeQuery({
           kind: "HogQLQuery",
           query: `SELECT uniq(person_id) as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef}`,
         }),
-        // Total new signups via persons REST API — most accurate, uses created_after/before
-        phGet("persons_count", { start: startDate, end: endDate }).catch(() => ({ count: 0 })),
+        // Total new signups — direct Postgres query on user table
+        fetch(`/api/analytics?type=signups_count&start=${startDate}&end=${endDate}`, { credentials: "include" })
+          .then((r) => r.json()).catch(() => ({ count: 0 })),
         // Daily visitors/payments/campaigns
         safeQuery({
           kind: "HogQLQuery",
           query: `SELECT toDate(timestamp) as day, uniqIf(person_id, event = '$pageview') as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef} GROUP BY day ORDER BY day ASC`,
         }),
-        // Daily new users = persons whose FIRST ever event falls within the date range, grouped by day
-        safeQuery({
-          kind: "HogQLQuery",
-          query: `SELECT toDate(first_event) as day, count() as signups FROM (SELECT person_id, min(timestamp) as first_event FROM events GROUP BY person_id HAVING toDate(first_event) >= '${startDate}' AND toDate(first_event) <= '${endDate}') GROUP BY day ORDER BY day ASC`,
-        }),
+        // Daily new signups — direct Postgres query on user table
+        fetch(`/api/analytics?type=signups_daily&start=${startDate}&end=${endDate}`, { credentials: "include" })
+          .then((r) => r.json()).catch(() => ({ rows: [] })),
         // Top pages — use full expression in WHERE, not alias
         safeQuery({
           kind: "HogQLQuery",
@@ -285,9 +284,8 @@ export default function Analytics() {
         eventsMap[day] = { visitors: r[1] ?? 0, payments: r[2] ?? 0, campaigns: r[3] ?? 0 };
       }
       const signupsMap: Record<string, number> = {};
-      for (const r of (dailyNewUsersRes?.results ?? [])) {
-        const day = String(r[0]).split("T")[0];
-        signupsMap[day] = r[1] ?? 0;
+      for (const r of ((dailySignupsPgRes as any)?.rows ?? [])) {
+        signupsMap[String(r.day).split("T")[0]] = r.signups ?? 0;
       }
       const allDays = Array.from(new Set([...Object.keys(eventsMap), ...Object.keys(signupsMap)])).sort();
       setDaily(allDays.map((day) => ({
