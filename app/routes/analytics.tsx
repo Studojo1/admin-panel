@@ -249,26 +249,23 @@ export default function Analytics() {
     }
 
     try {
-      const [statsRes, signupsRes, dailyEventsRes, dailySignupsRes, topRes] = await Promise.all([
+      const [statsRes, signupsCountRes, dailyEventsRes, dailyNewUsersRes, topRes] = await Promise.all([
         // Visitors, payments, campaigns from events
         safeQuery({
           kind: "HogQLQuery",
           query: `SELECT uniq(person_id) as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef}`,
         }),
-        // New person sign-ups from persons table (accurate — matches your DB)
-        safeQuery({
-          kind: "HogQLQuery",
-          query: `SELECT count() as signups FROM persons WHERE ${pf}`,
-        }),
+        // Total new signups via persons REST API — most accurate, uses created_after/before
+        phGet("persons_count", { start: startDate, end: endDate }).catch(() => ({ count: 0 })),
         // Daily visitors/payments/campaigns
         safeQuery({
           kind: "HogQLQuery",
           query: `SELECT toDate(timestamp) as day, uniqIf(person_id, event = '$pageview') as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef} GROUP BY day ORDER BY day ASC`,
         }),
-        // Daily new sign-ups from persons table
+        // Daily new users = persons whose FIRST ever event falls within the date range, grouped by day
         safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT toDate(created_at) as day, count() as signups FROM persons WHERE ${pf} GROUP BY day ORDER BY day ASC`,
+          query: `SELECT toDate(first_event) as day, count() as signups FROM (SELECT person_id, min(timestamp) as first_event FROM events GROUP BY person_id HAVING toDate(first_event) >= '${startDate}' AND toDate(first_event) <= '${endDate}') GROUP BY day ORDER BY day ASC`,
         }),
         // Top pages — use full expression in WHERE, not alias
         safeQuery({
@@ -278,17 +275,17 @@ export default function Analytics() {
       ]);
 
       const row = statsRes?.results?.[0] ?? [0, 0, 0];
-      const signupCount = signupsRes?.results?.[0]?.[0] ?? 0;
+      const signupCount = (signupsCountRes as any)?.count ?? 0;
       setStats({ visitors: row[0] ?? 0, signups: signupCount, payments: row[1] ?? 0, campaigns: row[2] ?? 0 });
 
-      // Merge daily events + daily signups by date
+      // Merge daily events + daily new users by date
       const eventsMap: Record<string, { visitors: number; payments: number; campaigns: number }> = {};
       for (const r of (dailyEventsRes?.results ?? [])) {
         const day = String(r[0]).split("T")[0];
         eventsMap[day] = { visitors: r[1] ?? 0, payments: r[2] ?? 0, campaigns: r[3] ?? 0 };
       }
       const signupsMap: Record<string, number> = {};
-      for (const r of (dailySignupsRes?.results ?? [])) {
+      for (const r of (dailyNewUsersRes?.results ?? [])) {
         const day = String(r[0]).split("T")[0];
         signupsMap[day] = r[1] ?? 0;
       }

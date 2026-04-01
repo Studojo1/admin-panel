@@ -69,6 +69,18 @@ export async function loader({ request }: { request: Request }) {
       return Response.json(data, { status: res.status });
     }
 
+    if (type === "persons_count") {
+      // Returns total count of persons created within a date range
+      const start = url.searchParams.get("start");
+      const end = url.searchParams.get("end");
+      let qs = "?limit=1";
+      if (start) qs += `&created_after=${encodeURIComponent(start + "T00:00:00Z")}`;
+      if (end) qs += `&created_before=${encodeURIComponent(end + "T23:59:59Z")}`;
+      const res = await fetch(`${BASE}/persons/${qs}`, { headers: phHeaders() });
+      const data = await res.json();
+      return Response.json({ count: data.count ?? 0 }, { status: res.status });
+    }
+
     if (type === "person_events") {
       const personId = url.searchParams.get("person_id");
       if (!personId) return Response.json({ error: "person_id required" }, { status: 400 });
