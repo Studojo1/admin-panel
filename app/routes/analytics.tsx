@@ -216,44 +216,37 @@ export default function Analytics() {
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
     const interval = rangeToInterval(range);
+
+    async function safeQuery(query: object) {
+      try { return await phQuery(query); } catch { return null; }
+    }
+
     try {
       const [statsRes, signupsRes, dailyEventsRes, dailySignupsRes, topRes] = await Promise.all([
         // Visitors, payments, campaigns from events
-        phQuery({
+        safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT
-            uniq(person_id) as visitors,
-            countIf(event = 'payment_confirmed') as payments,
-            countIf(event = 'campaign_started') as campaigns
-          FROM events WHERE timestamp > now() - ${interval}`,
+          query: `SELECT uniq(person_id) as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE timestamp > now() - ${interval}`,
         }),
         // New person sign-ups from persons table (accurate — matches your DB)
-        phQuery({
+        safeQuery({
           kind: "HogQLQuery",
           query: `SELECT count() as signups FROM persons WHERE created_at > now() - ${interval}`,
         }),
         // Daily visitors/payments/campaigns
-        phQuery({
+        safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT
-            toDate(timestamp) as day,
-            uniqIf(person_id, event = '$pageview') as visitors,
-            countIf(event = 'payment_confirmed') as payments,
-            countIf(event = 'campaign_started') as campaigns
-          FROM events WHERE timestamp > now() - ${interval}
-          GROUP BY day ORDER BY day ASC`,
+          query: `SELECT toDate(timestamp) as day, uniqIf(person_id, event = '$pageview') as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE timestamp > now() - ${interval} GROUP BY day ORDER BY day ASC`,
         }),
         // Daily new sign-ups from persons table
-        phQuery({
+        safeQuery({
           kind: "HogQLQuery",
           query: `SELECT toDate(created_at) as day, count() as signups FROM persons WHERE created_at > now() - ${interval} GROUP BY day ORDER BY day ASC`,
         }),
-        phQuery({
+        // Top pages — use full expression in WHERE, not alias
+        safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT properties.$current_url as url, count() as views
-          FROM events WHERE event = '$pageview' AND timestamp > now() - ${interval}
-          AND url IS NOT NULL AND url != ''
-          GROUP BY url ORDER BY views DESC LIMIT 10`,
+          query: `SELECT properties.$current_url as url, count() as views FROM events WHERE event = '$pageview' AND timestamp > now() - ${interval} AND properties.$current_url IS NOT NULL AND properties.$current_url != '' GROUP BY url ORDER BY views DESC LIMIT 10`,
         }),
       ]);
 
@@ -599,7 +592,7 @@ export default function Analytics() {
                 {/* Stat cards */}
                 <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
                   <StatCard label="Unique Visitors" value={stats?.visitors ?? 0} color="violet" />
-                  <StatCard label="Resume Uploads" value={stats?.signups ?? 0} color="emerald" />
+                  <StatCard label="New Signups" value={stats?.signups ?? 0} color="emerald" />
                   <StatCard label="Payments" value={stats?.payments ?? 0} color="amber" />
                   <StatCard label="Campaigns Started" value={stats?.campaigns ?? 0} color="cyan" />
                 </div>
