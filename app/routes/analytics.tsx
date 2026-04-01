@@ -249,23 +249,22 @@ export default function Analytics() {
     }
 
     try {
-      const [statsRes, signupsCountRes, dailyEventsRes, dailySignupsPgRes, topRes] = await Promise.all([
+      const [statsRes, signupsRes, dailyEventsRes, , topRes] = await Promise.all([
         // Visitors, payments, campaigns from events
         safeQuery({
           kind: "HogQLQuery",
           query: `SELECT uniq(person_id) as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef}`,
         }),
-        // Total new signups — direct Postgres query on user table
-        fetch(`/api/analytics?type=signups_count&start=${startDate}&end=${endDate}`, { credentials: "include" })
-          .then((r) => r.json()).catch(() => ({ count: 0 })),
+        // Total new signups + daily breakdown via outreach backend (real User table)
+        fetch(`/api/analytics?start=${startDate}&end=${endDate}`, { credentials: "include" })
+          .then((r) => r.json()).catch(() => ({ count: 0, daily: [] })),
         // Daily visitors/payments/campaigns
         safeQuery({
           kind: "HogQLQuery",
           query: `SELECT toDate(timestamp) as day, uniqIf(person_id, event = '$pageview') as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef} GROUP BY day ORDER BY day ASC`,
         }),
-        // Daily new signups — direct Postgres query on user table
-        fetch(`/api/analytics?type=signups_daily&start=${startDate}&end=${endDate}`, { credentials: "include" })
-          .then((r) => r.json()).catch(() => ({ rows: [] })),
+        // (signups daily comes bundled in the signups_count response above)
+        Promise.resolve(null),
         // Top pages — use full expression in WHERE, not alias
         safeQuery({
           kind: "HogQLQuery",
@@ -274,17 +273,17 @@ export default function Analytics() {
       ]);
 
       const row = statsRes?.results?.[0] ?? [0, 0, 0];
-      const signupCount = (signupsCountRes as any)?.count ?? 0;
+      const signupCount = (signupsRes as any)?.count ?? 0;
       setStats({ visitors: row[0] ?? 0, signups: signupCount, payments: row[1] ?? 0, campaigns: row[2] ?? 0 });
 
-      // Merge daily events + daily new users by date
+      // Merge daily events + daily signups by date
       const eventsMap: Record<string, { visitors: number; payments: number; campaigns: number }> = {};
       for (const r of (dailyEventsRes?.results ?? [])) {
         const day = String(r[0]).split("T")[0];
         eventsMap[day] = { visitors: r[1] ?? 0, payments: r[2] ?? 0, campaigns: r[3] ?? 0 };
       }
       const signupsMap: Record<string, number> = {};
-      for (const r of ((dailySignupsPgRes as any)?.rows ?? [])) {
+      for (const r of ((signupsRes as any)?.daily ?? [])) {
         signupsMap[String(r.day).split("T")[0]] = r.signups ?? 0;
       }
       const allDays = Array.from(new Set([...Object.keys(eventsMap), ...Object.keys(signupsMap)])).sort();

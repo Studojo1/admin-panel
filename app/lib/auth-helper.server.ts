@@ -41,6 +41,43 @@ export async function getUserInfo(userId: string): Promise<UserInfo | null> {
 }
 
 /**
+ * Extract raw JWT string from request (Authorization header or session cookie via share-token).
+ * Returns null if no valid token found.
+ */
+export async function getTokenFromRequest(request: Request): Promise<string | null> {
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    return authHeader.substring(7);
+  }
+
+  const frontendUrl = process.env.VITE_AUTH_URL || "http://localhost:3000";
+  const cookies = request.headers.get("Cookie");
+  if (cookies) {
+    try {
+      const origin = request.headers.get("Origin") || `https://${new URL(frontendUrl).hostname}`;
+      const response = await fetch(`${frontendUrl}/api/auth/share-token`, {
+        method: "GET",
+        headers: {
+          "Cookie": cookies,
+          "Content-Type": "application/json",
+          "User-Agent": request.headers.get("User-Agent") || "Admin-Panel/1.0",
+          "Origin": origin,
+          "Referer": request.headers.get("Referer") || `${origin}/`,
+        },
+        redirect: "manual",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.token) return data.token as string;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
+/**
  * Get user info from Authorization header with verified JWT token
  */
 export async function getUserFromRequest(request: Request): Promise<UserInfo | null> {
