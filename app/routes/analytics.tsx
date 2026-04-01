@@ -57,7 +57,20 @@ async function phGet(type: string, params: Record<string, string> = {}) {
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type Tab = "overview" | "funnels" | "sessions" | "users" | "cohorts";
-type Range = "7d" | "30d" | "90d";
+type Preset = "7d" | "30d" | "90d" | "custom";
+
+function isoDate(d: Date) {
+  return d.toISOString().split("T")[0];
+}
+function daysAgo(n: number) {
+  return isoDate(new Date(Date.now() - n * 86400000));
+}
+function eventsFilter(start: string, end: string) {
+  return `toDate(timestamp) >= '${start}' AND toDate(timestamp) <= '${end}'`;
+}
+function personsFilter(start: string, end: string) {
+  return `toDate(created_at) >= '${start}' AND toDate(created_at) <= '${end}'`;
+}
 
 interface OverviewStats {
   visitors: number;
@@ -114,10 +127,6 @@ interface Cohort {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-
-function rangeToInterval(r: Range) {
-  return r === "7d" ? "INTERVAL 7 DAY" : r === "30d" ? "INTERVAL 30 DAY" : "INTERVAL 90 DAY";
-}
 
 function fmtDuration(secs: number) {
   if (!secs) return "0s";
@@ -177,7 +186,24 @@ const TABS: { id: Tab; label: string }[] = [
 export default function Analytics() {
   const { isAuthorized } = useAdminGuard();
   const [tab, setTab] = useState<Tab>("overview");
-  const [range, setRange] = useState<Range>("30d");
+  const [preset, setPreset] = useState<Preset>("30d");
+  const [startDate, setStartDate] = useState(() => daysAgo(30));
+  const [endDate, setEndDate] = useState(() => isoDate(new Date()));
+  const [pendingStart, setPendingStart] = useState(startDate);
+  const [pendingEnd, setPendingEnd] = useState(endDate);
+
+  function applyPreset(days: number, p: Preset) {
+    const s = daysAgo(days);
+    const e = isoDate(new Date());
+    setStartDate(s); setEndDate(e);
+    setPendingStart(s); setPendingEnd(e);
+    setPreset(p);
+  }
+  function applyCustom() {
+    setStartDate(pendingStart);
+    setEndDate(pendingEnd);
+    setPreset("custom");
+  }
 
   // Overview
   const [stats, setStats] = useState<OverviewStats | null>(null);
@@ -215,7 +241,8 @@ export default function Analytics() {
   // ── Overview loader ──────────────────────────────────────────────────────
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
-    const interval = rangeToInterval(range);
+    const ef = eventsFilter(startDate, endDate);
+    const pf = personsFilter(startDate, endDate);
 
     async function safeQuery(query: object) {
       try { return await phQuery(query); } catch { return null; }
@@ -226,27 +253,27 @@ export default function Analytics() {
         // Visitors, payments, campaigns from events
         safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT uniq(person_id) as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE timestamp > now() - ${interval}`,
+          query: `SELECT uniq(person_id) as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef}`,
         }),
         // New person sign-ups from persons table (accurate — matches your DB)
         safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT count() as signups FROM persons WHERE created_at > now() - ${interval}`,
+          query: `SELECT count() as signups FROM persons WHERE ${pf}`,
         }),
         // Daily visitors/payments/campaigns
         safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT toDate(timestamp) as day, uniqIf(person_id, event = '$pageview') as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE timestamp > now() - ${interval} GROUP BY day ORDER BY day ASC`,
+          query: `SELECT toDate(timestamp) as day, uniqIf(person_id, event = '$pageview') as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef} GROUP BY day ORDER BY day ASC`,
         }),
         // Daily new sign-ups from persons table
         safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT toDate(created_at) as day, count() as signups FROM persons WHERE created_at > now() - ${interval} GROUP BY day ORDER BY day ASC`,
+          query: `SELECT toDate(created_at) as day, count() as signups FROM persons WHERE ${pf} GROUP BY day ORDER BY day ASC`,
         }),
         // Top pages — use full expression in WHERE, not alias
         safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT properties.$current_url as url, count() as views FROM events WHERE event = '$pageview' AND timestamp > now() - ${interval} AND properties.$current_url IS NOT NULL AND properties.$current_url != '' GROUP BY url ORDER BY views DESC LIMIT 10`,
+          query: `SELECT properties.$current_url as url, count() as views FROM events WHERE event = '$pageview' AND ${ef} AND properties.$current_url IS NOT NULL AND properties.$current_url != '' GROUP BY url ORDER BY views DESC LIMIT 10`,
         }),
       ]);
 
@@ -285,12 +312,12 @@ export default function Analytics() {
     } finally {
       setOverviewLoading(false);
     }
-  }, [range]);
+  }, [startDate, endDate]);
 
   // ── Funnels loader ───────────────────────────────────────────────────────
   const loadFunnels = useCallback(async () => {
     setFunnelsLoading(true);
-    const interval = rangeToInterval(range);
+    const ef = eventsFilter(startDate, endDate);
 
     async function computeFunnel(steps: { name: string; event: string }[]) {
       // Use HogQL to count unique persons per step within the window
@@ -299,7 +326,7 @@ export default function Analytics() {
         .join(", ");
       const res = await phQuery({
         kind: "HogQLQuery",
-        query: `SELECT ${selects} FROM events WHERE timestamp > now() - ${interval}`,
+        query: `SELECT ${selects} FROM events WHERE ${ef}`,
       });
       const row: number[] = res?.results?.[0] ?? steps.map(() => 0);
       const first = row[0] ?? 1;
@@ -342,7 +369,7 @@ export default function Analytics() {
     } finally {
       setFunnelsLoading(false);
     }
-  }, [range]);
+  }, [startDate, endDate]);
 
   // ── Sessions loader ──────────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
@@ -396,12 +423,12 @@ export default function Analytics() {
   useEffect(() => {
     if (!isAuthorized) return;
     if (tab === "overview") loadOverview();
-  }, [isAuthorized, tab, range, loadOverview]);
+  }, [isAuthorized, tab, startDate, endDate, loadOverview]);
 
   useEffect(() => {
     if (!isAuthorized) return;
     if (tab === "funnels") loadFunnels();
-  }, [isAuthorized, tab, range, loadFunnels]);
+  }, [isAuthorized, tab, startDate, endDate, loadFunnels]);
 
   useEffect(() => {
     if (!isAuthorized) return;
@@ -472,8 +499,8 @@ export default function Analytics() {
         backgroundColor: "rgba(139,92,246,0.12)",
         borderWidth: 2,
         fill: true,
-        tension: 0.4,
-        pointRadius: 3,
+        tension: 0.15,
+        pointRadius: 4,
         pointHoverRadius: 5,
         pointBackgroundColor: "#8b5cf6",
         pointBorderColor: "#fff",
@@ -486,8 +513,8 @@ export default function Analytics() {
         backgroundColor: "rgba(16,185,129,0.08)",
         borderWidth: 2,
         fill: true,
-        tension: 0.4,
-        pointRadius: 3,
+        tension: 0.15,
+        pointRadius: 4,
         pointHoverRadius: 5,
         pointBackgroundColor: "#10b981",
         pointBorderColor: "#fff",
@@ -543,22 +570,48 @@ export default function Analytics() {
             </p>
           </div>
 
-          {/* Date range — only for data tabs */}
-          {(tab === "overview" || tab === "funnels") && (
-            <div className="flex gap-2">
-              {(["7d", "30d", "90d"] as Range[]).map((r) => (
+          {/* Date range picker — shown on all tabs */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Quick presets */}
+            {(["7d", "30d", "90d"] as Preset[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => applyPreset(p === "7d" ? 7 : p === "30d" ? 30 : 90, p)}
+                className={`rounded-lg border-2 border-neutral-900 px-3 py-1.5 font-['Satoshi'] text-sm font-medium shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:translate-x-px hover:translate-y-px hover:shadow-none ${
+                  preset === p ? "bg-violet-500 text-white" : "bg-white text-neutral-900"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+            {/* Custom date inputs */}
+            <div className="flex items-center gap-1.5 rounded-lg border-2 border-neutral-900 bg-white px-3 py-1.5 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]">
+              <input
+                type="date"
+                value={pendingStart}
+                max={pendingEnd}
+                onChange={(e) => { setPendingStart(e.target.value); setPreset("custom"); }}
+                className="font-['Satoshi'] text-sm text-neutral-900 outline-none"
+              />
+              <span className="text-neutral-400">→</span>
+              <input
+                type="date"
+                value={pendingEnd}
+                min={pendingStart}
+                max={isoDate(new Date())}
+                onChange={(e) => { setPendingEnd(e.target.value); setPreset("custom"); }}
+                className="font-['Satoshi'] text-sm text-neutral-900 outline-none"
+              />
+              {preset === "custom" && (
                 <button
-                  key={r}
-                  onClick={() => setRange(r)}
-                  className={`rounded-lg border-2 border-neutral-900 px-3 py-1.5 font-['Satoshi'] text-sm font-medium shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:translate-x-px hover:translate-y-px hover:shadow-none ${
-                    range === r ? "bg-violet-500 text-white" : "bg-white text-neutral-900"
-                  }`}
+                  onClick={applyCustom}
+                  className="ml-1 rounded-md bg-violet-500 px-2 py-0.5 font-['Satoshi'] text-xs font-semibold text-white"
                 >
-                  {r}
+                  Apply
                 </button>
-              ))}
+              )}
             </div>
-          )}
+          </div>
         </div>
 
         {/* Tabs */}
