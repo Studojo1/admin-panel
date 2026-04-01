@@ -72,14 +72,26 @@ export async function loader({ request }: { request: Request }) {
     if (type === "person_events") {
       const personId = url.searchParams.get("person_id");
       if (!personId) return Response.json({ error: "person_id required" }, { status: 400 });
-      // Use HogQL to get last 10 events for this person
+      // Use HogQL to get last 15 events with key properties for this person
       const res = await fetch(`${BASE}/query/`, {
         method: "POST",
         headers: phHeaders(),
         body: JSON.stringify({
           query: {
             kind: "HogQLQuery",
-            query: `SELECT event, timestamp, properties FROM events WHERE person_id = '${personId}' ORDER BY timestamp DESC LIMIT 10`,
+            query: `SELECT event, timestamp,
+              properties.$pathname,
+              properties.$current_url,
+              properties.file_type,
+              properties.tier,
+              properties.amount_cents,
+              properties.campaign_id,
+              properties.leads_found,
+              properties.enriched_count,
+              properties.email_address,
+              properties.error_type,
+              properties.coupon_code
+            FROM events WHERE person_id = '${personId}' ORDER BY timestamp DESC LIMIT 15`,
           },
         }),
       });

@@ -217,26 +217,36 @@ export default function Analytics() {
     setOverviewLoading(true);
     const interval = rangeToInterval(range);
     try {
-      const [statsRes, dailyRes, topRes] = await Promise.all([
+      const [statsRes, signupsRes, dailyEventsRes, dailySignupsRes, topRes] = await Promise.all([
+        // Visitors, payments, campaigns from events
         phQuery({
           kind: "HogQLQuery",
           query: `SELECT
             uniq(person_id) as visitors,
-            countIf(event = 'resume_uploaded') as signups,
             countIf(event = 'payment_confirmed') as payments,
             countIf(event = 'campaign_started') as campaigns
           FROM events WHERE timestamp > now() - ${interval}`,
         }),
+        // New person sign-ups from persons table (accurate — matches your DB)
+        phQuery({
+          kind: "HogQLQuery",
+          query: `SELECT count() as signups FROM persons WHERE created_at > now() - ${interval}`,
+        }),
+        // Daily visitors/payments/campaigns
         phQuery({
           kind: "HogQLQuery",
           query: `SELECT
             toDate(timestamp) as day,
             uniqIf(person_id, event = '$pageview') as visitors,
-            countIf(event = 'resume_uploaded') as signups,
             countIf(event = 'payment_confirmed') as payments,
             countIf(event = 'campaign_started') as campaigns
           FROM events WHERE timestamp > now() - ${interval}
           GROUP BY day ORDER BY day ASC`,
+        }),
+        // Daily new sign-ups from persons table
+        phQuery({
+          kind: "HogQLQuery",
+          query: `SELECT toDate(created_at) as day, count() as signups FROM persons WHERE created_at > now() - ${interval} GROUP BY day ORDER BY day ASC`,
         }),
         phQuery({
           kind: "HogQLQuery",
@@ -247,18 +257,29 @@ export default function Analytics() {
         }),
       ]);
 
-      const row = statsRes?.results?.[0] ?? [0, 0, 0, 0];
-      setStats({ visitors: row[0] ?? 0, signups: row[1] ?? 0, payments: row[2] ?? 0, campaigns: row[3] ?? 0 });
+      const row = statsRes?.results?.[0] ?? [0, 0, 0];
+      const signupCount = signupsRes?.results?.[0]?.[0] ?? 0;
+      setStats({ visitors: row[0] ?? 0, signups: signupCount, payments: row[1] ?? 0, campaigns: row[2] ?? 0 });
 
-      setDaily(
-        (dailyRes?.results ?? []).map((r: any[]) => ({
-          day: r[0]?.split("T")[0] ?? r[0],
-          visitors: r[1] ?? 0,
-          signups: r[2] ?? 0,
-          payments: r[3] ?? 0,
-          campaigns: r[4] ?? 0,
-        }))
-      );
+      // Merge daily events + daily signups by date
+      const eventsMap: Record<string, { visitors: number; payments: number; campaigns: number }> = {};
+      for (const r of (dailyEventsRes?.results ?? [])) {
+        const day = String(r[0]).split("T")[0];
+        eventsMap[day] = { visitors: r[1] ?? 0, payments: r[2] ?? 0, campaigns: r[3] ?? 0 };
+      }
+      const signupsMap: Record<string, number> = {};
+      for (const r of (dailySignupsRes?.results ?? [])) {
+        const day = String(r[0]).split("T")[0];
+        signupsMap[day] = r[1] ?? 0;
+      }
+      const allDays = Array.from(new Set([...Object.keys(eventsMap), ...Object.keys(signupsMap)])).sort();
+      setDaily(allDays.map((day) => ({
+        day,
+        visitors: eventsMap[day]?.visitors ?? 0,
+        signups: signupsMap[day] ?? 0,
+        payments: eventsMap[day]?.payments ?? 0,
+        campaigns: eventsMap[day]?.campaigns ?? 0,
+      })));
 
       setTopPages(
         (topRes?.results ?? []).map((r: any[]) => ({
@@ -902,20 +923,13 @@ export default function Analytics() {
                             >
                               <div className="border-t border-neutral-100 bg-neutral-50 px-6 py-4">
                                 <p className="mb-2 font-['Satoshi'] text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                                  Last 10 Events
+                                  Recent Activity (last 15 events)
                                 </p>
                                 {personEvents[p.uuid] ? (
                                   personEvents[p.uuid].length > 0 ? (
-                                    <div className="space-y-1">
+                                    <div className="space-y-1.5">
                                       {personEvents[p.uuid].map((ev: any[], i: number) => (
-                                        <div key={i} className="flex items-center gap-3">
-                                          <span className="font-['Satoshi'] text-xs text-neutral-400 w-36 shrink-0">
-                                            {new Date(ev[1]).toLocaleString()}
-                                          </span>
-                                          <span className="font-['Satoshi'] text-xs font-medium text-violet-700 bg-violet-50 px-2 py-0.5 rounded">
-                                            {ev[0]}
-                                          </span>
-                                        </div>
+                                        <EventRow key={i} ev={ev} />
                                       ))}
                                     </div>
                                   ) : (
@@ -1137,6 +1151,52 @@ function FunnelChart({
           Overall conversion: {steps[0]?.count > 0 ? Math.round((steps[steps.length - 1].count / steps[0].count) * 100) : 0}%
           &nbsp;({steps[0]?.count.toLocaleString()} → {steps[steps.length - 1]?.count.toLocaleString()})
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ev columns: [event, timestamp, $pathname, $current_url, file_type, tier, amount_cents, campaign_id, leads_found, enriched_count, email_address, error_type, coupon_code]
+function EventRow({ ev }: { ev: any[] }) {
+  const [event, timestamp, pathname, currentUrl, fileType, tier, amountCents, campaignId, leadsFound, enrichedCount, emailAddress, errorType, couponCode] = ev;
+
+  const labels: Record<string, { label: string; color: string; detail?: string }> = {
+    "$pageview": { label: "Viewed page", color: "text-neutral-500 bg-neutral-100", detail: pathname || currentUrl?.replace(/^https?:\/\/[^/]+/, "") || "" },
+    "$autocapture": { label: "Clicked something", color: "text-neutral-500 bg-neutral-100", detail: pathname || "" },
+    "resume_uploaded": { label: "Uploaded resume", color: "text-blue-700 bg-blue-50", detail: fileType ? `type: ${fileType}` : "" },
+    "profile_quiz_completed": { label: "Completed onboarding quiz", color: "text-blue-700 bg-blue-50" },
+    "payment_order_created": { label: "Started checkout", color: "text-amber-700 bg-amber-50", detail: tier ? `tier: ${tier}` : "" },
+    "coupon_applied": { label: "Applied coupon", color: "text-amber-700 bg-amber-50", detail: couponCode || "" },
+    "payment_confirmed": { label: "Paid ✓", color: "text-emerald-700 bg-emerald-50", detail: [tier, amountCents ? `₹${Math.round(amountCents / 100)}` : ""].filter(Boolean).join(" · ") },
+    "lead_discovery_started": { label: "Started lead search", color: "text-violet-700 bg-violet-50" },
+    "lead_discovery_completed": { label: "Leads found", color: "text-violet-700 bg-violet-50", detail: leadsFound ? `${leadsFound} leads` : "" },
+    "enrichment_started": { label: "Enrichment started", color: "text-violet-700 bg-violet-50" },
+    "enrichment_completed": { label: "Enrichment done", color: "text-violet-700 bg-violet-50", detail: enrichedCount ? `${enrichedCount} enriched` : "" },
+    "gmail_connected": { label: "Connected Gmail", color: "text-emerald-700 bg-emerald-50", detail: emailAddress || "" },
+    "campaign_created": { label: "Created campaign", color: "text-cyan-700 bg-cyan-50" },
+    "campaign_started": { label: "Launched campaign 🚀", color: "text-emerald-700 bg-emerald-50", detail: campaignId ? `campaign #${campaignId}` : "" },
+    "campaign_cancelled": { label: "Cancelled campaign", color: "text-red-700 bg-red-50" },
+    "test_launch_started": { label: "Ran test emails", color: "text-cyan-700 bg-cyan-50" },
+    "email_sent": { label: "Email sent", color: "text-cyan-700 bg-cyan-50", detail: campaignId ? `campaign #${campaignId}` : "" },
+    "email_failed": { label: "Email failed", color: "text-red-700 bg-red-50", detail: errorType || "" },
+  };
+
+  const meta = labels[event] ?? { label: event, color: "text-neutral-600 bg-neutral-100" };
+
+  return (
+    <div className="flex items-start gap-3">
+      <span className="w-32 shrink-0 font-['Satoshi'] text-xs text-neutral-400 mt-0.5">
+        {new Date(timestamp).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+      </span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={`font-['Satoshi'] text-xs font-semibold px-2 py-0.5 rounded ${meta.color}`}>
+          {meta.label}
+        </span>
+        {meta.detail && (
+          <span className="font-['Satoshi'] text-xs text-neutral-500 font-mono">
+            {meta.detail}
+          </span>
+        )}
       </div>
     </div>
   );
