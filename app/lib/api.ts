@@ -449,7 +449,7 @@ export interface SignupsData {
 }
 
 export async function getSignups(start: string, end: string): Promise<SignupsData> {
-  return adminFetch<SignupsData>(`/v1/admin/outreach/signups?start=${start}&end=${end}`);
+  return adminFetch<SignupsData>(`/v1/outreach/admin/outreach/signups?start=${start}&end=${end}`);
 }
 
 export interface DissertationSubmission {
