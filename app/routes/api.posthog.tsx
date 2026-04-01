@@ -33,8 +33,8 @@ export async function loader({ request }: { request: Request }) {
       const limit = url.searchParams.get("limit") ?? "20";
       const offset = url.searchParams.get("offset") ?? "0";
       const minDuration = url.searchParams.get("min_duration");
-      let qs = `?limit=${limit}&offset=${offset}&order=-start_time`;
-      if (minDuration) qs += `&recording_duration_filter_type=duration&duration=${minDuration}&duration_type_filter=gt`;
+      let qs = `?limit=${limit}&offset=${offset}`;
+      if (minDuration) qs += `&duration_filter_type=duration_gt&duration=${minDuration}`;
       const res = await fetch(`${BASE}/session_recordings/${qs}`, { headers: phHeaders() });
       const data = await res.json();
       return Response.json(data, { status: res.status });
