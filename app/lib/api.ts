@@ -443,6 +443,15 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   return adminFetch<DashboardStats>(`/v1/admin/stats`);
 }
 
+export interface SignupsData {
+  count: number;
+  daily: { day: string; signups: number }[];
+}
+
+export async function getSignups(start: string, end: string): Promise<SignupsData> {
+  return adminFetch<SignupsData>(`/v1/outreach/admin/outreach/signups?start=${start}&end=${end}`);
+}
+
 export interface DissertationSubmission {
   id: string;
   name: string;
