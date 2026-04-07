@@ -25,5 +25,6 @@ export default [
   route("api/utm-campaigns", "routes/api.utm-campaigns.tsx"),
   route("api/posthog", "routes/api.posthog.tsx"),
   route("api/analytics", "routes/api.analytics.tsx"),
+  route("api/outreach", "routes/api.outreach.tsx"),
 ] satisfies RouteConfig;
 

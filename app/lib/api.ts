@@ -372,8 +372,28 @@ export async function updateUser(
 
 // ── Outreach API Functions ───────────────────────────────────────────────────
 
+// Proxy helper — routes through server-side /api/outreach to avoid CORS on /v1/outreach/* paths
+async function outreachProxyFetch<T>(type: string, params: Record<string, string> = {}): Promise<T> {
+  const token = await getToken();
+  if (!token) throw new Error("No authentication token available. Please sign in.");
+  const qs = new URLSearchParams({ type, ...params }).toString();
+  const response = await fetch(`/api/outreach?${qs}`, {
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    credentials: "include",
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      if (typeof window !== "undefined") sessionStorage.removeItem("admin_token");
+      throw new Error("Authentication failed. Please sign in again.");
+    }
+    const err = await response.json().catch(() => ({}));
+    throw new Error((err as any).error || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function getOutreachOverview(): Promise<OutreachOverview> {
-  return adminFetch<OutreachOverview>(`/v1/outreach/admin/outreach/overview`);
+  return outreachProxyFetch<OutreachOverview>("overview");
 }
 
 export async function listOutreachUsers(
@@ -382,16 +402,14 @@ export async function listOutreachUsers(
   search?: string,
   statusFilter?: string,
 ): Promise<{ users: OutreachUserRow[]; total: number }> {
-  const params = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
-  if (search) params.append("search", search);
-  if (statusFilter) params.append("status_filter", statusFilter);
-  return adminFetch<{ users: OutreachUserRow[]; total: number }>(
-    `/v1/outreach/admin/outreach/users?${params.toString()}`,
-  );
+  const params: Record<string, string> = { limit: limit.toString(), offset: offset.toString() };
+  if (search) params.search = search;
+  if (statusFilter) params.status_filter = statusFilter;
+  return outreachProxyFetch<{ users: OutreachUserRow[]; total: number }>("users", params);
 }
 
 export async function getOutreachUserDetail(userId: string): Promise<OutreachUserDetail> {
-  return adminFetch<OutreachUserDetail>(`/v1/outreach/admin/outreach/users/${userId}/detail`);
+  return outreachProxyFetch<OutreachUserDetail>("user_detail", { user_id: userId });
 }
 
 export async function listCareers(limit = 50, offset = 0): Promise<CareerApplication[]> {
