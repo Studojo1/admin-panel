@@ -1,6 +1,6 @@
 /**
  * Server-side proxy for outreach admin endpoints.
- * Forwards requests to the internal control-plane service — no CORS issue.
+ * Forwards requests to job-outreach-svc — no CORS issue.
  *
  * GET /api/outreach?type=overview
  * GET /api/outreach?type=users&limit=&offset=&search=&status_filter=
@@ -9,10 +9,11 @@
 
 import type { Route } from "./+types/api.outreach";
 
-const CONTROL_PLANE =
-  process.env.CONTROL_PLANE_URL ??
-  process.env.VITE_CONTROL_PLANE_URL ??
-  "http://localhost:8000";
+const JOB_OUTREACH_URL =
+  process.env.JOB_OUTREACH_URL ??
+  (process.env.JOB_OUTREACH_SVC_SERVICE_HOST
+    ? `http://${process.env.JOB_OUTREACH_SVC_SERVICE_HOST}:${process.env.JOB_OUTREACH_SVC_SERVICE_PORT ?? 8000}`
+    : "http://job-outreach-svc:8000");
 
 export async function loader({ request }: Route.LoaderArgs) {
   const authHeader = request.headers.get("Authorization");
@@ -24,7 +25,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   try {
     if (type === "overview") {
-      const res = await fetch(`${CONTROL_PLANE}/api/v1/admin/outreach/overview`, { headers });
+      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/overview`, { headers });
       return Response.json(await res.json(), { status: res.status });
     }
 
@@ -36,14 +37,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       let qs = `?limit=${limit}&offset=${offset}`;
       if (search) qs += `&search=${encodeURIComponent(search)}`;
       if (statusFilter) qs += `&status_filter=${encodeURIComponent(statusFilter)}`;
-      const res = await fetch(`${CONTROL_PLANE}/api/v1/admin/outreach/users${qs}`, { headers });
+      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/users${qs}`, { headers });
       return Response.json(await res.json(), { status: res.status });
     }
 
     if (type === "user_detail") {
       const userId = url.searchParams.get("user_id");
       if (!userId) return Response.json({ error: "user_id required" }, { status: 400 });
-      const res = await fetch(`${CONTROL_PLANE}/api/v1/admin/outreach/users/${userId}/detail`, { headers });
+      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/users/${userId}/detail`, { headers });
       return Response.json(await res.json(), { status: res.status });
     }
 
