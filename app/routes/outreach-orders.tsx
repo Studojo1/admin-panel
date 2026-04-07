@@ -410,18 +410,13 @@ export default function OutreachOrders() {
                       </tr>
                     </thead>
                     <tbody>
-                      <AnimatePresence mode="popLayout">
-                        {users.map((u, idx) => {
+                        {users.map((u) => {
                           const sc = u.active_order_status
                             ? STATUS_COLORS[u.active_order_status] ?? STATUS_COLORS.created
                             : null;
                           return (
-                            <motion.tr
+                            <tr
                               key={u.user_id}
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -10 }}
-                              transition={{ duration: 0.2, delay: idx * 0.02 }}
                               onClick={() => { setSelectedUserId(u.user_id); setIsModalOpen(true); }}
                               className="cursor-pointer border-b border-neutral-200 transition-colors hover:bg-neutral-50"
                             >
@@ -460,10 +455,9 @@ export default function OutreachOrders() {
                               <td className="px-4 py-4 font-['Satoshi'] text-sm text-neutral-600">
                                 {timeAgo(u.active_order_updated_at)}
                               </td>
-                            </motion.tr>
+                            </tr>
                           );
                         })}
-                      </AnimatePresence>
                     </tbody>
                   </table>
                 </div>
