@@ -16,12 +16,14 @@ interface SavedUTM {
   name: string;
   url: string;
   created: string;
+  utm_content?: string;
+  utm_term?: string;
 }
 
 interface UTMStats {
   visitors: number;
-  payments: number;
-  conversion: string;
+  avgScroll: string;
+  clicks: number;
 }
 
 // ── PostHog query helper ───────────────────────────────────────────────────
@@ -42,19 +44,32 @@ async function phQuery(query: object) {
 const SOURCE_OPTIONS = ["email", "linkedin", "twitter", "whatsapp", "instagram", "youtube"];
 const MEDIUM_OPTIONS = ["nurture", "cpc", "social", "organic", "direct", "referral"];
 
-const LS_KEY = "studojo_utm_campaigns";
-
-function loadSaved(): SavedUTM[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
-  } catch {
-    return [];
-  }
+async function fetchCampaigns(): Promise<SavedUTM[]> {
+  const res = await fetch("/api/utm-campaigns", { credentials: "include" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.campaigns ?? []).map((c: any) => ({
+    id: c.id,
+    name: c.name,
+    url: buildUrl(c),
+    created: c.created_at,
+    utm_content: c.utm_content,
+    utm_term: c.utm_term,
+  }));
 }
 
-function persistSaved(list: SavedUTM[]) {
-  localStorage.setItem(LS_KEY, JSON.stringify(list));
+function buildUrl(c: { base_url: string; utm_source: string; utm_medium: string; utm_campaign: string; utm_content?: string | null; utm_term?: string | null }) {
+  try {
+    const u = new URL(c.base_url);
+    u.searchParams.set("utm_source", c.utm_source);
+    u.searchParams.set("utm_medium", c.utm_medium);
+    u.searchParams.set("utm_campaign", c.utm_campaign);
+    if (c.utm_content) u.searchParams.set("utm_content", c.utm_content);
+    if (c.utm_term) u.searchParams.set("utm_term", c.utm_term);
+    return u.toString();
+  } catch {
+    return c.base_url;
+  }
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -75,6 +90,7 @@ export default function UTMBuilder() {
 
   // Saved campaigns
   const [saved, setSaved] = useState<SavedUTM[]>([]);
+  const [savedLoading, setSavedLoading] = useState(true);
 
   // Per-campaign stats
   const [stats, setStats] = useState<Record<string, UTMStats | null>>({});
@@ -82,7 +98,10 @@ export default function UTMBuilder() {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    setSaved(loadSaved());
+    fetchCampaigns().then((list) => {
+      setSaved(list);
+      setSavedLoading(false);
+    });
   }, []);
 
   // ── Generated URL ────────────────────────────────────────────────────────
@@ -110,27 +129,42 @@ export default function UTMBuilder() {
     navigator.clipboard.writeText(generatedUrl).then(() => toast.success("URL copied!"));
   }
 
-  function saveCampaign() {
+  async function saveCampaign() {
     if (!generatedUrl) { toast.error("Enter a base URL first"); return; }
     if (!campaign) { toast.error("Enter a campaign name to save"); return; }
     const name = saveName || campaign;
-    const entry: SavedUTM = {
-      id: Date.now().toString(),
-      name,
-      url: generatedUrl,
-      created: new Date().toISOString(),
-    };
-    const updated = [entry, ...saved];
+    const id = Date.now().toString();
+    const res = await fetch("/api/utm-campaigns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        id,
+        name,
+        base_url: baseUrl,
+        utm_source: effectiveSource,
+        utm_medium: effectiveMedium,
+        utm_campaign: campaign,
+        utm_content: content || null,
+        utm_term: term || null,
+      }),
+    });
+    if (!res.ok) { toast.error("Failed to save campaign"); return; }
+    const updated = await fetchCampaigns();
     setSaved(updated);
-    persistSaved(updated);
     setSaveName("");
     toast.success(`Campaign "${name}" saved!`);
   }
 
-  function removeSaved(id: string) {
-    const updated = saved.filter((s) => s.id !== id);
-    setSaved(updated);
-    persistSaved(updated);
+  async function removeSaved(id: string) {
+    const res = await fetch("/api/utm-campaigns", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) { toast.error("Failed to delete campaign"); return; }
+    setSaved((prev) => prev.filter((s) => s.id !== id));
     if (expanded === id) setExpanded(null);
   }
 
@@ -161,21 +195,34 @@ export default function UTMBuilder() {
     }
 
     setStatsLoading((prev) => ({ ...prev, [item.id]: true }));
+    // Escape single quotes to prevent HogQL injection
+    const safe = utmCampaign.replace(/'/g, "\\'");
     try {
-      const res = await phQuery({
-        kind: "HogQLQuery",
-        query: `SELECT
-          uniqIf(person_id, event = '$pageview') as visitors,
-          countIf(event = 'payment_confirmed') as payments
-        FROM events
-        WHERE properties.utm_campaign = '${utmCampaign}'
-          AND timestamp > now() - INTERVAL 90 DAY`,
-      });
-      const row = res?.results?.[0] ?? [0, 0];
-      const v = row[0] ?? 0;
-      const p = row[1] ?? 0;
-      const conv = v > 0 ? ((p / v) * 100).toFixed(1) + "%" : "0%";
-      setStats((prev) => ({ ...prev, [item.id]: { visitors: v, payments: p, conversion: conv } }));
+      const [visitorsRes, scrollRes, clicksRes] = await Promise.all([
+        phQuery({
+          kind: "HogQLQuery",
+          query: `SELECT count(DISTINCT person_id) FROM events WHERE properties.utm_campaign = '${safe}' AND event = '$pageview' AND timestamp > now() - INTERVAL 90 DAY`,
+        }),
+        phQuery({
+          kind: "HogQLQuery",
+          query: `SELECT avg(toFloat64OrNull(properties.depth)) FROM events WHERE properties.utm_campaign = '${safe}' AND event = 'scroll_depth' AND timestamp > now() - INTERVAL 90 DAY`,
+        }),
+        phQuery({
+          kind: "HogQLQuery",
+          query: `SELECT count() FROM events WHERE properties.utm_campaign = '${safe}' AND event = '$autocapture' AND properties.$event_type = 'click' AND timestamp > now() - INTERVAL 90 DAY`,
+        }),
+      ]);
+      const visitors = visitorsRes?.results?.[0]?.[0] ?? 0;
+      const avgScroll = scrollRes?.results?.[0]?.[0];
+      const clicks = clicksRes?.results?.[0]?.[0] ?? 0;
+      setStats((prev) => ({
+        ...prev,
+        [item.id]: {
+          visitors,
+          avgScroll: avgScroll != null ? Math.round(Number(avgScroll)) + "%" : "—",
+          clicks,
+        },
+      }));
     } catch (e: any) {
       toast.error("Failed to load stats: " + e.message);
       setStats((prev) => ({ ...prev, [item.id]: null }));
@@ -308,6 +355,17 @@ export default function UTMBuilder() {
                 />
               </Field>
 
+              {/* Term (optional) */}
+              <Field label="Term (utm_term) — optional">
+                <input
+                  type="text"
+                  value={term}
+                  onChange={(e) => setTerm(e.target.value)}
+                  placeholder="e.g. paid_keyword"
+                  className={inputCls}
+                />
+              </Field>
+
               {/* Generated URL */}
               {generatedUrl && (
                 <div className="rounded-lg border-2 border-violet-200 bg-violet-50 p-4">
@@ -361,7 +419,12 @@ export default function UTMBuilder() {
             </div>
 
             <div className="divide-y divide-neutral-100">
-              {saved.length === 0 && (
+              {savedLoading && (
+                <p className="px-6 py-10 text-center font-['Satoshi'] text-sm text-neutral-400">
+                  Loading campaigns…
+                </p>
+              )}
+              {!savedLoading && saved.length === 0 && (
                 <p className="px-6 py-10 text-center font-['Satoshi'] text-sm text-neutral-400">
                   No campaigns saved yet. Build and save one on the left.
                 </p>
@@ -424,8 +487,8 @@ export default function UTMBuilder() {
                         ) : s ? (
                           <div className="mt-3 grid grid-cols-3 gap-3">
                             <MiniStat label="Visitors" value={s.visitors} color="violet" />
-                            <MiniStat label="Payments" value={s.payments} color="emerald" />
-                            <MiniStat label="Conversion" value={s.conversion} color="amber" />
+                            <MiniStat label="Avg Scroll" value={s.avgScroll} color="emerald" />
+                            <MiniStat label="Clicks" value={s.clicks} color="amber" />
                           </div>
                         ) : null}
                       </motion.div>
