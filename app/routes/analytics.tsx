@@ -15,7 +15,6 @@ import {
 import { Bar, Line } from "react-chartjs-2";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
-import { getSignups } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/analytics";
 
@@ -256,8 +255,10 @@ export default function Analytics() {
           kind: "HogQLQuery",
           query: `SELECT uniq(person_id) as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef}`,
         }),
-        // Total new signups + daily breakdown — direct adminFetch to outreach backend
-        getSignups(startDate, endDate).catch(() => ({ count: 0, daily: [] })),
+        // Total new signups + daily breakdown — via server-side proxy (avoids CORS)
+        fetch(`/api/analytics?start=${startDate}&end=${endDate}`, { credentials: "include" })
+          .then((r) => r.ok ? r.json() : { count: 0, daily: [] })
+          .catch(() => ({ count: 0, daily: [] })),
         // Daily visitors/payments/campaigns
         safeQuery({
           kind: "HogQLQuery",
