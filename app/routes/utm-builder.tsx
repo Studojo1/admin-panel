@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
+import { getToken } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/utm-builder";
 
@@ -45,7 +46,11 @@ const SOURCE_OPTIONS = ["email", "linkedin", "twitter", "whatsapp", "instagram",
 const MEDIUM_OPTIONS = ["nurture", "cpc", "social", "organic", "direct", "referral"];
 
 async function fetchCampaigns(): Promise<SavedUTM[]> {
-  const res = await fetch("/api/utm-campaigns", { credentials: "include" });
+  const token = await getToken();
+  const res = await fetch("/api/utm-campaigns", {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: "include",
+  });
   if (!res.ok) return [];
   const data = await res.json();
   return (data.campaigns ?? []).map((c: any) => ({
@@ -134,9 +139,13 @@ export default function UTMBuilder() {
     if (!campaign) { toast.error("Enter a campaign name to save"); return; }
     const name = saveName || campaign;
     const id = Date.now().toString();
+    const token = await getToken();
     const res = await fetch("/api/utm-campaigns", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       credentials: "include",
       body: JSON.stringify({
         id,
@@ -157,9 +166,13 @@ export default function UTMBuilder() {
   }
 
   async function removeSaved(id: string) {
+    const token = await getToken();
     const res = await fetch("/api/utm-campaigns", {
       method: "DELETE",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       credentials: "include",
       body: JSON.stringify({ id }),
     });
