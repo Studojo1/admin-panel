@@ -218,7 +218,7 @@ export default function UTMBuilder() {
         }),
         phQuery({
           kind: "HogQLQuery",
-          query: `SELECT avg(toFloat64OrNull(properties.depth)) FROM events WHERE properties.utm_campaign = '${safe}' AND event = 'scroll_depth' AND timestamp > now() - INTERVAL 90 DAY`,
+          query: `SELECT avg(toFloatOrDefault(properties.depth, 0)) FROM events WHERE properties.utm_campaign = '${safe}' AND event = 'scroll_depth' AND timestamp > now() - INTERVAL 90 DAY`,
         }),
         phQuery({
           kind: "HogQLQuery",
