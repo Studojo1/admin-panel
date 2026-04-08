@@ -39,6 +39,7 @@ ChartJS.register(
 
 const STATUS_ORDER = [
   "created",
+  "profile_complete",
   "leads_generating",
   "leads_ready",
   "enriching",
@@ -51,6 +52,7 @@ const STATUS_ORDER = [
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; chart: string }> = {
   created:              { bg: "bg-gray-100",    text: "text-gray-700",    chart: "#9ca3af" },
+  profile_complete:     { bg: "bg-orange-100",  text: "text-orange-700",  chart: "#f97316" },
   leads_generating:     { bg: "bg-blue-100",    text: "text-blue-700",    chart: "#3b82f6" },
   leads_ready:          { bg: "bg-cyan-100",    text: "text-cyan-700",    chart: "#06b6d4" },
   enriching:            { bg: "bg-indigo-100",  text: "text-indigo-700",  chart: "#6366f1" },
