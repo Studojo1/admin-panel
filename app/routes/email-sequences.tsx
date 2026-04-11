@@ -23,23 +23,93 @@ export function meta({}: Route.MetaArgs) {
 }
 
 const EMAIL_TYPE_LABELS: Record<string, string> = {
-  nurture_day3: "Day 3 — Applying the wrong way",
-  nurture_day7: "Day 7 — Still looking?",
-  nurture_day14: "Day 14 — Social proof",
-  nurture_day30: "Day 30 — Personal check-in",
+  // System
   welcome: "Welcome",
   "forgot-password": "Forgot password",
   "resume-optimized": "Resume optimized",
   "internship-applied": "Internship applied",
   "password-changed": "Password changed",
-};
-
-const BULK_TYPE_LABELS: Record<string, string> = {
-  welcome: "Welcome",
+  // Legacy nurture
   nurture_day3: "Day 3 — Applying the wrong way",
   nurture_day7: "Day 7 — Still looking?",
   nurture_day14: "Day 14 — Social proof",
   nurture_day30: "Day 30 — Personal check-in",
+  // Funnel — Email 01 Welcome
+  "event.funnel.welcome_new": "01A — Welcome (new user)",
+  "event.funnel.welcome_existing": "01B — Welcome (existing user)",
+  // Funnel — Email 02 Follow-up
+  "event.funnel.followup_v1": "02 V1 — Follow-up (Personal Nudge)",
+  "event.funnel.followup_v2": "02 V2 — Follow-up (Curiosity Hook)",
+  "event.funnel.followup_v3": "02 V3 — Follow-up (Blunt One)",
+  // Funnel — Email 03 Segmentation
+  "event.funnel.segmentation_v1": "03 V1 — Segmentation (Clean Direct)",
+  "event.funnel.segmentation_v2": "03 V2 — Segmentation (Story Led)",
+  // Funnel — Email 04 Exploration
+  "event.funnel.exploration_v1": "04 V1 — Exploration (The Guide)",
+  "event.funnel.exploration_v2": "04 V2 — Exploration (The Challenge)",
+  // Funnel — Email 05–06
+  "event.funnel.congratulations": "05 — Congratulations",
+  "event.funnel.comparison": "06 — Comparison",
+  // Funnel — Email 07 Pitching
+  "event.funnel.pitching_v1": "07 V1 — Pitching (Stat Led)",
+  "event.funnel.pitching_v2": "07 V2 — Pitching (Problem First)",
+  "event.funnel.pitching_v3": "07 V3 — Pitching (Soft Sell)",
+  // Funnel — Email 08 Honest Question
+  "event.funnel.honest_question_v1": "08 V1 — Honest Question (Direct Ask)",
+  "event.funnel.honest_question_v2": "08 V2 — Honest Question (Empathy)",
+  "event.funnel.honest_question_v3": "08 V3 — Honest Question (Exit Ramp)",
+  // Funnel — Email 09–10
+  "event.funnel.onboarding": "09 — Onboarding (Paywall)",
+  "event.funnel.recognition_v1": "10 V1 — Recognition (Strong Progress)",
+  "event.funnel.recognition_v2": "10 V2 — Recognition (Encouraging Start)",
+  "event.funnel.recognition_v3": "10 V3 — Recognition (Slow Progress / Anti-Churn)",
+  "event.funnel.recognition_v4": "10 V4 — Recognition (Milestone Unlocked)",
+  // Funnel — Emails 11–16
+  "event.funnel.testimonial": "11 — Testimonial (Social Proof)",
+  "event.funnel.pricing": "12 — Pricing (Post-Upgrade)",
+  "event.funnel.case_study": "13 — Case Study (Re-engaged)",
+  "event.funnel.walkthrough": "14 — Walkthrough (No Reply)",
+  "event.funnel.educational": "15 — Educational (Not Converting)",
+  "event.funnel.winback": "16 — Win-back (Final)",
+};
+
+const BULK_TYPE_LABELS: Record<string, string> = {
+  // System
+  welcome: "Welcome",
+  // Legacy nurture
+  nurture_day3: "Day 3 — Applying the wrong way",
+  nurture_day7: "Day 7 — Still looking?",
+  nurture_day14: "Day 14 — Social proof",
+  nurture_day30: "Day 30 — Personal check-in",
+  // Funnel
+  "event.funnel.welcome_new": "01A — Welcome (new user)",
+  "event.funnel.welcome_existing": "01B — Welcome (existing user)",
+  "event.funnel.followup_v1": "02 V1 — Follow-up (Personal Nudge)",
+  "event.funnel.followup_v2": "02 V2 — Follow-up (Curiosity Hook)",
+  "event.funnel.followup_v3": "02 V3 — Follow-up (Blunt One)",
+  "event.funnel.segmentation_v1": "03 V1 — Segmentation (Clean Direct)",
+  "event.funnel.segmentation_v2": "03 V2 — Segmentation (Story Led)",
+  "event.funnel.exploration_v1": "04 V1 — Exploration (The Guide)",
+  "event.funnel.exploration_v2": "04 V2 — Exploration (The Challenge)",
+  "event.funnel.congratulations": "05 — Congratulations",
+  "event.funnel.comparison": "06 — Comparison",
+  "event.funnel.pitching_v1": "07 V1 — Pitching (Stat Led)",
+  "event.funnel.pitching_v2": "07 V2 — Pitching (Problem First)",
+  "event.funnel.pitching_v3": "07 V3 — Pitching (Soft Sell)",
+  "event.funnel.honest_question_v1": "08 V1 — Honest Question (Direct Ask)",
+  "event.funnel.honest_question_v2": "08 V2 — Honest Question (Empathy)",
+  "event.funnel.honest_question_v3": "08 V3 — Honest Question (Exit Ramp)",
+  "event.funnel.onboarding": "09 — Onboarding (Paywall)",
+  "event.funnel.recognition_v1": "10 V1 — Recognition (Strong Progress)",
+  "event.funnel.recognition_v2": "10 V2 — Recognition (Encouraging Start)",
+  "event.funnel.recognition_v3": "10 V3 — Recognition (Slow Progress / Anti-Churn)",
+  "event.funnel.recognition_v4": "10 V4 — Recognition (Milestone Unlocked)",
+  "event.funnel.testimonial": "11 — Testimonial (Social Proof)",
+  "event.funnel.pricing": "12 — Pricing (Post-Upgrade)",
+  "event.funnel.case_study": "13 — Case Study (Re-engaged)",
+  "event.funnel.walkthrough": "14 — Walkthrough (No Reply)",
+  "event.funnel.educational": "15 — Educational (Not Converting)",
+  "event.funnel.winback": "16 — Win-back (Final)",
 };
 
 const DAYS_OPTIONS = [
@@ -340,9 +410,57 @@ export default function EmailSequences() {
                     onChange={(e) => setTriggerRouting(e.target.value)}
                     className="w-full rounded-lg border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] focus:outline-none focus:ring-2 focus:ring-violet-400"
                   >
-                    <option value="event.user.signup">Welcome (signup)</option>
-                    <option value="event.resume.optimized">Resume optimized</option>
-                    <option value="event.internship.applied">Internship applied</option>
+                    <optgroup label="System">
+                      <option value="event.user.signup">Welcome (signup)</option>
+                      <option value="event.resume.optimized">Resume optimized</option>
+                      <option value="event.internship.applied">Internship applied</option>
+                    </optgroup>
+                    <optgroup label="01 — Welcome">
+                      <option value="event.funnel.welcome_new">01A — Welcome (new user)</option>
+                      <option value="event.funnel.welcome_existing">01B — Welcome (existing user)</option>
+                    </optgroup>
+                    <optgroup label="02 — Follow-up">
+                      <option value="event.funnel.followup_v1">02 V1 — Personal Nudge</option>
+                      <option value="event.funnel.followup_v2">02 V2 — Curiosity Hook</option>
+                      <option value="event.funnel.followup_v3">02 V3 — Blunt One</option>
+                    </optgroup>
+                    <optgroup label="03 — Segmentation">
+                      <option value="event.funnel.segmentation_v1">03 V1 — Clean Direct</option>
+                      <option value="event.funnel.segmentation_v2">03 V2 — Story Led</option>
+                    </optgroup>
+                    <optgroup label="04 — Exploration">
+                      <option value="event.funnel.exploration_v1">04 V1 — The Guide</option>
+                      <option value="event.funnel.exploration_v2">04 V2 — The Challenge</option>
+                    </optgroup>
+                    <optgroup label="05–06">
+                      <option value="event.funnel.congratulations">05 — Congratulations</option>
+                      <option value="event.funnel.comparison">06 — Comparison</option>
+                    </optgroup>
+                    <optgroup label="07 — Pitching">
+                      <option value="event.funnel.pitching_v1">07 V1 — Stat Led</option>
+                      <option value="event.funnel.pitching_v2">07 V2 — Problem First</option>
+                      <option value="event.funnel.pitching_v3">07 V3 — Soft Sell</option>
+                    </optgroup>
+                    <optgroup label="08 — Honest Question">
+                      <option value="event.funnel.honest_question_v1">08 V1 — Direct Ask</option>
+                      <option value="event.funnel.honest_question_v2">08 V2 — Empathy</option>
+                      <option value="event.funnel.honest_question_v3">08 V3 — Exit Ramp</option>
+                    </optgroup>
+                    <optgroup label="09–10">
+                      <option value="event.funnel.onboarding">09 — Onboarding (Paywall)</option>
+                      <option value="event.funnel.recognition_v1">10 V1 — Recognition (Strong Progress)</option>
+                      <option value="event.funnel.recognition_v2">10 V2 — Recognition (Encouraging Start)</option>
+                      <option value="event.funnel.recognition_v3">10 V3 — Recognition (Slow Progress)</option>
+                      <option value="event.funnel.recognition_v4">10 V4 — Recognition (Milestone Unlocked)</option>
+                    </optgroup>
+                    <optgroup label="11–16 — New">
+                      <option value="event.funnel.testimonial">11 — Testimonial (Social Proof)</option>
+                      <option value="event.funnel.pricing">12 — Pricing (Post-Upgrade)</option>
+                      <option value="event.funnel.case_study">13 — Case Study (Re-engaged)</option>
+                      <option value="event.funnel.walkthrough">14 — Walkthrough (No Reply)</option>
+                      <option value="event.funnel.educational">15 — Educational (Not Converting)</option>
+                      <option value="event.funnel.winback">16 — Win-back (Final)</option>
+                    </optgroup>
                   </select>
                 </div>
 
