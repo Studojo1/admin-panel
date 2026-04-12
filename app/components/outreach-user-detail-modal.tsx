@@ -176,6 +176,18 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
               </div>
             </div>
           )}
+
+          {/* Open dashboard link */}
+          {(campaign.status === "running" || campaign.status === "paused") && (
+            <a
+              href="https://studojo.com/outreach/campaign/dashboard"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-1.5 hover:bg-violet-100 transition-colors w-fit"
+            >
+              Open Campaign Dashboard ↗
+            </a>
+          )}
         </div>
       )}
 
