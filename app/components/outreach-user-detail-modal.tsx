@@ -213,10 +213,9 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
                   {order.action_log.map((entry, i) => (
                     <div key={i} className="font-['Satoshi'] text-xs text-neutral-600">
                       <span className="font-medium text-neutral-800">
-                        {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ""}
+                        {entry.ts ? new Date(entry.ts).toLocaleString() : ""}
                       </span>{" "}
-                      {entry.action}
-                      {entry.detail && <span className="text-neutral-500"> — {entry.detail}</span>}
+                      {entry.msg}
                     </div>
                   ))}
                 </div>

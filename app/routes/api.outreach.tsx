@@ -23,10 +23,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   const type = url.searchParams.get("type");
   const headers = { Authorization: authHeader, "Content-Type": "application/json" };
 
+  const noCache = { "Cache-Control": "no-store" };
+
   try {
     if (type === "overview") {
       const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/overview`, { headers });
-      return Response.json(await res.json(), { status: res.status });
+      return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
     if (type === "users") {
@@ -38,14 +40,21 @@ export async function loader({ request }: Route.LoaderArgs) {
       if (search) qs += `&search=${encodeURIComponent(search)}`;
       if (statusFilter) qs += `&status_filter=${encodeURIComponent(statusFilter)}`;
       const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/users${qs}`, { headers });
-      return Response.json(await res.json(), { status: res.status });
+      return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
     if (type === "user_detail") {
       const userId = url.searchParams.get("user_id");
       if (!userId) return Response.json({ error: "user_id required" }, { status: 400 });
       const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/users/${userId}/detail`, { headers });
-      return Response.json(await res.json(), { status: res.status });
+      return Response.json(await res.json(), { status: res.status, headers: noCache });
+    }
+
+    if (type === "campaign_emails") {
+      const campaignId = url.searchParams.get("campaign_id");
+      if (!campaignId) return Response.json({ error: "campaign_id required" }, { status: 400 });
+      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/campaign/${campaignId}/emails`, { headers });
+      return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
     return Response.json({ error: "Unknown type" }, { status: 400 });

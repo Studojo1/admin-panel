@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Chart as ChartJS,
@@ -126,6 +127,7 @@ export function meta({}: Route.MetaArgs) {
 
 export default function OutreachOrders() {
   const { isAuthorized, isPending } = useAdminGuard();
+  const navigate = useNavigate();
   const [overview, setOverview] = useState<OutreachOverview | null>(null);
   const [users, setUsers] = useState<OutreachUserRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -409,6 +411,7 @@ export default function OutreachOrders() {
                         <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Emails</th>
                         <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Revenue</th>
                         <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Last Active</th>
+                        <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -456,6 +459,19 @@ export default function OutreachOrders() {
                               </td>
                               <td className="px-4 py-4 font-['Satoshi'] text-sm text-neutral-600">
                                 {timeAgo(u.active_order_updated_at)}
+                              </td>
+                              <td className="px-4 py-4">
+                                {u.active_order_status === "campaign_running" && u.active_campaign_id && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigate(`/outreach-campaign?campaign_id=${u.active_campaign_id}&user_id=${u.user_id}`);
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded-lg border-2 border-violet-900 bg-violet-500 px-3 py-1.5 font-['Satoshi'] text-xs font-medium text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+                                  >
+                                    View Campaign →
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           );

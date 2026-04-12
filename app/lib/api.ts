@@ -208,6 +208,7 @@ export interface OutreachUserRow {
   total_orders: number;
   active_order_status: string | null;
   active_order_id: number | null;
+  active_campaign_id: number | null;
   active_order_updated_at: string | null;
   is_stuck: boolean;
   total_paid_cents: number;
@@ -220,13 +221,45 @@ export interface OutreachUserRow {
   created_at: string | null;
 }
 
+export interface CampaignEmail {
+  id: number;
+  lead_name: string;
+  lead_company: string;
+  lead_title: string;
+  to_email: string | null;
+  subject: string | null;
+  body: string | null;
+  status: string;
+  assigned_style: string | null;
+  sent_at: string | null;
+  reply_text: string | null;
+  reply_sentiment: string | null;
+  reply_received_at: string | null;
+  bounce_reason: string | null;
+}
+
+export interface AdminCampaignDetail {
+  campaign: {
+    id: number;
+    name: string;
+    status: string;
+    daily_limit: number;
+  };
+  owner: {
+    id: string | null;
+    name: string;
+    email: string;
+  };
+  emails: CampaignEmail[];
+}
+
 export interface OutreachOrderDetail {
   id: number;
   status: string;
   leads_collected: number | null;
   leads_target: number | null;
   is_stuck: boolean;
-  action_log: Array<{ timestamp: string; action: string; detail?: string }>;
+  action_log: Array<{ ts: string; msg: string }>;
   created_at: string | null;
   updated_at: string | null;
   campaign: {
@@ -380,6 +413,7 @@ async function outreachProxyFetch<T>(type: string, params: Record<string, string
   const response = await fetch(`/api/outreach?${qs}`, {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     credentials: "include",
+    cache: "no-store",
   });
   if (!response.ok) {
     if (response.status === 401) {
@@ -410,6 +444,10 @@ export async function listOutreachUsers(
 
 export async function getOutreachUserDetail(userId: string): Promise<OutreachUserDetail> {
   return outreachProxyFetch<OutreachUserDetail>("user_detail", { user_id: userId });
+}
+
+export async function getAdminCampaignEmails(campaignId: number): Promise<AdminCampaignDetail> {
+  return outreachProxyFetch<AdminCampaignDetail>("campaign_emails", { campaign_id: campaignId.toString() });
 }
 
 export async function listCareers(limit = 50, offset = 0): Promise<CareerApplication[]> {
