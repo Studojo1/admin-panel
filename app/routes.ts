@@ -13,6 +13,7 @@ export default [
   route("assignments", "routes/assignments.tsx"),
   route("dissertations", "routes/dissertations.tsx"),
   route("outreach-orders", "routes/outreach-orders.tsx"),
+  route("outreach-campaign", "routes/outreach-campaign.tsx"),
   route("outreach", "routes/outreach.tsx"),
   route("careers", "routes/careers.tsx"),
   route("settings", "routes/settings.tsx"),

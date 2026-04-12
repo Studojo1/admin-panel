@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Chart as ChartJS,
@@ -81,6 +82,7 @@ function EmailStatBar({ label, value, total, color }: { label: string; value: nu
 
 function OrderCard({ order }: { order: OutreachOrderDetail }) {
   const [showLog, setShowLog] = useState(false);
+  const navigate = useNavigate();
   const campaign = order.campaign;
   const emailTotal = campaign
     ? campaign.email_stats.sent + campaign.email_stats.queued + campaign.email_stats.scheduled + campaign.email_stats.bounced + campaign.email_stats.failed
@@ -176,6 +178,14 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
               </div>
             </div>
           )}
+
+          {/* Admin campaign dashboard link */}
+          <button
+            onClick={() => navigate(`/outreach-campaign?campaign_id=${campaign.id}`)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-1.5 hover:bg-violet-100 transition-colors w-fit"
+          >
+            View Campaign Dashboard →
+          </button>
         </div>
       )}
 
@@ -183,34 +193,30 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
       {order.action_log && order.action_log.length > 0 && (
         <div className="mt-3">
           <button
-            onClick={() => setShowLog(!showLog)}
+            onClick={() => {
+              console.log("[ActionLog] raw entries:", JSON.stringify(order.action_log));
+              setShowLog(!showLog);
+            }}
             className="font-['Satoshi'] text-xs font-medium text-purple-600 hover:text-purple-800"
           >
             {showLog ? "Hide" : "Show"} Action Log ({order.action_log.length})
           </button>
-          <AnimatePresence>
-            {showLog && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden"
-              >
-                <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-neutral-200 bg-neutral-50 p-3 space-y-1">
-                  {order.action_log.map((entry, i) => (
-                    <div key={i} className="font-['Satoshi'] text-xs text-neutral-600">
-                      <span className="font-medium text-neutral-800">
-                        {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ""}
-                      </span>{" "}
-                      {entry.action}
-                      {entry.detail && <span className="text-neutral-500"> — {entry.detail}</span>}
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {showLog && (
+            <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-neutral-200 bg-neutral-50 p-3 space-y-1">
+              {order.action_log.map((entry, i) => {
+                const ts = (entry as any).ts ?? (entry as any).timestamp ?? "";
+                const msg = (entry as any).msg ?? (entry as any).action ?? (entry as any).message ?? JSON.stringify(entry);
+                return (
+                  <div key={i} className="font-['Satoshi'] text-xs text-neutral-600">
+                    <span className="font-medium text-neutral-800">
+                      {ts ? new Date(ts).toLocaleString() : ""}
+                    </span>{" "}
+                    {msg}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
