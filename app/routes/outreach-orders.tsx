@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Chart as ChartJS,
@@ -128,7 +128,6 @@ export function meta({}: Route.MetaArgs) {
 export default function OutreachOrders() {
   const { isAuthorized, isPending } = useAdminGuard();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [overview, setOverview] = useState<OutreachOverview | null>(null);
   const [users, setUsers] = useState<OutreachUserRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -136,14 +135,7 @@ export default function OutreachOrders() {
   const [usersLoading, setUsersLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const offset = parseInt(searchParams.get("offset") ?? "0", 10);
-  const setOffset = (newOffset: number) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set("offset", String(newOffset));
-      return next;
-    }, { replace: true, preventScrollReset: true });
-  };
+  const [offset, setOffset] = useState(0);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const limit = 50;
@@ -160,15 +152,12 @@ export default function OutreachOrders() {
   }, []);
 
   const loadUsers = useCallback(async () => {
-    console.log(`[loadUsers] called with offset=${offset} search="${search}" statusFilter="${statusFilter}"`);
     try {
       setUsersLoading(true);
       const data = await listOutreachUsers(limit, offset, search || undefined, statusFilter || undefined);
-      console.log(`[loadUsers] got back total=${data.total} users=${data.users?.length}`);
       setUsers(data.users || []);
       setTotal(data.total || 0);
     } catch (err: any) {
-      console.error(`[loadUsers] error:`, err);
       toast.error(err.message || "Failed to load users");
       setUsers([]);
     } finally {
@@ -499,14 +488,14 @@ export default function OutreachOrders() {
                   </p>
                   <div className="flex gap-4">
                     <button
-                      onClick={() => { console.log(`[Pagination] Prev clicked: offset ${offset} → ${Math.max(0, offset - limit)}`); setOffset(Math.max(0, offset - limit)); }}
+                      onClick={() => { setOffset(Math.max(0, offset - limit)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                       disabled={offset === 0}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
                       Previous
                     </button>
                     <button
-                      onClick={() => { console.log(`[Pagination] Next clicked: offset ${offset} → ${offset + limit}, total=${total}`); setOffset(offset + limit); }}
+                      onClick={() => { setOffset(offset + limit); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                       disabled={offset + limit >= total}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >

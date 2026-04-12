@@ -409,15 +409,13 @@ export async function updateUser(
 async function outreachProxyFetch<T>(type: string, params: Record<string, string> = {}): Promise<T> {
   const token = await getToken();
   if (!token) throw new Error("No authentication token available. Please sign in.");
-  const qs = new URLSearchParams({ type, ...params }).toString();
+  const qs = new URLSearchParams({ type, ...params, _t: Date.now().toString() }).toString();
   const fullUrl = `/api/outreach?${qs}`;
-  console.log(`[outreachProxy] → ${fullUrl}`);
   const response = await fetch(fullUrl, {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     credentials: "include",
     cache: "no-store",
   });
-  console.log(`[outreachProxy] ← status=${response.status} url=${fullUrl}`);
   if (!response.ok) {
     if (response.status === 401) {
       if (typeof window !== "undefined") sessionStorage.removeItem("admin_token");
@@ -426,11 +424,7 @@ async function outreachProxyFetch<T>(type: string, params: Record<string, string
     const err = await response.json().catch(() => ({}));
     throw new Error((err as any).error || `HTTP ${response.status}`);
   }
-  const json = await response.json();
-  if (type === "users") {
-    console.log(`[outreachProxy] users response: total=${(json as any).total} returned=${(json as any).users?.length}`);
-  }
-  return json as T;
+  return response.json() as T;
 }
 
 export async function getOutreachOverview(): Promise<OutreachOverview> {
@@ -443,7 +437,6 @@ export async function listOutreachUsers(
   search?: string,
   statusFilter?: string,
 ): Promise<{ users: OutreachUserRow[]; total: number }> {
-  console.log(`[listOutreachUsers] limit=${limit} offset=${offset} search=${search} statusFilter=${statusFilter}`);
   const params: Record<string, string> = { limit: limit.toString(), offset: offset.toString() };
   if (search) params.search = search;
   if (statusFilter) params.status_filter = statusFilter;
