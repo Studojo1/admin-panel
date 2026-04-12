@@ -152,12 +152,15 @@ export default function OutreachOrders() {
   }, []);
 
   const loadUsers = useCallback(async () => {
+    console.log(`[loadUsers] called with offset=${offset} search="${search}" statusFilter="${statusFilter}"`);
     try {
       setUsersLoading(true);
       const data = await listOutreachUsers(limit, offset, search || undefined, statusFilter || undefined);
+      console.log(`[loadUsers] got back total=${data.total} users=${data.users?.length}`);
       setUsers(data.users || []);
       setTotal(data.total || 0);
     } catch (err: any) {
+      console.error(`[loadUsers] error:`, err);
       toast.error(err.message || "Failed to load users");
       setUsers([]);
     } finally {
@@ -488,14 +491,14 @@ export default function OutreachOrders() {
                   </p>
                   <div className="flex gap-4">
                     <button
-                      onClick={() => setOffset(Math.max(0, offset - limit))}
+                      onClick={() => { console.log(`[Pagination] Prev clicked: offset ${offset} → ${Math.max(0, offset - limit)}`); setOffset(Math.max(0, offset - limit)); }}
                       disabled={offset === 0}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
                       Previous
                     </button>
                     <button
-                      onClick={() => setOffset(offset + limit)}
+                      onClick={() => { console.log(`[Pagination] Next clicked: offset ${offset} → ${offset + limit}, total=${total}`); setOffset(offset + limit); }}
                       disabled={offset + limit >= total}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
