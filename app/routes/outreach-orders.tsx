@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Chart as ChartJS,
@@ -128,6 +128,7 @@ export function meta({}: Route.MetaArgs) {
 export default function OutreachOrders() {
   const { isAuthorized, isPending } = useAdminGuard();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [overview, setOverview] = useState<OutreachOverview | null>(null);
   const [users, setUsers] = useState<OutreachUserRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -135,7 +136,14 @@ export default function OutreachOrders() {
   const [usersLoading, setUsersLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [offset, setOffset] = useState(0);
+  const offset = parseInt(searchParams.get("offset") ?? "0", 10);
+  const setOffset = (newOffset: number) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("offset", String(newOffset));
+      return next;
+    });
+  };
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const limit = 50;

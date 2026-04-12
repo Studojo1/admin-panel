@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Chart as ChartJS,
@@ -81,6 +82,7 @@ function EmailStatBar({ label, value, total, color }: { label: string; value: nu
 
 function OrderCard({ order }: { order: OutreachOrderDetail }) {
   const [showLog, setShowLog] = useState(false);
+  const navigate = useNavigate();
   const campaign = order.campaign;
   const emailTotal = campaign
     ? campaign.email_stats.sent + campaign.email_stats.queued + campaign.email_stats.scheduled + campaign.email_stats.bounced + campaign.email_stats.failed
@@ -177,17 +179,13 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
             </div>
           )}
 
-          {/* Open dashboard link */}
-          {(campaign.status === "running" || campaign.status === "paused") && (
-            <a
-              href="https://studojo.com/outreach/campaign/dashboard"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-1.5 hover:bg-violet-100 transition-colors w-fit"
-            >
-              Open Campaign Dashboard ↗
-            </a>
-          )}
+          {/* Admin campaign dashboard link */}
+          <button
+            onClick={() => navigate(`/outreach-campaign?campaign_id=${campaign.id}`)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-1.5 hover:bg-violet-100 transition-colors w-fit"
+          >
+            View Campaign Dashboard →
+          </button>
         </div>
       )}
 
