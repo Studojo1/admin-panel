@@ -151,20 +151,6 @@ export default function OutreachOrders() {
     }
   }, []);
 
-  const loadUsers = useCallback(async () => {
-    try {
-      setUsersLoading(true);
-      const data = await listOutreachUsers(limit, offset, search || undefined, statusFilter || undefined);
-      setUsers(data.users || []);
-      setTotal(data.total || 0);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to load users");
-      setUsers([]);
-    } finally {
-      setUsersLoading(false);
-    }
-  }, [offset, search, statusFilter]);
-
   useEffect(() => {
     if (isAuthorized) {
       loadOverview();
@@ -172,10 +158,25 @@ export default function OutreachOrders() {
   }, [isAuthorized, loadOverview]);
 
   useEffect(() => {
-    if (isAuthorized) {
-      loadUsers();
-    }
-  }, [isAuthorized, loadUsers]);
+    if (!isAuthorized) return;
+    const controller = new AbortController();
+    setUsersLoading(true);
+    listOutreachUsers(limit, offset, search || undefined, statusFilter || undefined)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setUsers(data.users || []);
+        setTotal(data.total || 0);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        toast.error(err.message || "Failed to load users");
+        setUsers([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setUsersLoading(false);
+      });
+    return () => controller.abort();
+  }, [isAuthorized, offset, search, statusFilter]);
 
   if (isPending || isAuthorized === null) {
     return (
