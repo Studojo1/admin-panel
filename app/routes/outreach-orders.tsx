@@ -142,7 +142,7 @@ export default function OutreachOrders() {
       const next = new URLSearchParams(prev);
       next.set("offset", String(newOffset));
       return next;
-    });
+    }, { replace: true, preventScrollReset: true });
   };
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
