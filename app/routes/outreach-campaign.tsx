@@ -115,6 +115,12 @@ function EmailRow({ email }: { email: CampaignEmail }) {
                   <div className="font-['Satoshi'] text-sm text-red-700">{email.bounce_reason}</div>
                 </div>
               )}
+              {email.error_message && email.status === "failed" && (
+                <div className="md:col-span-2">
+                  <div className="mb-1 font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-500">Error</div>
+                  <div className="font-['Satoshi'] text-sm text-red-700">{email.error_message}</div>
+                </div>
+              )}
             </div>
           </td>
         </tr>

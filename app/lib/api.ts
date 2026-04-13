@@ -236,6 +236,7 @@ export interface CampaignEmail {
   reply_sentiment: string | null;
   reply_received_at: string | null;
   bounce_reason: string | null;
+  error_message: string | null;
 }
 
 export interface AdminCampaignDetail {
