@@ -367,7 +367,15 @@ function CouponRow({
     : "Never expires";
 
   const usageLabel =
-    c.max_uses != null ? `${c.uses}/${c.max_uses} uses` : `${c.uses} uses`;
+    c.max_uses != null ? `${c.uses} / ${c.max_uses}` : `${c.uses}`;
+
+  const createdLabel = c.created_at
+    ? new Date(c.created_at).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : null;
 
   return (
     <div className="flex items-center gap-3 px-6 py-4">
@@ -382,10 +390,14 @@ function CouponRow({
           <span className="rounded-full bg-violet-100 px-2 py-0.5 font-['Satoshi'] text-xs font-semibold text-violet-700">
             {discountLabel}
           </span>
+          <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-['Satoshi'] text-xs font-semibold text-neutral-600">
+            {usageLabel} uses
+          </span>
         </div>
         <p className="mt-0.5 font-['Satoshi'] text-xs text-neutral-400">
-          {expiryLabel} &middot; {usageLabel}
+          {expiryLabel}
           {c.distributor_name && ` · ${c.distributor_name}`}
+          {createdLabel && ` · Created ${createdLabel}`}
         </p>
       </div>
       <button
