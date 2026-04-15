@@ -24,6 +24,8 @@ export default [
   route("analytics", "routes/analytics.tsx"),
   route("utm-builder", "routes/utm-builder.tsx"),
   route("api/utm-campaigns", "routes/api.utm-campaigns.tsx"),
+  route("coupons", "routes/coupons.tsx"),
+  route("api/coupons", "routes/api.coupons.tsx"),
   route("api/posthog", "routes/api.posthog.tsx"),
   route("api/analytics", "routes/api.analytics.tsx"),
   route("api/outreach", "routes/api.outreach.tsx"),
