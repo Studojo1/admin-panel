@@ -13,14 +13,16 @@ export function meta(_: Route.MetaArgs) {
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface Coupon {
-  id: string;
+  id: number;
   code: string;
   discount_type: "percent" | "fixed";
   discount_value: number;
   max_uses: number | null;
   uses: number;
-  expires_at: string | null;
-  notes: string | null;
+  valid_from: string;
+  valid_until: string | null;
+  distributor_name: string | null;
+  is_active: boolean;
   created_at: string;
 }
 
@@ -33,8 +35,9 @@ function randomCode(prefix = "") {
   return code;
 }
 
-function couponStatus(c: Coupon): "active" | "expired" | "exhausted" {
-  if (c.expires_at && new Date(c.expires_at) < new Date()) return "expired";
+function couponStatus(c: Coupon): "active" | "expired" | "exhausted" | "inactive" {
+  if (!c.is_active) return "inactive";
+  if (c.valid_until && new Date(c.valid_until) < new Date()) return "expired";
   if (c.max_uses != null && c.uses >= c.max_uses) return "exhausted";
   return "active";
 }
@@ -71,7 +74,7 @@ export default function Coupons() {
   const [expiryPreset, setExpiryPreset] = useState<"24h" | "7d" | "30d" | "never" | "custom">("24h");
   const [customExpiry, setCustomExpiry] = useState("");
   const [maxUses, setMaxUses] = useState("");
-  const [notes, setNotes] = useState("");
+  const [distributorName, setDistributorName] = useState("");
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -108,8 +111,8 @@ export default function Coupons() {
         discount_type: discountType,
         discount_value: val,
         max_uses: maxUses ? parseInt(maxUses) : null,
-        expires_at,
-        notes: notes.trim() || null,
+        valid_until: expires_at,
+        distributor_name: distributorName.trim() || null,
       }),
     });
 
@@ -123,7 +126,7 @@ export default function Coupons() {
 
     toast.success(`Coupon ${code.toUpperCase()} created`);
     setCode(randomCode());
-    setNotes("");
+    setDistributorName("");
     setMaxUses("");
     await loadCoupons();
   }
@@ -152,6 +155,7 @@ export default function Coupons() {
 
   const active = coupons.filter((c) => couponStatus(c) === "active");
   const inactive = coupons.filter((c) => couponStatus(c) !== "active");
+
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -262,13 +266,13 @@ export default function Coupons() {
                 />
               </Field>
 
-              {/* Notes */}
-              <Field label="Notes (internal)">
+              {/* Distributor / source */}
+              <Field label="Source / distributor (internal)">
                 <input
                   type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. leads-ready email April 2026"
+                  value={distributorName}
+                  onChange={(e) => setDistributorName(e.target.value)}
+                  placeholder="e.g. leads-ready email, George, CU Chalants"
                   className={inputCls}
                 />
               </Field>
@@ -348,6 +352,7 @@ function CouponRow({
     active: "bg-emerald-100 text-emerald-700",
     expired: "bg-neutral-100 text-neutral-500",
     exhausted: "bg-amber-100 text-amber-700",
+    inactive: "bg-red-100 text-red-600",
   }[status];
 
   const discountLabel =
@@ -355,10 +360,10 @@ function CouponRow({
       ? `${c.discount_value}% off`
       : `₹${c.discount_value} off`;
 
-  const expiryLabel = c.expires_at
-    ? new Date(c.expires_at) < new Date()
-      ? `Expired ${new Date(c.expires_at).toLocaleDateString()}`
-      : `Expires ${new Date(c.expires_at).toLocaleDateString()}`
+  const expiryLabel = c.valid_until
+    ? new Date(c.valid_until) < new Date()
+      ? `Expired ${new Date(c.valid_until).toLocaleDateString()}`
+      : `Expires ${new Date(c.valid_until).toLocaleDateString()}`
     : "Never expires";
 
   const usageLabel =
@@ -380,7 +385,7 @@ function CouponRow({
         </div>
         <p className="mt-0.5 font-['Satoshi'] text-xs text-neutral-400">
           {expiryLabel} &middot; {usageLabel}
-          {c.notes && ` · ${c.notes}`}
+          {c.distributor_name && ` · ${c.distributor_name}`}
         </p>
       </div>
       <button
