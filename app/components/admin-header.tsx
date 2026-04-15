@@ -125,6 +125,19 @@ export function AdminHeader() {
             </AnimatePresence>
           </div>
 
+          {/* Email dashboard */}
+          <motion.a
+            href="https://studojo.com/api/admin/email-dashboard-sso"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.3 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="rounded-lg border-2 border-violet-600 bg-violet-600 px-4 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-white shadow-[2px_2px_0px_0px_rgba(109,40,217,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(109,40,217,1)]"
+          >
+            ✉ Email
+          </motion.a>
+
           {/* Sign out */}
           {session && (
             <motion.button
