@@ -16,6 +16,7 @@ const NAV_LINKS = [
   { to: "/email-sequences", label: "Emails" },
   { to: "/analytics", label: "Analytics" },
   { to: "/utm-builder", label: "UTM Builder" },
+  { to: "/coupons", label: "Coupons" },
   { to: "/settings", label: "Settings" },
 ] as const;
 
