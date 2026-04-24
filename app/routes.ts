@@ -21,6 +21,8 @@ export default [
   route("email-sequences", "routes/email-sequences.tsx"),
   route("chat-logs", "routes/chat-logs.tsx"),
   route("api/chat-logs", "routes/api.chat-logs.tsx"),
+  route("consultation-signups", "routes/consultation-signups.tsx"),
+  route("api/consultation-signups", "routes/api.consultation-signups.tsx"),
   route("analytics", "routes/analytics.tsx"),
   route("utm-builder", "routes/utm-builder.tsx"),
   route("api/utm-campaigns", "routes/api.utm-campaigns.tsx"),

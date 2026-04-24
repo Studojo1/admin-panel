@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { to: "/outreach", label: "Outreach Stats" },
   { to: "/careers", label: "Careers" },
   { to: "/chat-logs", label: "Chat Logs" },
+  { to: "/consultation-signups", label: "Free Call Signups" },
   { to: "/email-sequences", label: "Emails" },
   { to: "/analytics", label: "Analytics" },
   { to: "/utm-builder", label: "UTM Builder" },
