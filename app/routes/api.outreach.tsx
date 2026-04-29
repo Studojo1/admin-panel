@@ -57,6 +57,17 @@ export async function loader({ request }: Route.LoaderArgs) {
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
+    if (type === "payments") {
+      const limit = url.searchParams.get("limit") ?? "50";
+      const offset = url.searchParams.get("offset") ?? "0";
+      const search = url.searchParams.get("search");
+      const statusFilter = url.searchParams.get("status_filter") ?? "paid";
+      let qs = `?limit=${limit}&offset=${offset}&status_filter=${encodeURIComponent(statusFilter)}`;
+      if (search) qs += `&search=${encodeURIComponent(search)}`;
+      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/payments${qs}`, { headers });
+      return Response.json(await res.json(), { status: res.status, headers: noCache });
+    }
+
     return Response.json({ error: "Unknown type" }, { status: 400 });
   } catch (err: any) {
     return Response.json({ error: err.message }, { status: 500 });

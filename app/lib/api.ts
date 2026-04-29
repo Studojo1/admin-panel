@@ -637,14 +637,24 @@ export async function listPayments(
   search = "",
   statusFilter = "paid"
 ): Promise<{ payments: PaidPayment[]; total: number; stats: PaymentsStats }> {
+  const token = await getToken();
   const params = new URLSearchParams({
+    type: "payments",
     limit: limit.toString(),
     offset: offset.toString(),
     status_filter: statusFilter,
   });
   if (search) params.append("search", search);
-  return adminFetch<{ payments: PaidPayment[]; total: number; stats: PaymentsStats }>(
-    `/v1/admin/outreach/payments?${params.toString()}`
-  );
+  const res = await fetch(`/api/outreach?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any).error || `HTTP ${res.status}`);
+  }
+  return res.json();
 }
 
