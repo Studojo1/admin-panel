@@ -603,3 +603,48 @@ export async function bulkSend(
   );
 }
 
+export interface PaidPayment {
+  id: number;
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  amount_cents: number;
+  currency: string;
+  provider: "razorpay" | "dodo" | "coupon";
+  tier: number;
+  status: string;
+  geo_country: string | null;
+  coupon_code: string | null;
+  credits_granted: number;
+  razorpay_order_id: string | null;
+  razorpay_payment_id: string | null;
+  dodo_checkout_id: string | null;
+  dodo_payment_id: string | null;
+  outreach_order_status: string | null;
+  created_at: string;
+}
+
+export interface PaymentsStats {
+  total_paid: number;
+  total_inr_paise: number;
+  total_usd_cents: number;
+  total_abandoned: number;
+}
+
+export async function listPayments(
+  limit = 50,
+  offset = 0,
+  search = "",
+  statusFilter = "paid"
+): Promise<{ payments: PaidPayment[]; total: number; stats: PaymentsStats }> {
+  const params = new URLSearchParams({
+    limit: limit.toString(),
+    offset: offset.toString(),
+    status_filter: statusFilter,
+  });
+  if (search) params.append("search", search);
+  return adminFetch<{ payments: PaidPayment[]; total: number; stats: PaymentsStats }>(
+    `/v1/admin/outreach/payments?${params.toString()}`
+  );
+}
+

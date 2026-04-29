@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { to: "/assignments", label: "Assignments" },
   { to: "/dissertations", label: "Dissertations" },
   { to: "/outreach-orders", label: "Outreach Orders" },
+  { to: "/paid-users", label: "Paid Users" },
   { to: "/outreach", label: "Outreach Stats" },
   { to: "/careers", label: "Careers" },
   { to: "/chat-logs", label: "Chat Logs" },
