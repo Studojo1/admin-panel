@@ -21,6 +21,7 @@ import {
   listOutreachUsers,
   type OutreachOverview,
   type OutreachUserRow,
+  type FunnelStageKey,
 } from "~/lib/api";
 import { OutreachUserDetailModal } from "~/components/outreach-user-detail-modal";
 import { toast } from "sonner";
@@ -49,6 +50,23 @@ const STATUS_ORDER = [
   "email_connected",
   "campaign_running",
   "completed",
+];
+
+// 12-stage funnel — keep in sync with FUNNEL_STAGES in api/routes_admin.py.
+// Used for the per-user "journey" dot-strip in the table.
+const FUNNEL_STAGE_KEYS: { key: FunnelStageKey; short: string }[] = [
+  { key: "resume_uploaded",       short: "Resume" },
+  { key: "quiz_started",          short: "Quiz▶" },
+  { key: "quiz_completed",        short: "Quiz✓" },
+  { key: "leads_generated",       short: "Leads" },
+  { key: "payment_page_reached",  short: "Pay➝" },
+  { key: "payment_made",          short: "Paid" },
+  { key: "gmail_connected",       short: "Gmail" },
+  { key: "email_style_selected",  short: "Style" },
+  { key: "campaign_setup",        short: "Setup" },
+  { key: "campaign_launched",     short: "Launch" },
+  { key: "campaign_paused",       short: "Pause" },
+  { key: "campaign_completed",    short: "Done" },
 ];
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; chart: string }> = {
@@ -191,10 +209,19 @@ export default function OutreachOrders() {
 
   if (!isAuthorized) return null;
 
-  // Chart data
-  const funnelLabels = STATUS_ORDER.filter((s) => overview?.orders_by_status?.[s]);
-  const funnelData = funnelLabels.map((s) => overview?.orders_by_status?.[s] ?? 0);
-  const funnelColors = funnelLabels.map((s) => STATUS_COLORS[s]?.chart ?? "#9ca3af");
+  // 12-stage funnel data straight from the backend. Each entry has the
+  // count of distinct users who reached that stage plus drop-off vs the
+  // previous active stage (computed server-side).
+  const funnelStages = overview?.funnel ?? [];
+  const funnelLabels = funnelStages.map((s) => s.label);
+  const funnelData = funnelStages.map((s) => s.users_reached);
+  // Violet-fade for the main flow, amber/red for paused/done so the eye
+  // separates the linear funnel from the terminal off-ramps.
+  const funnelColors = funnelStages.map((s) => {
+    if (s.stage === "campaign_paused") return "#f59e0b";
+    if (s.stage === "campaign_completed") return "#10b981";
+    return "#8b5cf6";
+  });
 
   const monthlyLabels = (overview?.monthly_metrics ?? []).map((m) => formatMonth(m.month));
   const monthlyEmailsSent = (overview?.monthly_metrics ?? []).map((m) => m.emails_sent);
@@ -261,19 +288,22 @@ export default function OutreachOrders() {
               transition={{ duration: 0.5, delay: 0.2 }}
               className="grid grid-cols-1 gap-6 md:grid-cols-2"
             >
-              {/* Pipeline Funnel */}
+              {/* 12-Stage Funnel */}
               <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] md:p-8">
-                <h2 className="mb-6 font-['Clash_Display'] text-xl font-medium leading-tight tracking-tight text-neutral-950 md:text-2xl">
-                  Pipeline Funnel
+                <h2 className="mb-1 font-['Clash_Display'] text-xl font-medium leading-tight tracking-tight text-neutral-950 md:text-2xl">
+                  Funnel — 12 Stages
                 </h2>
-                <div className="h-64">
+                <p className="mb-4 font-['Satoshi'] text-xs text-neutral-500">
+                  Distinct users who reached each stage. Drop-off % is vs the previous main-flow stage.
+                </p>
+                <div className="h-[420px]">
                   {funnelLabels.length > 0 ? (
                     <Bar
                       data={{
-                        labels: funnelLabels.map(formatStatus),
+                        labels: funnelLabels,
                         datasets: [
                           {
-                            label: "Orders",
+                            label: "Users",
                             data: funnelData,
                             backgroundColor: funnelColors,
                             borderColor: "#171717",
@@ -288,14 +318,28 @@ export default function OutreachOrders() {
                           ...chartOptions.plugins,
                           tooltip: {
                             ...chartOptions.plugins.tooltip,
-                            callbacks: { label: (ctx) => `${ctx.parsed.x} orders` },
+                            callbacks: {
+                              label: (ctx) => {
+                                const stage = funnelStages[ctx.dataIndex];
+                                if (!stage) return `${ctx.parsed.x} users`;
+                                const lines = [`${stage.users_reached} users`];
+                                if (stage.drop_off_from_prev !== null && stage.drop_off_pct_from_prev !== null) {
+                                  lines.push(
+                                    `Drop-off: ${stage.drop_off_from_prev} (${stage.drop_off_pct_from_prev}%)`
+                                  );
+                                }
+                                return lines;
+                              },
+                            },
                           },
                         },
                       }}
                     />
                   ) : (
                     <div className="flex h-full items-center justify-center">
-                      <p className="font-['Satoshi'] text-sm text-neutral-500">No orders yet</p>
+                      <p className="font-['Satoshi'] text-sm text-neutral-500">
+                        No funnel data yet (run the backfill script)
+                      </p>
                     </div>
                   )}
                 </div>
@@ -407,6 +451,7 @@ export default function OutreachOrders() {
                       <tr className="border-b-2 border-neutral-900 bg-neutral-50">
                         <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">User</th>
                         <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Status</th>
+                        <th className="px-3 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Journey</th>
                         <th className="px-3 py-4 text-center font-['Satoshi'] text-sm font-bold text-neutral-950">Alert</th>
                         <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Leads</th>
                         <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Emails</th>
@@ -438,6 +483,30 @@ export default function OutreachOrders() {
                                 ) : (
                                   <span className="font-['Satoshi'] text-xs text-neutral-400">No active order</span>
                                 )}
+                              </td>
+                              <td className="px-3 py-4">
+                                {/* 12-stage dot strip — filled if reached, hollow if not.
+                                    Lets the admin see at a glance where each user dropped. */}
+                                <div className="flex items-center gap-1">
+                                  {FUNNEL_STAGE_KEYS.map(({ key, short }) => {
+                                    const ts = u.stage_timestamps?.[key];
+                                    const reached = !!ts;
+                                    const isPause = key === "campaign_paused";
+                                    const isDone = key === "campaign_completed";
+                                    const fill = reached
+                                      ? isDone ? "bg-emerald-500 border-emerald-700"
+                                        : isPause ? "bg-amber-500 border-amber-700"
+                                        : "bg-violet-500 border-violet-700"
+                                      : "bg-white border-neutral-300";
+                                    return (
+                                      <span
+                                        key={key}
+                                        title={`${short}${ts ? `: ${new Date(ts).toLocaleString()}` : " — not reached"}`}
+                                        className={`inline-block h-2.5 w-2.5 rounded-full border ${fill}`}
+                                      />
+                                    );
+                                  })}
+                                </div>
                               </td>
                               <td className="px-3 py-4 text-center">
                                 {u.is_stuck && (

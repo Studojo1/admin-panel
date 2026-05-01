@@ -124,6 +124,55 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
         </div>
       )}
 
+      {/* Funnel journey — per-stage timestamps for THIS order */}
+      {order.stage_timestamps && (
+        <div className="mt-4">
+          <div className="mb-2 font-['Satoshi'] text-xs font-medium text-neutral-600">
+            Funnel Journey
+          </div>
+          <ol className="space-y-1.5">
+            {(
+              [
+                ["resume_uploaded",       "Resume uploaded"],
+                ["quiz_started",          "Quiz started"],
+                ["quiz_completed",        "Quiz completed"],
+                ["leads_generated",       "Leads generated"],
+                ["payment_page_reached",  "Payment page reached"],
+                ["payment_made",          "Payment made"],
+                ["gmail_connected",       "Gmail connected"],
+                ["email_style_selected",  "Email style selected"],
+                ["campaign_setup",        "Campaign setup"],
+                ["campaign_launched",     "Campaign launched"],
+                ["campaign_paused",       "Campaign paused"],
+                ["campaign_completed",    "Campaign completed"],
+              ] as const
+            ).map(([key, label]) => {
+              const ts = order.stage_timestamps?.[key as keyof typeof order.stage_timestamps];
+              const reached = !!ts;
+              return (
+                <li key={key} className="flex items-center gap-2">
+                  <span
+                    className={`inline-block h-2 w-2 rounded-full border ${
+                      reached ? "bg-violet-500 border-violet-700" : "bg-white border-neutral-300"
+                    }`}
+                  />
+                  <span
+                    className={`flex-1 font-['Satoshi'] text-xs ${
+                      reached ? "text-neutral-900" : "text-neutral-400"
+                    }`}
+                  >
+                    {label}
+                  </span>
+                  <span className="font-['Satoshi'] text-xs text-neutral-500 tabular-nums">
+                    {reached ? fmtDate(ts as string) : "—"}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
+
       {/* Campaign details */}
       {campaign && (
         <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4 space-y-3">

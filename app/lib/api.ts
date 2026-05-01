@@ -186,6 +186,14 @@ export interface OutreachMonthlyMetric {
   emails_replied: number;
 }
 
+export interface FunnelStage {
+  stage: string;
+  label: string;
+  users_reached: number;
+  drop_off_from_prev: number | null;
+  drop_off_pct_from_prev: number | null;
+}
+
 export interface OutreachOverview {
   total_orders: number;
   paid_orders: number;
@@ -199,13 +207,31 @@ export interface OutreachOverview {
   reply_rate_pct: number;
   orders_by_status: Record<string, number>;
   monthly_metrics: OutreachMonthlyMetric[];
+  funnel?: FunnelStage[];
 }
+
+export type FunnelStageKey =
+  | "resume_uploaded"
+  | "quiz_started"
+  | "quiz_completed"
+  | "leads_generated"
+  | "payment_page_reached"
+  | "payment_made"
+  | "gmail_connected"
+  | "email_style_selected"
+  | "campaign_setup"
+  | "campaign_launched"
+  | "campaign_paused"
+  | "campaign_completed";
+
+export type StageTimestamps = Partial<Record<FunnelStageKey, string | null>>;
 
 export interface OutreachUserRow {
   user_id: string;
   user_name: string;
   user_email: string;
   total_orders: number;
+  stage_timestamps?: StageTimestamps;
   active_order_status: string | null;
   active_order_id: number | null;
   active_campaign_id: number | null;
@@ -261,6 +287,7 @@ export interface OutreachOrderDetail {
   leads_target: number | null;
   is_stuck: boolean;
   action_log: Array<{ ts: string; msg: string }>;
+  stage_timestamps?: StageTimestamps;
   created_at: string | null;
   updated_at: string | null;
   campaign: {
