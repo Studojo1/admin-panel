@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Chart as ChartJS,
@@ -153,10 +153,21 @@ export default function OutreachOrders() {
   const [usersLoading, setUsersLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [offset, setOffset] = useState(0);
+  // Pagination is URL-driven — ?page=2 in the address bar is the source of
+  // truth. This sidesteps any stale-closure / effect-ordering bugs and lets
+  // the user share/bookmark a specific page.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const limit = 50;
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
+  const offset = (page - 1) * limit;
+  const goToPage = useCallback((nextPage: number) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextPage <= 1) next.delete("page"); else next.set("page", String(nextPage));
+    setSearchParams(next, { replace: false });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [searchParams, setSearchParams]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const limit = 50;
 
   const loadOverview = useCallback(async () => {
     try {
@@ -428,12 +439,12 @@ export default function OutreachOrders() {
             >
               <SearchInput
                 value={search}
-                onChange={(val) => { setSearch(val); setOffset(0); }}
+                onChange={(val) => { setSearch(val); goToPage(1); }}
                 placeholder="Search by name or email..."
               />
               <select
                 value={statusFilter}
-                onChange={(e) => { setStatusFilter(e.target.value); setOffset(0); }}
+                onChange={(e) => { setStatusFilter(e.target.value); goToPage(1); }}
                 className="rounded-2xl border-2 border-neutral-900 bg-white px-4 py-3 font-['Satoshi'] text-base font-normal text-neutral-900 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] transition-shadow focus:outline-none focus:shadow-[6px_6px_0px_0px_rgba(25,26,35,1)]"
               >
                 <option value="">All Statuses</option>
@@ -453,7 +464,9 @@ export default function OutreachOrders() {
               </div>
             ) : users.length > 0 ? (
               <>
-                <div className="overflow-x-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                {/* key={page} forces React to remount the table when the
+                    page changes — kills any chance of stale row state. */}
+                <div key={page} className="overflow-x-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="border-b-2 border-neutral-900 bg-neutral-50">
@@ -558,37 +571,34 @@ export default function OutreachOrders() {
                   </table>
                 </div>
 
-                {/* Pagination */}
-                <div className="mt-6 flex items-center justify-between">
+                {/* Pagination — URL-driven (?page=N) so it can't get out of
+                    sync with React state. Page number is the source of truth. */}
+                <div className="mt-6 flex items-center justify-between gap-4 flex-wrap">
                   <p className="font-['Satoshi'] text-sm text-neutral-600">
-                    Showing {users.length === 0 ? 0 : offset + 1}
-                    {users.length > 1 ? `–${offset + users.length}` : ""} of {total} users
+                    Showing <span className="font-bold text-neutral-900">
+                      {users.length === 0 ? 0 : offset + 1}–{offset + users.length}
+                    </span> of <span className="font-bold text-neutral-900">{total}</span> users
                     {search && ` matching "${search}"`}
                   </p>
-                  <div className="flex gap-4">
+                  <div className="flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setOffset(Math.max(0, offset - limit));
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                      disabled={offset === 0 || usersLoading}
+                      onClick={(e) => { e.preventDefault(); goToPage(page - 1); }}
+                      disabled={page <= 1 || usersLoading}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
-                      Previous
+                      ← Previous
                     </button>
+                    <span className="font-['Satoshi'] text-sm font-bold text-neutral-900 px-3 py-2 rounded-lg bg-violet-100 border-2 border-violet-300">
+                      Page {page} of {Math.max(1, Math.ceil(total / limit))}
+                    </span>
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setOffset(offset + limit);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                      disabled={offset + limit >= total || usersLoading}
+                      onClick={(e) => { e.preventDefault(); goToPage(page + 1); }}
+                      disabled={offset + users.length >= total || usersLoading}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
-                      Next
+                      Next →
                     </button>
                   </div>
                 </div>
