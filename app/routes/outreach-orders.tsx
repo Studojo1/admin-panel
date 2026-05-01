@@ -260,7 +260,15 @@ export default function OutreachOrders() {
               transition={{ duration: 0.5, delay: 0.1 }}
               className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4"
             >
-              <StatCard value={overview.active_orders} label="Active Orders" color="orange" delay={0} />
+              {/* Top-of-funnel: distinct users who uploaded a resume.
+                  Replaces the old "Active Orders" stat which only counted
+                  mid-flight statuses and so undercounted the real funnel. */}
+              <StatCard
+                value={overview.funnel?.find(s => s.stage === "resume_uploaded")?.users_reached ?? overview.active_orders}
+                label="Funnel Entries"
+                color="orange"
+                delay={0}
+              />
               <StatCard
                 value={overview.stuck_orders}
                 label="Stuck Orders"
@@ -553,20 +561,31 @@ export default function OutreachOrders() {
                 {/* Pagination */}
                 <div className="mt-6 flex items-center justify-between">
                   <p className="font-['Satoshi'] text-sm text-neutral-600">
-                    Showing {users.length} of {total} users
+                    Showing {users.length === 0 ? 0 : offset + 1}
+                    {users.length > 1 ? `–${offset + users.length}` : ""} of {total} users
                     {search && ` matching "${search}"`}
                   </p>
                   <div className="flex gap-4">
                     <button
-                      onClick={() => { setOffset(Math.max(0, offset - limit)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                      disabled={offset === 0}
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setOffset(Math.max(0, offset - limit));
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      disabled={offset === 0 || usersLoading}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
                       Previous
                     </button>
                     <button
-                      onClick={() => { setOffset(offset + limit); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                      disabled={offset + limit >= total}
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setOffset(offset + limit);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      disabled={offset + limit >= total || usersLoading}
                       className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
                     >
                       Next
