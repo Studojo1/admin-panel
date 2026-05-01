@@ -212,7 +212,6 @@ export interface OutreachOverview {
 
 export type FunnelStageKey =
   | "resume_uploaded"
-  | "quiz_started"
   | "quiz_completed"
   | "leads_generated"
   | "payment_page_reached"
@@ -232,6 +231,8 @@ export interface OutreachUserRow {
   user_email: string;
   total_orders: number;
   stage_timestamps?: StageTimestamps;
+  current_stage?: FunnelStageKey | null;
+  current_stage_label?: string | null;
   active_order_status: string | null;
   active_order_id: number | null;
   active_campaign_id: number | null;

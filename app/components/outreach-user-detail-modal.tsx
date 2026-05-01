@@ -134,7 +134,6 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
             {(
               [
                 ["resume_uploaded",       "Resume uploaded"],
-                ["quiz_started",          "Quiz started"],
                 ["quiz_completed",        "Quiz completed"],
                 ["leads_generated",       "Leads generated"],
                 ["payment_page_reached",  "Payment page reached"],

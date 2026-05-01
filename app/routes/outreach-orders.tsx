@@ -52,12 +52,12 @@ const STATUS_ORDER = [
   "completed",
 ];
 
-// 12-stage funnel — keep in sync with FUNNEL_STAGES in api/routes_admin.py.
-// Used for the per-user "journey" dot-strip in the table.
+// 11-stage funnel (quiz_started removed — never had a backfill signal and
+// adds no analytic value going forward). Keep in sync with FUNNEL_STAGES
+// in api/routes_admin.py. Used for the per-user "journey" dot-strip.
 const FUNNEL_STAGE_KEYS: { key: FunnelStageKey; short: string }[] = [
   { key: "resume_uploaded",       short: "Resume" },
-  { key: "quiz_started",          short: "Quiz▶" },
-  { key: "quiz_completed",        short: "Quiz✓" },
+  { key: "quiz_completed",        short: "Quiz" },
   { key: "leads_generated",       short: "Leads" },
   { key: "payment_page_reached",  short: "Pay➝" },
   { key: "payment_made",          short: "Paid" },
@@ -68,6 +68,22 @@ const FUNNEL_STAGE_KEYS: { key: FunnelStageKey; short: string }[] = [
   { key: "campaign_paused",       short: "Pause" },
   { key: "campaign_completed",    short: "Done" },
 ];
+
+// Funnel-stage badge colours for the Status column. Maps the latest
+// reached stage to a colour pair so the eye can scan progress at a glance.
+const STAGE_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
+  resume_uploaded:      { bg: "bg-gray-100",    text: "text-gray-700"    },
+  quiz_completed:       { bg: "bg-orange-100",  text: "text-orange-700"  },
+  leads_generated:      { bg: "bg-cyan-100",    text: "text-cyan-700"    },
+  payment_page_reached: { bg: "bg-yellow-100",  text: "text-yellow-700"  },
+  payment_made:         { bg: "bg-lime-100",    text: "text-lime-700"    },
+  gmail_connected:      { bg: "bg-violet-100",  text: "text-violet-700"  },
+  email_style_selected: { bg: "bg-fuchsia-100", text: "text-fuchsia-700" },
+  campaign_setup:       { bg: "bg-amber-100",   text: "text-amber-700"   },
+  campaign_launched:    { bg: "bg-green-100",   text: "text-green-700"   },
+  campaign_paused:      { bg: "bg-orange-100",  text: "text-orange-700"  },
+  campaign_completed:   { bg: "bg-emerald-100", text: "text-emerald-700" },
+};
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; chart: string }> = {
   created:              { bg: "bg-gray-100",    text: "text-gray-700",    chart: "#9ca3af" },
@@ -524,9 +540,13 @@ export default function OutreachOrders() {
                     </thead>
                     <tbody>
                         {users.map((u) => {
-                          const sc = u.active_order_status
-                            ? STATUS_COLORS[u.active_order_status] ?? STATUS_COLORS.created
-                            : null;
+                          // Status badge shows the LATEST funnel stage the user
+                          // actually reached (Resume Uploaded / Quiz Completed /
+                          // ... / Campaign Completed) — not the raw OutreachOrder
+                          // status enum, which doesn't capture pre-order stages.
+                          const stageKey = u.current_stage ?? null;
+                          const stageLabel = u.current_stage_label ?? null;
+                          const stageColor = stageKey ? STAGE_BADGE_COLORS[stageKey] : null;
                           return (
                             <tr
                               key={u.user_id}
@@ -538,12 +558,12 @@ export default function OutreachOrders() {
                                 <div className="font-['Satoshi'] text-xs text-neutral-500">{u.user_email}</div>
                               </td>
                               <td className="px-4 py-4">
-                                {u.active_order_status ? (
-                                  <span className={`inline-block rounded-lg px-3 py-1 font-['Satoshi'] text-xs font-medium ${sc!.bg} ${sc!.text}`}>
-                                    {formatStatus(u.active_order_status)}
+                                {stageLabel && stageColor ? (
+                                  <span className={`inline-block rounded-lg px-3 py-1 font-['Satoshi'] text-xs font-medium ${stageColor.bg} ${stageColor.text}`}>
+                                    {stageLabel}
                                   </span>
                                 ) : (
-                                  <span className="font-['Satoshi'] text-xs text-neutral-400">No active order</span>
+                                  <span className="font-['Satoshi'] text-xs text-neutral-400">No stage reached</span>
                                 )}
                               </td>
                               <td className="px-3 py-4">
