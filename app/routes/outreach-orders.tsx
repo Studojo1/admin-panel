@@ -487,8 +487,11 @@ export default function OutreachOrders() {
               </select>
             </motion.div>
 
-            {/* Users Table */}
-            {usersLoading ? (
+            {/* Users Table — only show the centered spinner on the FIRST
+                load (no rows yet). For subsequent infinite-scroll fetches
+                the table stays mounted so its scroll position is preserved;
+                the in-table sentinel row handles its own loading state. */}
+            {usersLoading && users.length === 0 ? (
               <div className="flex items-center justify-center py-16">
                 <div className="text-center">
                   <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent" />
