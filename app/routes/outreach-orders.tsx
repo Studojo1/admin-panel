@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Chart as ChartJS,
@@ -153,19 +153,17 @@ export default function OutreachOrders() {
   const [usersLoading, setUsersLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  // Pagination is URL-driven — ?page=2 in the address bar is the source of
-  // truth. This sidesteps any stale-closure / effect-ordering bugs and lets
-  // the user share/bookmark a specific page.
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [hasMore, setHasMore] = useState(true);
+  const [requestedOffset, setRequestedOffset] = useState(0);
+  // Synchronous guard against double-loading when the IntersectionObserver
+  // fires multiple times before React reflects the loading state. Refs are
+  // updated atomically; useState is async/batched.
+  const loadingRef = useRef(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLTableRowElement>(null);
   const limit = 50;
-  const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
-  const offset = (page - 1) * limit;
-  const goToPage = useCallback((nextPage: number) => {
-    const next = new URLSearchParams(searchParams);
-    if (nextPage <= 1) next.delete("page"); else next.set("page", String(nextPage));
-    setSearchParams(next, { replace: false });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [searchParams, setSearchParams]);
+  // Filter change → reset (combined into a single key so we can wipe + refetch atomically)
+  const filterKey = `${search}|${statusFilter}`;
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -186,26 +184,61 @@ export default function OutreachOrders() {
     }
   }, [isAuthorized, loadOverview]);
 
+  // Reset accumulated rows whenever the filter changes
+  useEffect(() => {
+    setUsers([]);
+    setRequestedOffset(0);
+    setHasMore(true);
+    loadingRef.current = false;
+  }, [filterKey]);
+
+  // Single fetch effect — fires on filter reset (offset back to 0) and on
+  // every subsequent loadMore() call (which bumps requestedOffset by limit).
   useEffect(() => {
     if (!isAuthorized) return;
-    const controller = new AbortController();
+    let cancelled = false;
     setUsersLoading(true);
-    listOutreachUsers(limit, offset, search || undefined, statusFilter || undefined)
+    loadingRef.current = true;
+    listOutreachUsers(limit, requestedOffset, search || undefined, statusFilter || undefined)
       .then((data) => {
-        if (controller.signal.aborted) return;
-        setUsers(data.users || []);
+        if (cancelled) return;
+        const fetched = data.users || [];
+        setUsers((prev) => (requestedOffset === 0 ? fetched : [...prev, ...fetched]));
         setTotal(data.total || 0);
+        setHasMore(requestedOffset + fetched.length < (data.total || 0));
       })
       .catch((err) => {
-        if (controller.signal.aborted) return;
+        if (cancelled) return;
         toast.error(err.message || "Failed to load users");
-        setUsers([]);
+        setHasMore(false);
       })
       .finally(() => {
-        if (!controller.signal.aborted) setUsersLoading(false);
+        if (!cancelled) setUsersLoading(false);
+        loadingRef.current = false;
       });
-    return () => controller.abort();
-  }, [isAuthorized, offset, search, statusFilter]);
+    return () => { cancelled = true; };
+  }, [isAuthorized, requestedOffset, filterKey]);
+
+  // Infinite scroll — observe a sentinel row at the bottom of the scroll
+  // container; when it intersects, request the next chunk. rootMargin of
+  // 200px pre-fetches before the user actually hits the bottom.
+  const loadMore = useCallback(() => {
+    if (loadingRef.current || !hasMore) return;
+    loadingRef.current = true;
+    setRequestedOffset((prev) => prev + limit);
+  }, [hasMore]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = scrollContainerRef.current;
+    if (!sentinel || !root) return;
+    const obs = new IntersectionObserver(
+      (entries) => { if (entries.some((e) => e.isIntersecting)) loadMore(); },
+      { root, rootMargin: "200px" }
+    );
+    obs.observe(sentinel);
+    return () => obs.disconnect();
+  }, [loadMore, users.length]);
 
   if (isPending || isAuthorized === null) {
     return (
@@ -439,12 +472,12 @@ export default function OutreachOrders() {
             >
               <SearchInput
                 value={search}
-                onChange={(val) => { setSearch(val); goToPage(1); }}
+                onChange={(val) => { setSearch(val); }}
                 placeholder="Search by name or email..."
               />
               <select
                 value={statusFilter}
-                onChange={(e) => { setStatusFilter(e.target.value); goToPage(1); }}
+                onChange={(e) => { setStatusFilter(e.target.value); }}
                 className="rounded-2xl border-2 border-neutral-900 bg-white px-4 py-3 font-['Satoshi'] text-base font-normal text-neutral-900 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] transition-shadow focus:outline-none focus:shadow-[6px_6px_0px_0px_rgba(25,26,35,1)]"
               >
                 <option value="">All Statuses</option>
@@ -464,12 +497,17 @@ export default function OutreachOrders() {
               </div>
             ) : users.length > 0 ? (
               <>
-                {/* key={page} forces React to remount the table when the
-                    page changes — kills any chance of stale row state. */}
-                <div key={page} className="overflow-x-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                {/* Bounded-height container with internal scroll. The
+                    table thead is sticky so headers stay visible while
+                    rows scroll past, and a sentinel <tr> at the bottom
+                    triggers an infinite-scroll fetch via IntersectionObserver. */}
+                <div
+                  ref={scrollContainerRef}
+                  className="overflow-x-auto overflow-y-auto max-h-[640px] rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+                >
                   <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="border-b-2 border-neutral-900 bg-neutral-50">
+                    <thead className="sticky top-0 z-10 bg-neutral-50 shadow-[0_2px_0_0_rgba(25,26,35,1)]">
+                      <tr className="bg-neutral-50">
                         <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">User</th>
                         <th className="px-4 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Status</th>
                         <th className="px-3 py-4 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Journey</th>
@@ -567,40 +605,43 @@ export default function OutreachOrders() {
                             </tr>
                           );
                         })}
+                      {/* Sentinel row — invisible, used by IntersectionObserver
+                          to detect when the user has scrolled near the bottom
+                          and trigger fetching the next chunk. */}
+                      {hasMore && (
+                        <tr ref={sentinelRef}>
+                          <td colSpan={9} className="py-6 text-center">
+                            {usersLoading ? (
+                              <span className="font-['Satoshi'] text-sm text-neutral-500">
+                                Loading more…
+                              </span>
+                            ) : (
+                              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-violet-400 border-r-transparent" />
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      {!hasMore && (
+                        <tr>
+                          <td colSpan={9} className="py-4 text-center font-['Satoshi'] text-xs text-neutral-400">
+                            End of list — all {total} users loaded
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
 
-                {/* Pagination — URL-driven (?page=N) so it can't get out of
-                    sync with React state. Page number is the source of truth. */}
-                <div className="mt-6 flex items-center justify-between gap-4 flex-wrap">
+                {/* Footer counter — shows progress of how many rows are
+                    currently rendered vs total. Updates live as more chunks
+                    are streamed in by the infinite-scroll observer. */}
+                <div className="mt-4 flex items-center justify-between gap-4 flex-wrap">
                   <p className="font-['Satoshi'] text-sm text-neutral-600">
-                    Showing <span className="font-bold text-neutral-900">
-                      {users.length === 0 ? 0 : offset + 1}–{offset + users.length}
-                    </span> of <span className="font-bold text-neutral-900">{total}</span> users
+                    Showing <span className="font-bold text-neutral-900">{users.length}</span>
+                    {" "}of <span className="font-bold text-neutral-900">{total}</span> users
                     {search && ` matching "${search}"`}
+                    {!hasMore && total > 0 && " — scroll to top to view earlier rows"}
                   </p>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); goToPage(page - 1); }}
-                      disabled={page <= 1 || usersLoading}
-                      className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
-                    >
-                      ← Previous
-                    </button>
-                    <span className="font-['Satoshi'] text-sm font-bold text-neutral-900 px-3 py-2 rounded-lg bg-violet-100 border-2 border-violet-300">
-                      Page {page} of {Math.max(1, Math.ceil(total / limit))}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); goToPage(page + 1); }}
-                      disabled={offset + users.length >= total || usersLoading}
-                      className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform disabled:cursor-not-allowed disabled:opacity-50 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:hover:translate-x-0 disabled:hover:translate-y-0"
-                    >
-                      Next →
-                    </button>
-                  </div>
                 </div>
               </>
             ) : (
