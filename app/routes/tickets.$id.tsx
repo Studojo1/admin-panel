@@ -19,6 +19,12 @@ interface TicketMessage {
   created_at: string;
 }
 
+interface TicketAttachment {
+  url: string;
+  content_type?: string;
+  filename?: string;
+}
+
 interface TicketDetail {
   id: number;
   user_id: string;
@@ -30,6 +36,7 @@ interface TicketDetail {
   source: string;
   context: Record<string, any> | null;
   assignee_email: string | null;
+  attachments: TicketAttachment[] | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -244,6 +251,31 @@ export default function TicketDetailPage({ params }: Route.ComponentProps) {
                         </div>
                       ),
                     )}
+                  </div>
+                )}
+                {detail.attachments && detail.attachments.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1.5">
+                      Screenshots ({detail.attachments.length})
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      {detail.attachments.map((a, i) => (
+                        <a
+                          key={i}
+                          href={a.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block overflow-hidden rounded-lg border-2 border-neutral-300 bg-neutral-100 hover:border-neutral-900 transition-colors"
+                          title={a.filename || `Screenshot ${i + 1}`}
+                        >
+                          <img
+                            src={a.url}
+                            alt={a.filename || `Screenshot ${i + 1}`}
+                            className="block h-24 w-full object-cover"
+                          />
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
