@@ -15,6 +15,7 @@ const NAV_LINKS = [
   { to: "/careers", label: "Careers" },
   { to: "/chat-logs", label: "Chat Logs" },
   { to: "/ops-alerts", label: "Ops Alerts" },
+  { to: "/tickets", label: "Tickets" },
   { to: "/consultation-signups", label: "Free Call Signups" },
   { to: "/email-sequences", label: "Emails" },
   { to: "/analytics", label: "Analytics" },
