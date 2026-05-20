@@ -34,7 +34,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const tRes = await db.execute(sql`
     SELECT id, user_id, user_email, user_name, category, priority, status,
-           source, context, assignee_email,
+           source, context, assignee_email, attachments,
            created_at, updated_at, closed_at
     FROM tickets WHERE id = ${id} LIMIT 1
   `);
