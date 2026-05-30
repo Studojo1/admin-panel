@@ -14,10 +14,11 @@ const CC_API = "https://studojo.pro/api/v1/cc";
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface OverviewData {
-  students: { total: number; active_today: number; active_this_week: number; active_this_month: number };
+  students: { total: number; active_last_hour: number; active_today: number; active_this_week: number; active_this_month: number };
   conversations: { total: number; avg_messages_per_session: number };
   dna: { total_generated: number; accuracy_rate: number; inaccuracy_count: number };
   tools: { total_clicks: number };
+  active_per_hour?: { hour: string; label: string; active_users: number }[];
   generated_at: string;
 }
 
@@ -375,12 +376,41 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
           <div>
             {overview ? (
               <>
-                <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-                  <StatCard num={overview.students.total} label="Total Students" sub={`${overview.students.active_today} active today`} color="purple" />
-                  <StatCard num={overview.conversations.total} label="Conversations" sub={`${overview.conversations.avg_messages_per_session} msgs/session avg`} color="blue" />
+                <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+                  <StatCard num={overview.students.active_last_hour ?? 0} label="Active (last hour)" sub={`${overview.students.active_today} today · ${overview.students.active_this_week} this week`} color="purple" />
+                  <StatCard num={overview.students.total} label="Total Students" sub={`${overview.students.active_this_month} active this month`} color="blue" />
                   <StatCard num={overview.dna.total_generated} label="DNAs Built" sub={`${overview.dna.accuracy_rate}% accuracy`} color="green" />
                   <StatCard num={`${funnel?.overall_completion_rate ?? 0}%`} label="Completion Rate" sub="landing → roadmap" color="red" />
                 </div>
+
+                {/* Active users per hour — last 24h */}
+                {overview.active_per_hour && overview.active_per_hour.length > 0 && (
+                  <div className="mb-6 rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                    <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">Active users per hour</h3>
+                    <p className="mb-4 text-xs text-neutral-500">Distinct students who sent a message, last 24 hours</p>
+                    <div className="flex items-end gap-1" style={{ height: 120 }}>
+                      {overview.active_per_hour.map((h, i) => {
+                        const max = Math.max(...overview.active_per_hour!.map((x) => x.active_users), 1);
+                        const pct = (h.active_users / max) * 100;
+                        return (
+                          <div key={i} className="group flex flex-1 flex-col items-center justify-end" style={{ height: "100%" }}>
+                            <div className="mb-1 text-[10px] font-bold text-neutral-700 opacity-0 group-hover:opacity-100">{h.active_users}</div>
+                            <div
+                              className="w-full rounded-t"
+                              style={{
+                                height: `${Math.max(pct, h.active_users > 0 ? 6 : 1)}%`,
+                                background: h.active_users > 0 ? "#7c3aed" : "#e5e7eb",
+                                transition: "height 0.6s ease",
+                              }}
+                              title={`${h.label}: ${h.active_users} active`}
+                            />
+                            {i % 3 === 0 && <div className="mt-1 text-[9px] text-neutral-400">{h.label}</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 <div className="mb-6 grid gap-6 md:grid-cols-2">
                   {/* Mini funnel */}
                   <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
