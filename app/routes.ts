@@ -40,6 +40,5 @@ export default [
   route("api/posthog", "routes/api.posthog.tsx"),
   route("api/analytics", "routes/api.analytics.tsx"),
   route("api/outreach", "routes/api.outreach.tsx"),
-  route("career-coach", "routes/career-coach.tsx"),
 ] satisfies RouteConfig;
 
