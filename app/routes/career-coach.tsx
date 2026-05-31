@@ -34,12 +34,28 @@ interface FunnelStage {
   stage: string;
   count: number;
   conversion_rate: number;
+  step_conversion_rate?: number;
+  dropped_from_prev?: number;
+  note?: string;
 }
 
 interface FunnelData {
   funnel_stages: FunnelStage[];
   overall_completion_rate: number;
   biggest_drop_off: string;
+  biggest_drop_off_detail?: string;
+  side_actions?: {
+    uploaded_resume: number;
+    logged_check_in: number;
+    clicked_resume_maker: number;
+    clicked_outreach_dojo: number;
+    clicked_any_tool: number;
+    explored_new_path: number;
+  };
+  profiling_depth?: {
+    buckets: Record<string, number>;
+    avg_user_messages: number;
+  };
 }
 
 interface DropoffStage {
@@ -493,52 +509,107 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
         {/* ── Funnel ───────────────────────────────────────────────────────── */}
         {tab === "funnel" && (
           <div className="space-y-6">
+            {/* Biggest drop-off callout */}
+            {funnel?.biggest_drop_off_detail && (
+              <div className="rounded-2xl border-2 border-red-500 bg-red-50 p-5 shadow-[4px_4px_0px_0px_rgba(239,68,68,0.4)]">
+                <div className="text-xs font-bold uppercase tracking-widest text-red-500">Biggest drop-off</div>
+                <div className="mt-1 font-['Clash_Display'] text-lg font-bold text-neutral-900">{funnel.biggest_drop_off}</div>
+                <div className="text-sm text-neutral-600">{funnel.biggest_drop_off_detail}</div>
+              </div>
+            )}
+
+            {/* Step-by-step funnel with per-step conversion + drop */}
             <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
-              <h3 className="mb-5 font-['Clash_Display'] text-base font-bold">Conversion by Stage</h3>
+              <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">The full journey, step by step</h3>
+              <p className="mb-5 text-xs text-neutral-500">Each bar shows students who reached that step. % of previous step is where the drop happens.</p>
               {(funnel?.funnel_stages ?? []).map((stage, i) => {
                 const max = Math.max(...(funnel?.funnel_stages ?? []).map((s) => s.count), 1);
                 const isBiggest = stage.stage === funnel?.biggest_drop_off;
+                const stepConv = stage.step_conversion_rate ?? stage.conversion_rate;
                 return (
-                  <div key={stage.stage} className="mb-4 flex items-center gap-3">
-                    <div className="flex w-44 flex-shrink-0 items-center gap-2 text-xs font-semibold">
-                      {stage.stage}
-                      {isBiggest && (
-                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">biggest drop</span>
-                      )}
-                    </div>
-                    <div className="flex-1 overflow-hidden rounded-full bg-neutral-100" style={{ height: 28 }}>
-                      <div
-                        className="flex h-full items-center rounded-full pl-3"
-                        style={{
-                          width: `${Math.max((stage.count / max) * 100, 2)}%`,
-                          background: FUNNEL_COLORS[i % FUNNEL_COLORS.length],
-                          transition: "width 0.8s ease",
-                        }}
-                      >
-                        <span className="text-xs font-bold text-white">{stage.count} students</span>
+                  <div key={stage.stage} className="mb-5">
+                    <div className="mb-1 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <span className="text-neutral-400">{i + 1}.</span> {stage.stage}
+                        {isBiggest && (
+                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-600">biggest drop</span>
+                        )}
                       </div>
+                      <div className="text-xs text-neutral-400">{stage.note}</div>
                     </div>
-                    <div className={`w-12 text-right text-xs font-semibold ${stage.conversion_rate < 30 ? "text-red-500" : "text-neutral-600"}`}>
-                      {stage.conversion_rate}%
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 overflow-hidden rounded-full bg-neutral-100" style={{ height: 28 }}>
+                        <div
+                          className="flex h-full items-center rounded-full pl-3"
+                          style={{
+                            width: `${Math.max((stage.count / max) * 100, 3)}%`,
+                            background: isBiggest ? "#EF4444" : FUNNEL_COLORS[i % FUNNEL_COLORS.length],
+                            transition: "width 0.8s ease",
+                          }}
+                        >
+                          <span className="whitespace-nowrap text-xs font-bold text-white">{stage.count} students</span>
+                        </div>
+                      </div>
+                      <div className="w-28 text-right text-xs">
+                        <span className={`font-bold ${stepConv < 60 ? "text-red-500" : "text-neutral-700"}`}>{stepConv}%</span>
+                        <span className="text-neutral-400"> of prev</span>
+                        {!!stage.dropped_from_prev && (
+                          <div className="text-[11px] text-red-400">−{stage.dropped_from_prev} dropped</div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
               })}
               {!(funnel?.funnel_stages ?? []).length && <EmptyState loading={loading} />}
             </div>
-            <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
-              <h3 className="mb-5 font-['Clash_Display'] text-base font-bold">Drop-off by Stage</h3>
-              {(dropoffs?.dropoff_by_stage ?? []).map((d) => (
-                <div key={d.stage} className="flex items-center justify-between border-b border-neutral-100 py-3 last:border-0">
-                  <div>
-                    <div className="font-semibold">{d.stage}</div>
-                    <div className="text-xs text-neutral-400">{d.avg_messages_before_dropoff.toFixed(1)} average messages before dropping</div>
-                  </div>
-                  <div className="text-3xl font-black text-red-500">{d.count}</div>
+
+            {/* Profiling depth — where in the conversation they stall */}
+            {funnel?.profiling_depth && (
+              <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">Conversation depth</h3>
+                <p className="mb-4 text-xs text-neutral-500">
+                  How many messages students send. Profiling usually needs ~7+ to complete — short conversations are where DNA never gets built.
+                  Average: <span className="font-bold text-neutral-700">{funnel.profiling_depth.avg_user_messages} messages</span>
+                </p>
+                {Object.entries(funnel.profiling_depth.buckets).map(([bucket, count]) => {
+                  const vals = Object.values(funnel.profiling_depth!.buckets);
+                  const max = Math.max(...vals, 1);
+                  return (
+                    <div key={bucket} className="mb-2 flex items-center gap-3">
+                      <div className="w-20 flex-shrink-0 text-xs font-semibold">{bucket}</div>
+                      <div className="flex-1 overflow-hidden rounded-full bg-neutral-100" style={{ height: 20 }}>
+                        <div className="flex h-full items-center rounded-full pl-2" style={{ width: `${Math.max((count / max) * 100, 3)}%`, background: "#7c3aed" }}>
+                          <span className="text-[11px] font-bold text-white">{count}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Side actions — engagement signals */}
+            {funnel?.side_actions && (
+              <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                <h3 className="mb-4 font-['Clash_Display'] text-base font-bold">Engagement actions</h3>
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                  {[
+                    ["Uploaded resume", funnel.side_actions.uploaded_resume],
+                    ["Logged a check-in", funnel.side_actions.logged_check_in],
+                    ["Clicked Resume Maker", funnel.side_actions.clicked_resume_maker],
+                    ["Clicked Outreach Dojo", funnel.side_actions.clicked_outreach_dojo],
+                    ["Clicked any tool", funnel.side_actions.clicked_any_tool],
+                    ["Explored a new path", funnel.side_actions.explored_new_path],
+                  ].map(([label, val]) => (
+                    <div key={label as string} className="rounded-xl border border-neutral-200 p-3">
+                      <div className="text-2xl font-black text-neutral-900">{val as number}</div>
+                      <div className="text-xs text-neutral-500">{label as string}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-              {!(dropoffs?.dropoff_by_stage ?? []).length && <EmptyState loading={loading} />}
-            </div>
+              </div>
+            )}
           </div>
         )}
 
