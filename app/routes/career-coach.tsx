@@ -124,7 +124,40 @@ interface StudentDetail {
   };
   student?: {
     name?: string;
+    email?: string;
     session_count?: number;
+  };
+}
+
+interface StudentActivity {
+  main_platform_linked?: boolean;
+  coach?: {
+    name?: string;
+    email?: string;
+    first_seen?: string;
+    last_seen?: string;
+    session_count?: number;
+    events?: { type: string; data?: Record<string, unknown>; at?: string }[];
+    states_reached?: { state: string; first_at?: string }[];
+  };
+  main_platform?: {
+    found?: boolean;
+    user?: {
+      name?: string;
+      email?: string;
+      created_at?: string;
+      last_login_method?: string | null;
+      email_verified?: boolean;
+      role?: string | null;
+    };
+    signup_methods?: { method: string; provider_id: string; linked_at?: string }[];
+    logins?: { at?: string; ip?: string; user_agent?: string }[];
+    tools?: {
+      resume_maker?: { used: boolean; count: number; items?: { name?: string; created_at?: string }[] };
+      internship_applications?: { used: boolean; count: number; items?: { status?: string; created_at?: string }[] };
+      career_applications?: { used: boolean; count: number; items?: { status?: string; payment_status?: string; amount?: number; created_at?: string }[] };
+    };
+    profile?: { referral_source?: string | null; college?: string; year_of_study?: string; course?: string } | null;
   };
 }
 
@@ -211,6 +244,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
 
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   const [studentDetail, setStudentDetail] = useState<StudentDetail | null>(null);
+  const [studentActivity, setStudentActivity] = useState<StudentActivity | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [adminNotes, setAdminNotes] = useState<Record<string, string>>({});
 
@@ -262,6 +296,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     setSelectedStudent(id);
     setLoadingDetail(true);
     setStudentDetail(null);
+    setStudentActivity(null);
     try {
       const dash = await fetch(`${CC_API}/dashboard/${id}`, {
         headers: ccHeaders(),
@@ -271,6 +306,15 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       toast.error("Could not load student detail");
     } finally {
       setLoadingDetail(false);
+    }
+    // Activity + cross-platform sign-in/tool log (best-effort, non-blocking)
+    try {
+      const act = await fetch(`${CC_API}/admin/student/${id}/activity`, {
+        headers: ccHeaders(),
+      }).then((r) => (r.ok ? r.json() : null));
+      if (act) setStudentActivity(act);
+    } catch {
+      /* activity is supplementary — ignore failures */
     }
   }
 
@@ -784,6 +828,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                 <StudentPanel
                   id={selectedStudent}
                   detail={studentDetail}
+                  activity={studentActivity}
                   student={students.find((s) => s.id === selectedStudent)}
                   note={loadNote(selectedStudent)}
                   onSaveNote={(note) => saveNote(selectedStudent, note)}
@@ -836,12 +881,14 @@ function BarList({ items, color }: { items: { label: string; count: number }[]; 
 function StudentPanel({
   id,
   detail,
+  activity,
   student,
   note,
   onSaveNote,
 }: {
   id: string;
   detail: StudentDetail;
+  activity?: StudentActivity | null;
   student?: StudentRow;
   note: string;
   onSaveNote: (note: string) => void;
@@ -905,6 +952,9 @@ function StudentPanel({
         </div>
       )}
 
+      {/* Cross-platform activity & sign-in log */}
+      <ActivitySection activity={activity} coachEmail={s.email ?? student?.email} />
+
       {/* Admin notes */}
       <div className="mb-5">
         <div className="mb-2 text-xs font-bold uppercase tracking-widest text-neutral-400">Admin Notes</div>
@@ -924,6 +974,158 @@ function StudentPanel({
       </div>
 
       <div className="text-xs text-neutral-400">Student ID: {id}</div>
+    </div>
+  );
+}
+
+// Human-readable labels for coach analytics event types.
+function eventLabel(type: string): string {
+  const map: Record<string, string> = {
+    conversation_started: "Started a conversation",
+    new_path_exploration_started: "Started exploring a new path",
+    resume_uploaded: "Uploaded a resume",
+    check_in_logged: "Logged a check-in",
+    state_reached_profiling: "Reached: Profiling",
+    state_reached_career_analysis: "Reached: Career Analysis",
+    state_reached_dna_review: "Reached: Career DNA review",
+    state_reached_roadmap: "Reached: Roadmap",
+    state_reached_ongoing_support: "Reached: Ongoing support",
+    tool_click_resume_maker: "Clicked → Resume Maker",
+    tool_click_outreach_dojo: "Clicked → Outreach Dojo",
+    tool_click_internship_dojo: "Clicked → Internship Dojo",
+    tool_click_reports: "Clicked → Reports",
+    tool_click_ai_risk: "Clicked → AI Risk Dojo",
+  };
+  if (map[type]) return map[type];
+  if (type.startsWith("tool_click_"))
+    return "Clicked → " + type.replace("tool_click_", "").replace(/_/g, " ");
+  if (type.startsWith("state_reached_"))
+    return "Reached: " + type.replace("state_reached_", "").replace(/_/g, " ");
+  return type.replace(/_/g, " ");
+}
+
+function ActivitySection({
+  activity,
+  coachEmail,
+}: {
+  activity?: StudentActivity | null;
+  coachEmail?: string | null;
+}) {
+  if (!activity) {
+    return (
+      <div className="mb-5 rounded-xl border border-neutral-100 bg-neutral-50 p-4 text-xs text-neutral-400">
+        Loading activity log…
+      </div>
+    );
+  }
+
+  const mp = activity.main_platform;
+  const linked = activity.main_platform_linked && mp?.found;
+  const tools = mp?.tools;
+  const events = activity.coach?.events ?? [];
+
+  return (
+    <div className="mb-5">
+      <div className="mb-2 text-xs font-bold uppercase tracking-widest text-neutral-400">
+        Activity &amp; Sign-in Log
+      </div>
+
+      {/* Account / sign-in */}
+      <div className="mb-3 rounded-xl border border-neutral-100 bg-neutral-50 p-4 space-y-2">
+        <div className="flex justify-between text-sm">
+          <span className="text-neutral-400">Email</span>
+          <span className="font-semibold">{mp?.user?.email ?? coachEmail ?? "—"}</span>
+        </div>
+        {linked ? (
+          <>
+            <div className="flex justify-between text-sm">
+              <span className="text-neutral-400">Signed up</span>
+              <span className="font-semibold">{fmtDate(mp?.user?.created_at)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-neutral-400">Sign-up method</span>
+              <span className="font-semibold">
+                {(mp?.signup_methods ?? []).map((m) => m.method).join(", ") || "—"}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-neutral-400">Last login method</span>
+              <span className="font-semibold">{mp?.user?.last_login_method ?? "—"}</span>
+            </div>
+            {mp?.profile?.referral_source && (
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-400">Heard about us via</span>
+                <span className="font-semibold">{mp.profile.referral_source}</span>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-xs text-neutral-400">
+            No main-platform (studojo.com) account linked to this email yet — the
+            person used the coach without signing in on the main site, or signed
+            in with a different email.
+          </div>
+        )}
+      </div>
+
+      {/* Tools used on the main platform */}
+      {linked && tools && (
+        <div className="mb-3 grid grid-cols-3 gap-2">
+          {[
+            { label: "Resume Maker", t: tools.resume_maker },
+            { label: "Internship apps", t: tools.internship_applications },
+            { label: "Career apps", t: tools.career_applications },
+          ].map(({ label, t }) => (
+            <div
+              key={label}
+              className={`rounded-xl border p-3 text-center ${
+                t?.used ? "border-emerald-300 bg-emerald-50" : "border-neutral-100 bg-neutral-50"
+              }`}
+            >
+              <div className={`text-lg font-black ${t?.used ? "text-emerald-700" : "text-neutral-300"}`}>
+                {t?.count ?? 0}
+              </div>
+              <div className="text-[10px] uppercase tracking-wide text-neutral-400">{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Recent logins */}
+      {linked && (mp?.logins ?? []).length > 0 && (
+        <details className="mb-3 rounded-xl border border-neutral-100 bg-white p-3">
+          <summary className="cursor-pointer text-xs font-bold text-neutral-500">
+            Recent logins ({mp!.logins!.length})
+          </summary>
+          <div className="mt-2 space-y-1">
+            {mp!.logins!.slice(0, 10).map((l, i) => (
+              <div key={i} className="flex justify-between gap-2 text-[11px] text-neutral-500">
+                <span>{fmtDateTime(l.at)}</span>
+                <span className="truncate text-right text-neutral-400" title={l.user_agent}>
+                  {l.ip ?? ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {/* Coach event timeline */}
+      <div className="rounded-xl border border-neutral-100 bg-white p-3">
+        <div className="mb-2 text-xs font-bold text-neutral-500">Career-coach activity</div>
+        {events.length ? (
+          <div className="space-y-1.5">
+            {events.slice(-25).reverse().map((e, i) => (
+              <div key={i} className="flex justify-between gap-2 text-[11px]">
+                <span className="font-medium text-neutral-700">{eventLabel(e.type)}</span>
+                <span className="shrink-0 text-neutral-400">{fmtDateTime(e.at)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-neutral-400">No tracked events yet.</p>
+        )}
+      </div>
     </div>
   );
 }
