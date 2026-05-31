@@ -9,7 +9,15 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Career Coach — Studojo Admin" }];
 }
 
-const CC_API = "https://studojo.pro/api/v1/cc";
+// Read the career-coach backend that matches this admin panel's environment.
+// admin.studojo.pro -> studojo.pro data (staging); everything else -> studojo.com
+// (production, where real students use the coach). Falls back to .com on the server.
+const CC_API = (() => {
+  if (typeof window !== "undefined" && window.location.hostname.includes(".pro")) {
+    return "https://studojo.pro/api/v1/cc";
+  }
+  return "https://studojo.com/api/v1/cc";
+})();
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
