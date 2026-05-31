@@ -19,6 +19,17 @@ const CC_API = (() => {
   return "https://studojo.com/api/v1/cc";
 })();
 
+// Main Studojo platform origin (for cross-platform user activity: sign-in
+// method, login history, tool usage). The admin panel calls it directly from
+// the browser using the shared .studojo.com / .studojo.pro session cookie, so
+// no server-to-server secret is needed.
+const MAIN_API = (() => {
+  if (typeof window !== "undefined" && window.location.hostname.includes(".pro")) {
+    return "https://studojo.pro";
+  }
+  return "https://studojo.com";
+})();
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface OverviewData {
@@ -307,15 +318,31 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     } finally {
       setLoadingDetail(false);
     }
-    // Activity + cross-platform sign-in/tool log (best-effort, non-blocking)
-    try {
-      const act = await fetch(`${CC_API}/admin/student/${id}/activity`, {
-        headers: ccHeaders(),
-      }).then((r) => (r.ok ? r.json() : null));
-      if (act) setStudentActivity(act);
-    } catch {
-      /* activity is supplementary — ignore failures */
+    // Activity + cross-platform sign-in/tool log (best-effort, non-blocking).
+    // Coach events come from the coach backend; main-platform sign-in/tool data
+    // is fetched directly from studojo.com using the admin's shared session
+    // cookie (so no server-to-server secret is required).
+    const email = students.find((s) => s.id === id)?.email ?? null;
+    const [coachAct, mainAct] = await Promise.all([
+      fetch(`${CC_API}/admin/student/${id}/activity`, { headers: ccHeaders() })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      email
+        ? fetch(
+            `${MAIN_API}/api/admin/cc-user-activity?email=${encodeURIComponent(email)}`,
+            { credentials: "include" },
+          )
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
+        : Promise.resolve(null),
+    ]);
+
+    const merged: StudentActivity = (coachAct as StudentActivity) ?? {};
+    if (mainAct && (mainAct as { found?: boolean }).found) {
+      merged.main_platform = mainAct;
+      merged.main_platform_linked = true;
     }
+    setStudentActivity(merged);
   }
 
   function saveNote(id: string, note: string) {
