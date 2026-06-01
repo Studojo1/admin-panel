@@ -19,17 +19,6 @@ const CC_API = (() => {
   return "https://studojo.com/api/v1/cc";
 })();
 
-// Main Studojo platform origin (for cross-platform user activity: sign-in
-// method, login history, tool usage). The admin panel calls it directly from
-// the browser using the shared .studojo.com / .studojo.pro session cookie, so
-// no server-to-server secret is needed.
-const MAIN_API = (() => {
-  if (typeof window !== "undefined" && window.location.hostname.includes(".pro")) {
-    return "https://studojo.pro";
-  }
-  return "https://studojo.com";
-})();
-
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface OverviewData {
@@ -91,6 +80,14 @@ interface StudentRow {
   created_at: string | null;
   has_resume: boolean;
   resume_filename: string | null;
+  main_platform?: {
+    linked: boolean;
+    signup_method: string;
+    signed_up_at: string | null;
+    resume_count: number;
+    internship_count: number;
+    career_app_count: number;
+  } | null;
 }
 
 interface ScoreImprover {
@@ -322,30 +319,16 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       setLoadingDetail(false);
     }
     // Activity + cross-platform sign-in/tool log (best-effort, non-blocking).
-    // Coach events come from the coach backend; main-platform sign-in/tool data
-    // is fetched directly from studojo.com using the admin's shared session
-    // cookie (so no server-to-server secret is required).
-    const email = students.find((s) => s.id === id)?.email ?? null;
-    const [coachAct, mainAct] = await Promise.all([
-      fetch(`${CC_API}/admin/student/${id}/activity`, { headers: ccHeaders() })
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null),
-      email
-        ? fetch(
-            `${MAIN_API}/api/admin/cc-user-activity?email=${encodeURIComponent(email)}`,
-            { credentials: "include" },
-          )
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null)
-        : Promise.resolve(null),
-    ]);
-
-    const merged: StudentActivity = (coachAct as StudentActivity) ?? {};
-    if (mainAct && (mainAct as { found?: boolean }).found) {
-      merged.main_platform = mainAct;
-      merged.main_platform_linked = true;
+    // The coach backend reads the main platform's Postgres directly and returns
+    // both coach events and the merged main-platform activity in one response.
+    try {
+      const act = await fetch(`${CC_API}/admin/student/${id}/activity`, {
+        headers: ccHeaders(),
+      }).then((r) => (r.ok ? r.json() : null));
+      setStudentActivity((act as StudentActivity) ?? {});
+    } catch {
+      setStudentActivity({});
     }
-    setStudentActivity(merged);
   }
 
   function saveNote(id: string, note: string) {
@@ -727,7 +710,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-neutral-50">
-                  {["ID", "Name", "Email", "Archetype", "Sessions", "Resume", "Last Seen", ""].map((h) => (
+                  {["ID", "Name", "Email", "Sign-in", "Tools used", "Archetype", "Sessions", "Resume", "Last Seen", ""].map((h) => (
                     <th key={h} className="border-b-2 border-neutral-900 px-4 py-3 text-left text-xs font-bold uppercase tracking-widest text-neutral-400">
                       {h}
                     </th>
@@ -744,6 +727,41 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                     <td className="px-4 py-3 font-mono text-xs text-neutral-300" title={s.id}>{s.id.slice(0, 8)}…</td>
                     <td className="px-4 py-3 text-sm font-semibold">{s.name || "—"}</td>
                     <td className="px-4 py-3 text-xs text-neutral-500">{s.email || "—"}</td>
+                    {/* Sign-in method (from main platform) */}
+                    <td className="px-4 py-3 text-xs">
+                      {s.main_platform?.linked ? (
+                        <div>
+                          <div className="font-semibold text-neutral-700">{s.main_platform.signup_method}</div>
+                          <div className="text-[10px] text-neutral-400">signed up {fmtDate(s.main_platform.signed_up_at)}</div>
+                        </div>
+                      ) : s.email ? (
+                        <span className="text-[10px] text-neutral-300" title="No studojo.com account matches this email">not linked</span>
+                      ) : (
+                        <span className="text-[10px] text-neutral-300">no email</span>
+                      )}
+                    </td>
+                    {/* Tools used on the main platform */}
+                    <td className="px-4 py-3">
+                      {s.main_platform?.linked ? (
+                        <div className="flex flex-wrap gap-1">
+                          {([
+                            ["Resume", s.main_platform.resume_count],
+                            ["Internship", s.main_platform.internship_count],
+                            ["Apply", s.main_platform.career_app_count],
+                          ] as [string, number][]).map(([label, n]) => (
+                            <span
+                              key={label}
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                n > 0 ? "bg-emerald-100 text-emerald-700" : "bg-neutral-100 text-neutral-300"
+                              }`}
+                              title={`${label}: ${n}`}
+                            >
+                              {label} {n}
+                            </span>
+                          ))}
+                        </div>
+                      ) : <span className="text-xs text-neutral-300">—</span>}
+                    </td>
                     <td className="px-4 py-3">
                       {s.archetype ? (
                         <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold text-violet-700">{s.archetype}</span>
@@ -773,7 +791,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-sm text-neutral-400">
+                    <td colSpan={10} className="px-4 py-10 text-center text-sm text-neutral-400">
                       {loading ? "Loading…" : "No students yet."}
                     </td>
                   </tr>
