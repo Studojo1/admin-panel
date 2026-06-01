@@ -38,6 +38,8 @@ interface OverviewData {
   dna: { total_generated: number; accuracy_rate: number; inaccuracy_count: number };
   tools: { total_clicks: number };
   active_per_hour?: { hour: string; label: string; active_users: number }[];
+  active_per_week?: { hour: string; label: string; active_users: number }[];
+  active_per_month?: { hour: string; label: string; active_users: number }[];
   generated_at: string;
 }
 
@@ -244,6 +246,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
 
   const [tab, setTab] = useState<Tab>("overview");
   const [loading, setLoading] = useState(false);
+  const [activeGranularity, setActiveGranularity] = useState<"hour" | "week" | "month">("hour");
 
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
@@ -478,34 +481,68 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   <StatCard num={`${funnel?.overall_completion_rate ?? 0}%`} label="Completion Rate" sub="landing → roadmap" color="red" />
                 </div>
 
-                {/* Active users per hour — last 24h */}
-                {overview.active_per_hour && overview.active_per_hour.length > 0 && (
-                  <div className="mb-6 rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
-                    <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">Active users per hour</h3>
-                    <p className="mb-4 text-xs text-neutral-500">Distinct students who sent a message, last 24 hours</p>
-                    <div className="flex items-end gap-1" style={{ height: 120 }}>
-                      {overview.active_per_hour.map((h, i) => {
-                        const max = Math.max(...overview.active_per_hour!.map((x) => x.active_users), 1);
-                        const pct = (h.active_users / max) * 100;
-                        return (
-                          <div key={i} className="group flex flex-1 flex-col items-center justify-end" style={{ height: "100%" }}>
-                            <div className="mb-1 text-[10px] font-bold text-neutral-700 opacity-0 group-hover:opacity-100">{h.active_users}</div>
-                            <div
-                              className="w-full rounded-t"
-                              style={{
-                                height: `${Math.max(pct, h.active_users > 0 ? 6 : 1)}%`,
-                                background: h.active_users > 0 ? "#7c3aed" : "#e5e7eb",
-                                transition: "height 0.6s ease",
-                              }}
-                              title={`${h.label}: ${h.active_users} active`}
-                            />
-                            {i % 3 === 0 && <div className="mt-1 text-[9px] text-neutral-400">{h.label}</div>}
-                          </div>
-                        );
-                      })}
+                {/* Active users — interchangeable hour / week / month */}
+                {(() => {
+                  const series =
+                    activeGranularity === "hour"
+                      ? overview.active_per_hour
+                      : activeGranularity === "week"
+                      ? overview.active_per_week
+                      : overview.active_per_month;
+                  const meta = {
+                    hour: { title: "Active users per hour", sub: "Distinct students who sent a message, last 24 hours", labelEvery: 3 },
+                    week: { title: "Active users per week", sub: "Distinct active students per week, last 12 weeks", labelEvery: 1 },
+                    month: { title: "Active users per month", sub: "Distinct active students per month, last 12 months", labelEvery: 1 },
+                  }[activeGranularity];
+                  if (!series || series.length === 0) return null;
+                  const max = Math.max(...series.map((x) => x.active_users), 1);
+                  return (
+                    <div className="mb-6 rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                      <div className="mb-1 flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="font-['Clash_Display'] text-base font-bold">{meta.title}</h3>
+                          <p className="text-xs text-neutral-500">{meta.sub}</p>
+                        </div>
+                        {/* Granularity toggle */}
+                        <div className="flex flex-shrink-0 rounded-full border-2 border-neutral-900 p-0.5">
+                          {(["hour", "week", "month"] as const).map((g) => (
+                            <button
+                              key={g}
+                              onClick={() => setActiveGranularity(g)}
+                              className={`rounded-full px-3 py-1 text-xs font-bold capitalize transition-all ${
+                                activeGranularity === g
+                                  ? "bg-violet-500 text-white"
+                                  : "text-neutral-500 hover:text-neutral-900"
+                              }`}
+                            >
+                              {g}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="mt-4 flex items-end gap-1" style={{ height: 120 }}>
+                        {series.map((h, i) => {
+                          const pct = (h.active_users / max) * 100;
+                          return (
+                            <div key={i} className="group flex flex-1 flex-col items-center justify-end" style={{ height: "100%" }}>
+                              <div className="mb-1 text-[10px] font-bold text-neutral-700 opacity-0 group-hover:opacity-100">{h.active_users}</div>
+                              <div
+                                className="w-full rounded-t"
+                                style={{
+                                  height: `${Math.max(pct, h.active_users > 0 ? 6 : 1)}%`,
+                                  background: h.active_users > 0 ? "#7c3aed" : "#e5e7eb",
+                                  transition: "height 0.6s ease",
+                                }}
+                                title={`${h.label}: ${h.active_users} active`}
+                              />
+                              {i % meta.labelEvery === 0 && <div className="mt-1 text-[9px] text-neutral-400">{h.label}</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
                 <div className="mb-6 grid gap-6 md:grid-cols-2">
                   {/* Mini funnel */}
                   <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
