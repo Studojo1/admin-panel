@@ -1077,6 +1077,10 @@ function eventLabel(type: string): string {
     tool_click_internship_dojo: "Clicked → Internship Dojo",
     tool_click_reports: "Clicked → Reports",
     tool_click_ai_risk: "Clicked → AI Risk Dojo",
+    agent_error: "⚠ Agent hit a technical error",
+    resume_upload_rejected: "Resume upload rejected",
+    checkin_reminder_sent: "Check-in reminder emailed",
+    streak_reward_unlocked: "Unlocked consistency reward",
   };
   if (map[type]) return map[type];
   if (type.startsWith("tool_click_"))
@@ -1192,17 +1196,36 @@ function ActivitySection({
         </details>
       )}
 
+      {/* Error flag — surfaces any agent technical errors this student hit */}
+      {(() => {
+        const errCount = (events || []).filter((e) => e.type === "agent_error").length;
+        if (!errCount) return null;
+        return (
+          <div className="mb-3 rounded-xl border-2 border-red-400 bg-red-50 p-3">
+            <div className="text-xs font-bold text-red-700">
+              ⚠ Agent errored {errCount} time{errCount === 1 ? "" : "s"} for this student
+            </div>
+            <div className="text-[11px] text-red-600 mt-0.5">
+              The coach replied "Something went wrong on my end" on {errCount} turn{errCount === 1 ? "" : "s"} — see the timeline below.
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Coach event timeline */}
       <div className="rounded-xl border border-neutral-100 bg-white p-3">
         <div className="mb-2 text-xs font-bold text-neutral-500">Career-coach activity</div>
         {events.length ? (
           <div className="space-y-1.5">
-            {events.slice(-25).reverse().map((e, i) => (
-              <div key={i} className="flex justify-between gap-2 text-[11px]">
-                <span className="font-medium text-neutral-700">{eventLabel(e.type)}</span>
-                <span className="shrink-0 text-neutral-400">{fmtDateTime(e.at)}</span>
-              </div>
-            ))}
+            {events.slice(-25).reverse().map((e, i) => {
+              const isErr = e.type === "agent_error";
+              return (
+                <div key={i} className={`flex justify-between gap-2 text-[11px] ${isErr ? "rounded bg-red-50 px-1.5 py-1" : ""}`}>
+                  <span className={`font-medium ${isErr ? "text-red-700 font-bold" : "text-neutral-700"}`}>{eventLabel(e.type)}</span>
+                  <span className="shrink-0 text-neutral-400">{fmtDateTime(e.at)}</span>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <p className="text-[11px] text-neutral-400">No tracked events yet.</p>
