@@ -102,6 +102,8 @@ interface StudentRow {
 
 interface ScoreImprover {
   student_id: string;
+  name?: string | null;
+  email?: string | null;
   from_score: number;
   to_score: number;
   improvement: number;
@@ -678,8 +680,11 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   {(scores?.top_improvers ?? []).slice(0, 5).length ? (
                     (scores?.top_improvers ?? []).slice(0, 5).map((im) => (
                       <div key={im.student_id} className="flex items-center justify-between border-b border-neutral-100 py-2 last:border-0">
-                        <div className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-neutral-400">{im.student_id}</div>
-                        <div className="flex items-center gap-2 text-sm">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-neutral-800">{im.name || im.email || "Unnamed student"}</div>
+                          <div className="truncate font-mono text-[10px] text-neutral-300">{im.student_id.slice(0, 8)}…</div>
+                        </div>
+                        <div className="flex flex-shrink-0 items-center gap-2 text-sm">
                           <span className="text-neutral-400">{im.from_score}</span>
                           <span className="text-neutral-300">→</span>
                           <span className="font-bold">{im.to_score}</span>
@@ -924,8 +929,12 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   <h3 className="mb-5 font-['Clash_Display'] text-base font-bold">Top Improvers</h3>
                   {scores.top_improvers?.length ? scores.top_improvers.map((im) => (
                     <div key={im.student_id} className="flex items-center gap-3 border-b border-neutral-100 py-3 last:border-0">
-                      <div className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-neutral-400">{im.student_id}</div>
-                      <div className="flex items-center gap-2 text-sm">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-neutral-800">{im.name || im.email || "Unnamed student"}</div>
+                        {im.email && im.name && <div className="truncate text-xs text-neutral-400">{im.email}</div>}
+                        <div className="truncate font-mono text-[10px] text-neutral-300">{im.student_id.slice(0, 8)}…</div>
+                      </div>
+                      <div className="flex flex-shrink-0 items-center gap-2 text-sm">
                         <span className="text-neutral-400">{im.from_score}</span>
                         <span className="text-neutral-300">→</span>
                         <span className="font-bold">{im.to_score}</span>
