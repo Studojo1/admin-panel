@@ -569,7 +569,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                       ? overview.active_per_week
                       : overview.active_per_month;
                   const meta = {
-                    hour: { title: "Active users per hour", sub: "Distinct students who sent a message, last 24 hours", labelEvery: 3 },
+                    hour: { title: "Active users per hour", sub: "Distinct students who sent a message, last 24 hours (IST)", labelEvery: 2 },
                     week: { title: "Active users per week", sub: "Distinct active students per week, last 12 weeks", labelEvery: 1 },
                     month: { title: "Active users per month", sub: "Distinct active students per month, last 12 months", labelEvery: 1 },
                   }[activeGranularity];
