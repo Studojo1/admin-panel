@@ -100,6 +100,16 @@ interface StudentRow {
   } | null;
 }
 
+interface ResumeView {
+  has_snapshot: boolean;
+  file_on_disk: boolean;
+  filename: string | null;
+  parser?: string | null;
+  uploaded_at?: string | null;
+  parsed?: Record<string, any> | null;
+  text?: string | null;
+}
+
 interface ScoreImprover {
   student_id: string;
   name?: string | null;
@@ -293,6 +303,10 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   const [loadingTranscripts, setLoadingTranscripts] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [adminNotes, setAdminNotes] = useState<Record<string, string>>({});
+  // Resume viewer modal
+  const [resumeView, setResumeView] = useState<ResumeView | null>(null);
+  const [resumeViewFor, setResumeViewFor] = useState<{ id: string; name: string } | null>(null);
+  const [loadingResume, setLoadingResume] = useState(false);
 
   // No key needed — the admin panel login is the only gate. Load on mount once
   // BetterAuth has authorized the admin.
@@ -413,6 +427,20 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       return localStorage.getItem(`cc_admin_note_${id}`) ?? "";
     } catch {
       return "";
+    }
+  }
+
+  async function viewResume(studentId: string, name: string) {
+    setResumeViewFor({ id: studentId, name });
+    setResumeView(null);
+    setLoadingResume(true);
+    try {
+      const r = await fetch(`${CC_API}/admin/student/${studentId}/resume-view`, { headers: ccHeaders() });
+      setResumeView(r.ok ? await r.json() : null);
+    } catch {
+      setResumeView(null);
+    } finally {
+      setLoadingResume(false);
     }
   }
 
@@ -875,22 +903,14 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                     </td>
                     <td className="px-4 py-3 text-sm font-semibold">{s.session_count}</td>
                     <td className="px-4 py-3">
-                      {s.resume_on_file ? (
+                      {s.has_resume ? (
                         <button
-                          onClick={(e) => { e.stopPropagation(); downloadResume(s.id, s.resume_filename ?? "resume"); }}
+                          onClick={(e) => { e.stopPropagation(); viewResume(s.id, s.name || s.email || "Student"); }}
                           className="flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 hover:bg-white"
                         >
                           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                          Download
+                          View resume
                         </button>
-                      ) : s.has_resume ? (
-                        <span
-                          className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700"
-                          title="Resume was uploaded and parsed; the original file isn't stored for download"
-                        >
-                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                          Uploaded
-                        </span>
                       ) : <span className="text-xs text-neutral-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-xs text-neutral-400">{fmtDate(s.last_seen)}</td>
@@ -1040,6 +1060,80 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                 />
               ) : (
                 <p className="text-sm text-red-500">Could not load student data.</p>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Resume viewer modal */}
+      <AnimatePresence>
+        {resumeViewFor && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 0.4 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] bg-black"
+              onClick={() => { setResumeViewFor(null); setResumeView(null); }}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+              className="fixed left-1/2 top-1/2 z-[70] max-h-[85vh] w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[6px_6px_0px_0px_rgba(25,26,35,1)]"
+            >
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-['Clash_Display'] text-lg font-black">{resumeViewFor.name}'s resume</h3>
+                  {resumeView?.filename && <div className="text-xs text-neutral-400">{resumeView.filename}{resumeView.uploaded_at ? ` · uploaded ${fmtDate(resumeView.uploaded_at)}` : ""}</div>}
+                </div>
+                <div className="flex items-center gap-2">
+                  {resumeView?.file_on_disk && (
+                    <button
+                      onClick={() => downloadResume(resumeViewFor.id, resumeView?.filename ?? "resume")}
+                      className="rounded-full border-2 border-neutral-900 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] hover:bg-white"
+                    >
+                      ↓ Download file
+                    </button>
+                  )}
+                  <button onClick={() => { setResumeViewFor(null); setResumeView(null); }} className="text-xl font-bold text-neutral-400 hover:text-neutral-900">✕</button>
+                </div>
+              </div>
+
+              {loadingResume ? (
+                <div className="py-10 text-center text-sm text-neutral-400">Loading resume…</div>
+              ) : resumeView?.has_snapshot ? (
+                <div className="space-y-4">
+                  {!resumeView.file_on_disk && (
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+                      The original file isn't stored for this upload — showing the parsed resume content the coach extracted.
+                    </p>
+                  )}
+                  {/* Parsed structured fields */}
+                  {resumeView.parsed && Object.keys(resumeView.parsed).length > 0 && (
+                    <div className="space-y-3">
+                      {Object.entries(resumeView.parsed).map(([key, val]) => {
+                        if (val == null || (Array.isArray(val) && val.length === 0) || val === "") return null;
+                        return (
+                          <div key={key}>
+                            <div className="mb-1 text-xs font-bold uppercase tracking-widest text-neutral-400">{key.replace(/_/g, " ")}</div>
+                            <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-2.5 text-[12px] leading-relaxed text-neutral-800 whitespace-pre-wrap break-words">
+                              {typeof val === "string" || typeof val === "number"
+                                ? String(val)
+                                : JSON.stringify(val, null, 2)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {/* Raw extracted text */}
+                  {resumeView.text && (
+                    <details className="rounded-lg border border-neutral-200">
+                      <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-neutral-600">Raw extracted text</summary>
+                      <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-[11px] leading-relaxed text-neutral-700">{resumeView.text}</pre>
+                    </details>
+                  )}
+                </div>
+              ) : (
+                <p className="py-10 text-center text-sm text-neutral-400">No resume content stored for this student.</p>
               )}
             </motion.div>
           </>
