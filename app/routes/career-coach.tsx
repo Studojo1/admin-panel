@@ -139,6 +139,22 @@ interface StudentDetail {
   };
 }
 
+interface TranscriptMsg {
+  role: string;       // "user" | "agent"
+  content: string;
+  state?: string | null;
+  at?: string | null;
+}
+interface TranscriptConv {
+  conversation_id: string;
+  thread_type?: string | null;
+  created_at?: string | null;
+  last_state?: string | null;
+  message_count: number;
+  title: string;
+  messages: TranscriptMsg[];
+}
+
 interface StudentActivity {
   main_platform_linked?: boolean;
   coach?: {
@@ -256,6 +272,9 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   const [studentDetail, setStudentDetail] = useState<StudentDetail | null>(null);
   const [studentActivity, setStudentActivity] = useState<StudentActivity | null>(null);
+  const [transcripts, setTranscripts] = useState<TranscriptConv[] | null>(null);
+  const [showTranscripts, setShowTranscripts] = useState(false);
+  const [loadingTranscripts, setLoadingTranscripts] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [adminNotes, setAdminNotes] = useState<Record<string, string>>({});
 
@@ -303,11 +322,28 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     }
   }
 
+  async function loadTranscripts(id: string) {
+    setShowTranscripts(true);
+    if (transcripts) return; // already loaded for this open student
+    setLoadingTranscripts(true);
+    try {
+      const r = await fetch(`${CC_API}/admin/student/${id}/transcripts`, { headers: ccHeaders() });
+      const d = r.ok ? await r.json() : null;
+      setTranscripts(Array.isArray(d?.conversations) ? d.conversations : []);
+    } catch {
+      setTranscripts([]);
+    } finally {
+      setLoadingTranscripts(false);
+    }
+  }
+
   async function openStudentPanel(id: string) {
     setSelectedStudent(id);
     setLoadingDetail(true);
     setStudentDetail(null);
     setStudentActivity(null);
+    setTranscripts(null);
+    setShowTranscripts(false);
     try {
       const dash = await fetch(`${CC_API}/dashboard/${id}`, {
         headers: ccHeaders(),
@@ -914,6 +950,11 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   student={students.find((s) => s.id === selectedStudent)}
                   note={loadNote(selectedStudent)}
                   onSaveNote={(note) => saveNote(selectedStudent, note)}
+                  transcripts={transcripts}
+                  showTranscripts={showTranscripts}
+                  loadingTranscripts={loadingTranscripts}
+                  onViewTranscripts={() => loadTranscripts(selectedStudent)}
+                  onHideTranscripts={() => setShowTranscripts(false)}
                 />
               ) : (
                 <p className="text-sm text-red-500">Could not load student data.</p>
@@ -967,6 +1008,11 @@ function StudentPanel({
   student,
   note,
   onSaveNote,
+  transcripts,
+  showTranscripts,
+  loadingTranscripts,
+  onViewTranscripts,
+  onHideTranscripts,
 }: {
   id: string;
   detail: StudentDetail;
@@ -974,6 +1020,11 @@ function StudentPanel({
   student?: StudentRow;
   note: string;
   onSaveNote: (note: string) => void;
+  transcripts: TranscriptConv[] | null;
+  showTranscripts: boolean;
+  loadingTranscripts: boolean;
+  onViewTranscripts: () => void;
+  onHideTranscripts: () => void;
 }) {
   const [noteVal, setNoteVal] = useState(note);
   const p = detail.primary_path ?? {};
@@ -1036,6 +1087,59 @@ function StudentPanel({
 
       {/* Cross-platform activity & sign-in log */}
       <ActivitySection activity={activity} coachEmail={s.email ?? student?.email} />
+
+      {/* Chat logs / transcripts */}
+      <div className="mb-5">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-xs font-bold uppercase tracking-widest text-neutral-400">Chat Logs</div>
+          {showTranscripts ? (
+            <button onClick={onHideTranscripts} className="text-xs font-semibold text-neutral-500 hover:text-neutral-900">Hide</button>
+          ) : (
+            <button
+              onClick={onViewTranscripts}
+              className="rounded-full border-2 border-neutral-900 bg-white px-3 py-1 text-xs font-bold shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] hover:bg-neutral-50"
+            >
+              View chat logs →
+            </button>
+          )}
+        </div>
+        {showTranscripts && (
+          loadingTranscripts ? (
+            <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-4 text-xs text-neutral-400">Loading transcripts…</div>
+          ) : transcripts && transcripts.length ? (
+            <div className="space-y-4">
+              {transcripts.map((conv) => (
+                <div key={conv.conversation_id} className="rounded-xl border border-neutral-200 bg-white">
+                  <div className="flex items-center justify-between border-b border-neutral-100 px-3 py-2">
+                    <span className="truncate text-xs font-bold text-neutral-700">{conv.title}</span>
+                    <span className="shrink-0 text-[10px] text-neutral-400">
+                      {conv.message_count} msgs{conv.last_state ? ` · ${conv.last_state}` : ""}
+                    </span>
+                  </div>
+                  <div className="max-h-80 space-y-2 overflow-y-auto p-3">
+                    {conv.messages.map((m, i) => (
+                      <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                        <div
+                          className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-[12px] leading-relaxed ${
+                            m.role === "user"
+                              ? "bg-violet-500 text-white"
+                              : "border border-neutral-200 bg-neutral-50 text-neutral-800"
+                          }`}
+                          title={m.at ? new Date(m.at).toLocaleString("en-IN") : undefined}
+                        >
+                          {m.content}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-neutral-400">No chat logs for this student yet.</p>
+          )
+        )}
+      </div>
 
       {/* Admin notes */}
       <div className="mb-5">
