@@ -811,7 +811,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-neutral-50">
-                  {["ID", "Name", "Email", "Sign-in", "Tools used", "Archetype", "Sessions", "Resume", "Last Seen", ""].map((h) => (
+                  {["ID · Last used", "Name", "Email", "Sign-in", "Tools used", "Archetype", "Sessions", "Resume", "Last Seen", ""].map((h) => (
                     <th key={h} className="border-b-2 border-neutral-900 px-4 py-3 text-left text-xs font-bold uppercase tracking-widest text-neutral-400">
                       {h}
                     </th>
@@ -825,7 +825,12 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                     onClick={() => openStudentPanel(s.id)}
                     className="cursor-pointer border-b border-neutral-100 transition-colors last:border-0 hover:bg-violet-50/40"
                   >
-                    <td className="px-4 py-3 font-mono text-xs text-neutral-300" title={s.id}>{s.id.slice(0, 8)}…</td>
+                    <td className="px-4 py-3" title={s.id}>
+                      <div className="font-mono text-xs text-neutral-300">{s.id.slice(0, 8)}…</div>
+                      <div className="mt-0.5 text-[11px] font-semibold text-neutral-600" title={`Last used: ${fmtDateTime(s.last_seen)}`}>
+                        {fmtDateTime(s.last_seen)}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-sm font-semibold">{s.name || "—"}</td>
                     <td className="px-4 py-3 text-xs text-neutral-500">{s.email || "—"}</td>
                     {/* Sign-in method (from main platform) */}
