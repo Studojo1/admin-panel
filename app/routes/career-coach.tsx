@@ -187,6 +187,11 @@ interface StudentActivity {
     session_count?: number;
     events?: { type: string; data?: Record<string, unknown>; at?: string }[];
     states_reached?: { state: string; first_at?: string }[];
+    milestones?: {
+      career_analysis?: { done: boolean; at?: string | null };
+      roadmap?: { done: boolean; at?: string | null };
+      dashboard_ready?: { done: boolean; at?: string | null };
+    };
   };
   main_platform?: {
     found?: boolean;
@@ -1388,9 +1393,34 @@ function ActivitySection({
   const linked = activity.main_platform_linked && mp?.found;
   const tools = mp?.tools;
   const events = activity.coach?.events ?? [];
+  const ms = activity.coach?.milestones;
 
   return (
     <div className="mb-5">
+      {/* Coach progress milestones */}
+      {ms && (
+        <div className="mb-4">
+          <div className="mb-2 text-xs font-bold uppercase tracking-widest text-neutral-400">Coach Progress</div>
+          <div className="space-y-1.5 rounded-xl border border-neutral-100 bg-neutral-50 p-3">
+            {([
+              ["Career Analysis generated", ms.career_analysis],
+              ["Career Roadmap generated", ms.roadmap],
+              ["Dashboard ready", ms.dashboard_ready],
+            ] as [string, { done: boolean; at?: string | null } | undefined][]).map(([label, m]) => (
+              <div key={label} className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${m?.done ? "bg-emerald-500 text-white" : "bg-neutral-200 text-neutral-400"}`}>
+                    {m?.done ? "✓" : "○"}
+                  </span>
+                  <span className={m?.done ? "font-semibold text-neutral-800" : "text-neutral-400"}>{label}</span>
+                </span>
+                {m?.done && m?.at && <span className="text-[11px] text-neutral-400">{fmtDate(m.at)}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mb-2 text-xs font-bold uppercase tracking-widest text-neutral-400">
         Activity &amp; Sign-in Log
       </div>
