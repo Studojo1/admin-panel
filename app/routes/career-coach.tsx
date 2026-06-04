@@ -88,6 +88,7 @@ interface StudentRow {
   last_seen: string | null;
   created_at: string | null;
   has_resume: boolean;
+  resume_on_file?: boolean;
   resume_filename: string | null;
   main_platform?: {
     linked: boolean;
@@ -614,7 +615,6 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                                     {st.name || st.email || (st.missing ? "(record missing)" : "Anonymous student")}
                                   </span>
                                   {st.email && st.name && <span className="mx-2 truncate text-xs text-neutral-400">{st.email}</span>}
-                                  {st.archetype && <span className="mr-2 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{st.archetype}</span>}
                                   <span className="shrink-0 text-xs font-bold text-violet-600">View →</span>
                                 </button>
                               ))}
@@ -811,7 +811,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-neutral-50">
-                  {["ID · Last used", "Name", "Email", "Sign-in", "Tools used", "Archetype", "Sessions", "Resume", "Last Seen", ""].map((h) => (
+                  {["ID · Last used", "Name", "Email", "Sign-in", "Tools used", "Sessions", "Resume", "Last Seen", ""].map((h) => (
                     <th key={h} className="border-b-2 border-neutral-900 px-4 py-3 text-left text-xs font-bold uppercase tracking-widest text-neutral-400">
                       {h}
                     </th>
@@ -868,14 +868,9 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                         </div>
                       ) : <span className="text-xs text-neutral-300">—</span>}
                     </td>
-                    <td className="px-4 py-3">
-                      {s.archetype ? (
-                        <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold text-violet-700">{s.archetype}</span>
-                      ) : <span className="text-neutral-300 text-xs">—</span>}
-                    </td>
                     <td className="px-4 py-3 text-sm font-semibold">{s.session_count}</td>
                     <td className="px-4 py-3">
-                      {s.has_resume ? (
+                      {s.resume_on_file ? (
                         <button
                           onClick={(e) => { e.stopPropagation(); downloadResume(s.id, s.resume_filename ?? "resume"); }}
                           className="flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 hover:bg-white"
@@ -883,6 +878,14 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
                           Download
                         </button>
+                      ) : s.has_resume ? (
+                        <span
+                          className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700"
+                          title="Resume was uploaded and parsed; the original file isn't stored for download"
+                        >
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          Uploaded
+                        </span>
                       ) : <span className="text-xs text-neutral-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-xs text-neutral-400">{fmtDate(s.last_seen)}</td>
@@ -897,7 +900,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={10} className="px-4 py-10 text-center text-sm text-neutral-400">
+                    <td colSpan={9} className="px-4 py-10 text-center text-sm text-neutral-400">
                       {loading ? "Loading…" : "No students yet."}
                     </td>
                   </tr>
@@ -1115,7 +1118,6 @@ function StudentPanel({
           { label: "Readiness", val: p.readiness_score ? `${p.readiness_score}%` : undefined, color: "text-violet-600" },
           { label: "Reply Prob.", val: p.reply_probability ? `${p.reply_probability}%` : undefined, color: "text-emerald-600" },
           { label: "Sessions", val: s.session_count ?? student?.session_count },
-          { label: "Archetype", val: student?.archetype },
         ].map(({ label, val, color }) => (
           <div key={label}>
             <div className="text-xs text-neutral-400">{label}</div>
