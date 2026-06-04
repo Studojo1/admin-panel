@@ -185,6 +185,7 @@ interface StudentActivity {
     first_seen?: string;
     last_seen?: string;
     session_count?: number;
+    session_count?: number;
     events?: { type: string; data?: Record<string, unknown>; at?: string }[];
     states_reached?: { state: string; first_at?: string }[];
     milestones?: {
@@ -1225,7 +1226,7 @@ function StudentPanel({
           { label: "Industry", val: p.target_industry },
           { label: "Readiness", val: p.readiness_score ? `${p.readiness_score}%` : undefined, color: "text-violet-600" },
           { label: "Reply Prob.", val: p.reply_probability ? `${p.reply_probability}%` : undefined, color: "text-emerald-600" },
-          { label: "Sessions", val: s.session_count ?? student?.session_count },
+          { label: "Sessions", val: activity?.coach?.session_count ?? s.session_count ?? student?.session_count },
         ].map(({ label, val, color }) => (
           <div key={label}>
             <div className="text-xs text-neutral-400">{label}</div>
