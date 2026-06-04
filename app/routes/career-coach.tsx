@@ -32,6 +32,15 @@ interface OverviewData {
   generated_at: string;
 }
 
+interface ActiveStudent {
+  id: string;
+  name: string | null;
+  email: string | null;
+  archetype?: string | null;
+  last_state?: string;
+  missing?: boolean;
+}
+
 interface FunnelStage {
   stage: string;
   count: number;
@@ -260,6 +269,10 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   const [tab, setTab] = useState<Tab>("overview");
   const [loading, setLoading] = useState(false);
   const [activeGranularity, setActiveGranularity] = useState<"hour" | "week" | "month">("hour");
+  // Drill-down: which chart bucket was clicked + the students active in it.
+  const [activeBucket, setActiveBucket] = useState<{ hour: string; label: string } | null>(null);
+  const [bucketStudents, setBucketStudents] = useState<ActiveStudent[] | null>(null);
+  const [loadingBucket, setLoadingBucket] = useState(false);
 
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
@@ -319,6 +332,22 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       if (!overview) setKeyError(true);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadBucketStudents(bucketHour: string, label: string) {
+    setActiveBucket({ hour: bucketHour, label });
+    setBucketStudents(null);
+    setLoadingBucket(true);
+    try {
+      const url = `${CC_API}/admin/active-students?granularity=${activeGranularity}&bucket=${encodeURIComponent(bucketHour)}`;
+      const r = await fetch(url, { headers: ccHeaders() });
+      const d = r.ok ? await r.json() : null;
+      setBucketStudents(Array.isArray(d?.students) ? d.students : []);
+    } catch {
+      setBucketStudents([]);
+    } finally {
+      setLoadingBucket(false);
     }
   }
 
@@ -527,7 +556,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                           {(["hour", "week", "month"] as const).map((g) => (
                             <button
                               key={g}
-                              onClick={() => setActiveGranularity(g)}
+                              onClick={() => { setActiveGranularity(g); setActiveBucket(null); setBucketStudents(null); }}
                               className={`rounded-full px-3 py-1 text-xs font-bold capitalize transition-all ${
                                 activeGranularity === g
                                   ? "bg-violet-500 text-white"
@@ -546,19 +575,55 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                             <div key={i} className="group flex flex-1 flex-col items-center justify-end" style={{ height: "100%" }}>
                               <div className="mb-1 text-[10px] font-bold text-neutral-700 opacity-0 group-hover:opacity-100">{h.active_users}</div>
                               <div
-                                className="w-full rounded-t"
+                                onClick={() => { if (h.active_users > 0) loadBucketStudents(h.hour, h.label); }}
+                                className={`w-full rounded-t ${h.active_users > 0 ? "cursor-pointer hover:opacity-80" : ""}`}
                                 style={{
                                   height: `${Math.max(pct, h.active_users > 0 ? 6 : 1)}%`,
                                   background: h.active_users > 0 ? "#7c3aed" : "#e5e7eb",
                                   transition: "height 0.6s ease",
                                 }}
-                                title={`${h.label}: ${h.active_users} active`}
+                                title={h.active_users > 0 ? `${h.label}: ${h.active_users} active — click to see who` : `${h.label}: 0 active`}
                               />
                               {i % meta.labelEvery === 0 && <div className="mt-1 text-[9px] text-neutral-400">{h.label}</div>}
                             </div>
                           );
                         })}
                       </div>
+
+                      {/* Drill-down: who was active in the clicked bucket */}
+                      {activeBucket && (
+                        <div className="mt-5 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+                          <div className="mb-2 flex items-center justify-between">
+                            <span className="text-xs font-bold text-neutral-700">
+                              Active in {activeBucket.label}
+                              {bucketStudents ? ` · ${bucketStudents.length} ${bucketStudents.length === 1 ? "person" : "people"}` : ""}
+                            </span>
+                            <button onClick={() => { setActiveBucket(null); setBucketStudents(null); }} className="text-xs font-semibold text-neutral-400 hover:text-neutral-900">Close</button>
+                          </div>
+                          {loadingBucket ? (
+                            <p className="text-xs text-neutral-400">Loading…</p>
+                          ) : bucketStudents && bucketStudents.length ? (
+                            <div className="space-y-1.5">
+                              {bucketStudents.map((st) => (
+                                <button
+                                  key={st.id}
+                                  onClick={() => openStudentPanel(st.id)}
+                                  className="flex w-full items-center justify-between rounded-lg border border-neutral-200 bg-white px-3 py-2 text-left hover:bg-violet-50"
+                                >
+                                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-neutral-800">
+                                    {st.name || st.email || (st.missing ? "(record missing)" : "Anonymous student")}
+                                  </span>
+                                  {st.email && st.name && <span className="mx-2 truncate text-xs text-neutral-400">{st.email}</span>}
+                                  {st.archetype && <span className="mr-2 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{st.archetype}</span>}
+                                  <span className="shrink-0 text-xs font-bold text-violet-600">View →</span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-neutral-400">No students found for this bucket.</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -754,7 +819,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                 </tr>
               </thead>
               <tbody>
-                {students.length ? students.map((s) => (
+                {students.length ? [...students].sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || "")).map((s) => (
                   <tr
                     key={s.id}
                     onClick={() => openStudentPanel(s.id)}
