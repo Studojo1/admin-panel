@@ -562,7 +562,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
             {overview ? (
               <>
                 <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-                  <StatCard num={overview.students.active_last_hour ?? 0} label="Active (last hour)" sub={`${overview.students.active_today} today · ${overview.students.active_this_week} this week`} color="purple" />
+                  <StatCard num={overview.students.active_today ?? 0} label="Active today" sub={`${overview.students.active_last_hour ?? 0} in last hour · ${overview.students.active_this_week} this week`} color="purple" />
                   <StatCard num={overview.students.total} label="Total Students" sub={`${overview.students.active_this_month} active this month`} color="blue" />
                   <StatCard num={overview.dna.total_generated} label="DNAs Built" sub={`${overview.dna.accuracy_rate}% accuracy`} color="green" />
                   <StatCard num={`${funnel?.overall_completion_rate ?? 0}%`} label="Completion Rate" sub="landing → roadmap" color="red" />
@@ -578,8 +578,8 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                       : overview.active_per_month;
                   const meta = {
                     hour: { title: "Active users per hour", sub: "Distinct students who sent a message, last 24 hours (IST)", labelEvery: 2 },
-                    week: { title: "Active users per week", sub: "Distinct active students per week, last 12 weeks", labelEvery: 1 },
-                    month: { title: "Active users per month", sub: "Distinct active students per month, last 12 months", labelEvery: 1 },
+                    week: { title: "Active users per week", sub: "Distinct active students per week, last 12 weeks", labelEvery: 2 },
+                    month: { title: "Active users per month", sub: "Distinct active students per month, last 12 months", labelEvery: 2 },
                   }[activeGranularity];
                   if (!series || series.length === 0) return null;
                   const max = Math.max(...series.map((x) => x.active_users), 1);
