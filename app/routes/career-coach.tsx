@@ -1035,8 +1035,8 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
 
         {/* ── Students ─────────────────────────────────────────────────────── */}
         {tab === "students" && (
-          <div className="rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] overflow-hidden">
-            <table className="w-full border-collapse">
+          <div className="rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] overflow-x-auto">
+            <table className="w-full min-w-[1100px] border-collapse">
               <thead>
                 <tr className="bg-neutral-50">
                   {["ID · Last used", "Name", "Email", "Sign-in", "Location", "Tools used", "Sessions", "Reached", "Resume", "Last Seen", ""].map((h) => (
