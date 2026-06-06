@@ -32,6 +32,13 @@ interface OverviewData {
   generated_at: string;
 }
 
+interface LocationsData {
+  countries: { name: string; count: number }[];
+  cities: { name: string; count: number }[];
+  located: number;
+  total_with_email: number;
+}
+
 interface ActiveStudent {
   id: string;
   name: string | null;
@@ -181,6 +188,7 @@ interface TranscriptConv {
 
 interface StudentActivity {
   main_platform_linked?: boolean;
+  location?: { city?: string | null; region?: string | null; country?: string | null; ip?: string | null } | null;
   coach?: {
     name?: string;
     email?: string;
@@ -290,12 +298,14 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   const [tab, setTab] = useState<Tab>("overview");
   const [loading, setLoading] = useState(false);
   const [activeGranularity, setActiveGranularity] = useState<"hour" | "week" | "month">("hour");
+  const [chartTz, setChartTz] = useState<"IST" | "UTC">("IST");
   // Drill-down: which chart bucket was clicked + the students active in it.
   const [activeBucket, setActiveBucket] = useState<{ hour: string; label: string } | null>(null);
   const [bucketStudents, setBucketStudents] = useState<ActiveStudent[] | null>(null);
   const [loadingBucket, setLoadingBucket] = useState(false);
 
   const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [locations, setLocations] = useState<LocationsData | null>(null);
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
   const [dropoffs, setDropoffs] = useState<DropoffData | null>(null);
   const [students, setStudents] = useState<StudentRow[]>([]);
@@ -344,6 +354,12 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
         fetch(`${CC_API}/admin/questions`, { headers }).then((r) => r.json()),
       ]);
       setOverview(ov);
+      // Locations does live (rate-limited) geo lookups on first run — fetch it
+      // separately so it never blocks the dashboard load.
+      fetch(`${CC_API}/admin/locations`, { headers })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d) setLocations(d); })
+        .catch(() => {});
       setFunnel(fu);
       setDropoffs(dr);
       setStudents(Array.isArray(st) ? st : []);
@@ -577,7 +593,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                       ? overview.active_per_week
                       : overview.active_per_month;
                   const meta = {
-                    hour: { title: "Active users per hour", sub: "Distinct students who sent a message, last 24 hours (IST)", labelEvery: 2 },
+                    hour: { title: "Active users per hour", sub: `Distinct students who sent a message, last 24 hours (${chartTz})`, labelEvery: 2 },
                     week: { title: "Active users per week", sub: "Distinct active students per week, last 12 weeks", labelEvery: 2 },
                     month: { title: "Active users per month", sub: "Distinct active students per month, last 12 months", labelEvery: 2 },
                   }[activeGranularity];
@@ -590,40 +606,66 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                           <h3 className="font-['Clash_Display'] text-base font-bold">{meta.title}</h3>
                           <p className="text-xs text-neutral-500">{meta.sub}</p>
                         </div>
-                        {/* Granularity toggle */}
-                        <div className="flex flex-shrink-0 rounded-full border-2 border-neutral-900 p-0.5">
-                          {(["hour", "week", "month"] as const).map((g) => (
-                            <button
-                              key={g}
-                              onClick={() => { setActiveGranularity(g); setActiveBucket(null); setBucketStudents(null); }}
-                              className={`rounded-full px-3 py-1 text-xs font-bold capitalize transition-all ${
-                                activeGranularity === g
-                                  ? "bg-violet-500 text-white"
-                                  : "text-neutral-500 hover:text-neutral-900"
-                              }`}
-                            >
-                              {g}
-                            </button>
-                          ))}
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          {/* Timezone toggle — only relabels the hourly view */}
+                          {activeGranularity === "hour" && (
+                            <div className="flex rounded-full border-2 border-neutral-900 p-0.5">
+                              {(["IST", "UTC"] as const).map((tz) => (
+                                <button
+                                  key={tz}
+                                  onClick={() => setChartTz(tz)}
+                                  className={`rounded-full px-2.5 py-1 text-xs font-bold transition-all ${
+                                    chartTz === tz ? "bg-neutral-900 text-white" : "text-neutral-500 hover:text-neutral-900"
+                                  }`}
+                                >
+                                  {tz}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {/* Granularity toggle */}
+                          <div className="flex rounded-full border-2 border-neutral-900 p-0.5">
+                            {(["hour", "week", "month"] as const).map((g) => (
+                              <button
+                                key={g}
+                                onClick={() => { setActiveGranularity(g); setActiveBucket(null); setBucketStudents(null); }}
+                                className={`rounded-full px-3 py-1 text-xs font-bold capitalize transition-all ${
+                                  activeGranularity === g
+                                    ? "bg-violet-500 text-white"
+                                    : "text-neutral-500 hover:text-neutral-900"
+                                }`}
+                              >
+                                {g}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
                       <div className="mt-4 flex items-end gap-1" style={{ height: 120 }}>
                         {series.map((h, i) => {
                           const pct = (h.active_users / max) * 100;
+                          // For the hourly view, re-derive the label from the bucket
+                          // ISO in the chosen timezone so the IST/UTC toggle works.
+                          const dispLabel = activeGranularity === "hour" && h.hour
+                            ? new Date(h.hour).toLocaleTimeString("en-US", {
+                                hour: "numeric", hour12: true,
+                                timeZone: chartTz === "UTC" ? "UTC" : "Asia/Kolkata",
+                              }).toLowerCase().replace(" ", " ")
+                            : h.label;
                           return (
                             <div key={i} className="group flex flex-1 flex-col items-center justify-end" style={{ height: "100%" }}>
                               <div className="mb-1 text-[10px] font-bold text-neutral-700 opacity-0 group-hover:opacity-100">{h.active_users}</div>
                               <div
-                                onClick={() => { if (h.active_users > 0) loadBucketStudents(h.hour, h.label); }}
+                                onClick={() => { if (h.active_users > 0) loadBucketStudents(h.hour, dispLabel); }}
                                 className={`w-full rounded-t ${h.active_users > 0 ? "cursor-pointer hover:opacity-80" : ""}`}
                                 style={{
                                   height: `${Math.max(pct, h.active_users > 0 ? 6 : 1)}%`,
                                   background: h.active_users > 0 ? "#7c3aed" : "#e5e7eb",
                                   transition: "height 0.6s ease",
                                 }}
-                                title={h.active_users > 0 ? `${h.label}: ${h.active_users} active — click to see who` : `${h.label}: 0 active`}
+                                title={h.active_users > 0 ? `${dispLabel}: ${h.active_users} active — click to see who` : `${dispLabel}: 0 active`}
                               />
-                              {i % meta.labelEvery === 0 && <div className="mt-1 text-[9px] text-neutral-400">{h.label}</div>}
+                              {i % meta.labelEvery === 0 && <div className="mt-1 text-[9px] text-neutral-400">{dispLabel}</div>}
                             </div>
                           );
                         })}
@@ -732,6 +774,22 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                     <p className="text-sm text-neutral-400">No score movements yet.</p>
                   )}
                 </div>
+
+                {/* Where students are (from login IP) */}
+                {locations && (locations.cities.length > 0 || locations.countries.length > 0) && (
+                  <div className="mt-6 grid gap-6 md:grid-cols-2">
+                    <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                      <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">Top Cities</h3>
+                      <p className="mb-4 text-xs text-neutral-500">From most recent login IP · {locations.located} of {locations.total_with_email} located</p>
+                      <BarList items={locations.cities.slice(0, 8).map((c) => ({ label: c.name, count: c.count }))} color="#7c3aed" />
+                    </div>
+                    <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                      <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">Top Countries</h3>
+                      <p className="mb-4 text-xs text-neutral-500">Where your students sign in from</p>
+                      <BarList items={locations.countries.slice(0, 8).map((c) => ({ label: c.name, count: c.count }))} color="#10B981" />
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <EmptyState loading={loading} />
@@ -1456,6 +1514,14 @@ function ActivitySection({
           <span className="text-neutral-400">Email</span>
           <span className="font-semibold">{mp?.user?.email ?? coachEmail ?? "—"}</span>
         </div>
+        {activity.location && (activity.location.city || activity.location.country) && (
+          <div className="flex justify-between text-sm">
+            <span className="text-neutral-400">Location</span>
+            <span className="font-semibold" title="From most recent login IP">
+              📍 {[activity.location.city, activity.location.region, activity.location.country].filter(Boolean).join(", ")}
+            </span>
+          </div>
+        )}
         {linked ? (
           <>
             <div className="flex justify-between text-sm">
