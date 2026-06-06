@@ -108,7 +108,7 @@ export function AdminHeader() {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.97 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-full mt-2 w-52 overflow-hidden rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+                  className="absolute right-0 top-full mt-2 w-52 overflow-y-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] max-h-[calc(100vh-6rem)]"
                 >
                   {NAV_LINKS.map((link) => {
                     const isActive = location.pathname === link.to;
