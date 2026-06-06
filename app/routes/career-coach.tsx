@@ -574,9 +574,9 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     <div className="min-h-screen bg-neutral-50">
       <AdminHeader />
 
-      <div className="mx-auto max-w-7xl px-4 py-8 md:px-8">
+      <div className="mx-auto max-w-6xl px-4 py-8 md:px-8 lg:pr-20">
         {/* Page header */}
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="font-['Clash_Display'] text-3xl font-black text-neutral-900">
               Career Coach
@@ -590,7 +590,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
           <button
             onClick={() => loadAll()}
             disabled={loading}
-            className="rounded-full border-2 border-neutral-900 bg-white px-5 py-2 font-['Satoshi'] text-sm font-semibold shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:bg-neutral-50 hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
+            className="relative z-10 shrink-0 rounded-full border-2 border-neutral-900 bg-white px-5 py-2 font-['Satoshi'] text-sm font-semibold shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:bg-neutral-50 hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
           >
             {loading ? "Refreshing…" : "↻ Refresh"}
           </button>
