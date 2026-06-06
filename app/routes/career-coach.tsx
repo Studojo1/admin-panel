@@ -32,6 +32,30 @@ interface OverviewData {
   generated_at: string;
 }
 
+interface Dropper {
+  student_id: string;
+  name?: string | null;
+  email?: string | null;
+  furthest_state: string;
+  total_messages: number;
+  user_messages: number;
+  minutes_in_chat: number;
+  drop_speed: string;
+  returned: boolean;
+  first_at?: string | null;
+  last_messages: { role: string; content: string; at?: string | null }[];
+}
+interface DropoutsData {
+  total_dropped: number;
+  avg_messages: number;
+  avg_minutes: number;
+  speed_distribution: { under_1min: number; "1_3min": number; "3_10min": number; over_10min: number };
+  by_furthest_state: Record<string, number>;
+  returned_count: number;
+  returned_and_converted: number;
+  droppers: Dropper[];
+}
+
 interface LocationsData {
   countries: { name: string; count: number }[];
   cities: { name: string; count: number }[];
@@ -226,7 +250,7 @@ interface StudentActivity {
   };
 }
 
-type Tab = "overview" | "funnel" | "students" | "scores" | "paths" | "questions";
+type Tab = "overview" | "funnel" | "dropouts" | "students" | "scores" | "paths" | "questions";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -307,6 +331,9 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
 
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [locations, setLocations] = useState<LocationsData | null>(null);
+  const [dropouts, setDropouts] = useState<DropoutsData | null>(null);
+  const [loadingDropouts, setLoadingDropouts] = useState(false);
+  const [openDropper, setOpenDropper] = useState<string | null>(null);
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
   const [dropoffs, setDropoffs] = useState<DropoffData | null>(null);
   const [students, setStudents] = useState<StudentRow[]>([]);
@@ -335,6 +362,18 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       loadAll();
     }
   }, [isAuthorized]);
+
+  // Lazy-load the dropout analysis the first time the Dropouts tab is opened
+  // (it scans all messages, so we don't run it on every dashboard load).
+  useEffect(() => {
+    if (tab !== "dropouts" || dropouts || loadingDropouts || !authenticated) return;
+    setLoadingDropouts(true);
+    fetch(`${CC_API}/admin/dropouts`, { headers: { "Content-Type": "application/json" } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setDropouts(d); })
+      .catch(() => {})
+      .finally(() => setLoadingDropouts(false));
+  }, [tab, dropouts, loadingDropouts, authenticated]);
 
   const ccHeaders = useCallback(
     () => ({ "Content-Type": "application/json" }),
@@ -524,6 +563,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   const TABS: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "funnel", label: "Funnel" },
+    { id: "dropouts", label: "Dropouts" },
     { id: "students", label: "Students" },
     { id: "scores", label: "Scores" },
     { id: "paths", label: "Career Paths" },
@@ -901,6 +941,94 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   ))}
                 </div>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Dropouts ─────────────────────────────────────────────────────── */}
+        {tab === "dropouts" && (
+          <div className="space-y-6">
+            {loadingDropouts && !dropouts ? (
+              <EmptyState loading={true} />
+            ) : dropouts ? (
+              <>
+                {/* Summary cards */}
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                  <StatCard num={dropouts.total_dropped} label="Dropped in profiling" sub="reached profiling, never got a DNA" color="red" />
+                  <StatCard num={`${dropouts.avg_minutes}m`} label="Avg time before drop" sub={`${dropouts.avg_messages} messages avg`} color="amber" />
+                  <StatCard num={dropouts.speed_distribution.under_1min} label="Dropped under 1 min" sub="fast / first-impression drops" color="purple" />
+                  <StatCard num={dropouts.returned_and_converted} label="Returned & converted" sub={`${dropouts.returned_count} dropped students came back`} color="green" />
+                </div>
+
+                {/* Speed distribution */}
+                <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                  <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">How fast they leave</h3>
+                  <p className="mb-4 text-xs text-neutral-500">Fast drops (under a few minutes) usually mean a first-impression problem, not profiling fatigue.</p>
+                  {([
+                    ["Under 1 minute", dropouts.speed_distribution.under_1min, "#EF4444"],
+                    ["1–3 minutes", dropouts.speed_distribution["1_3min"], "#F59E0B"],
+                    ["3–10 minutes", dropouts.speed_distribution["3_10min"], "#8B5CF6"],
+                    ["Over 10 minutes", dropouts.speed_distribution.over_10min, "#10B981"],
+                  ] as [string, number, string][]).map(([label, n, color]) => {
+                    const max = Math.max(dropouts.total_dropped, 1);
+                    return (
+                      <div key={label} className="mb-2 flex items-center gap-3">
+                        <div className="w-32 flex-shrink-0 text-xs font-semibold">{label}</div>
+                        <div className="flex-1 overflow-hidden rounded-full bg-neutral-100" style={{ height: 20 }}>
+                          <div className="flex h-full items-center rounded-full pl-2" style={{ width: `${Math.max((n / max) * 100, n > 0 ? 6 : 0)}%`, background: color }}>
+                            {n > 0 && <span className="text-[11px] font-bold text-white">{n}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Dropper list with read-the-transcript */}
+                <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                  <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">Who dropped — and what they last said</h3>
+                  <p className="mb-4 text-xs text-neutral-500">Sorted fastest-drop first. Click a student to read their last messages and spot the pattern.</p>
+                  {dropouts.droppers.length ? dropouts.droppers.map((d) => {
+                    const isOpen = openDropper === d.student_id;
+                    const speedColor: Record<string, string> = {
+                      under_1min: "bg-red-100 text-red-700",
+                      "1_3min": "bg-amber-100 text-amber-800",
+                      "3_10min": "bg-violet-100 text-violet-700",
+                      over_10min: "bg-emerald-100 text-emerald-700",
+                    };
+                    return (
+                      <div key={d.student_id} className="border-b border-neutral-100 py-3 last:border-0">
+                        <button onClick={() => setOpenDropper(isOpen ? null : d.student_id)} className="flex w-full items-center justify-between gap-3 text-left">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold text-neutral-800">{d.name || d.email || "Unnamed student"}</div>
+                            <div className="text-[11px] text-neutral-400">
+                              {d.total_messages} msgs · {d.minutes_in_chat}m · died at {d.furthest_state}{d.returned ? " · returned later" : ""}
+                            </div>
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${speedColor[d.drop_speed] || "bg-neutral-100 text-neutral-500"}`}>
+                            {d.drop_speed.replace("_", "–").replace("min", " min")}
+                          </span>
+                          <span className="shrink-0 text-xs font-bold text-violet-600">{isOpen ? "Hide" : "Read →"}</span>
+                        </button>
+                        {isOpen && (
+                          <div className="mt-3 space-y-2 rounded-xl bg-neutral-50 p-3">
+                            {d.last_messages.map((m, i) => (
+                              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                                <div className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-[12px] leading-relaxed ${m.role === "user" ? "bg-violet-500 text-white" : "border border-neutral-200 bg-white text-neutral-800"}`}>
+                                  {m.content}
+                                </div>
+                              </div>
+                            ))}
+                            <button onClick={() => openStudentPanel(d.student_id)} className="mt-1 text-xs font-bold text-violet-600 hover:text-violet-800">Open full profile →</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }) : <p className="text-sm text-neutral-400">No dropouts found.</p>}
+                </div>
+              </>
+            ) : (
+              <EmptyState loading={loading} />
             )}
           </div>
         )}
