@@ -85,6 +85,8 @@ interface StudentRow {
   email: string | null;
   archetype: string | null;
   session_count: number;
+  reached_stage?: string;
+  dashboard_ready?: boolean;
   last_seen: string | null;
   created_at: string | null;
   has_resume: boolean;
@@ -850,7 +852,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-neutral-50">
-                  {["ID · Last used", "Name", "Email", "Sign-in", "Tools used", "Sessions", "Resume", "Last Seen", ""].map((h) => (
+                  {["ID · Last used", "Name", "Email", "Sign-in", "Tools used", "Sessions", "Reached", "Resume", "Last Seen", ""].map((h) => (
                     <th key={h} className="border-b-2 border-neutral-900 px-4 py-3 text-left text-xs font-bold uppercase tracking-widest text-neutral-400">
                       {h}
                     </th>
@@ -908,6 +910,28 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                       ) : <span className="text-xs text-neutral-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-sm font-semibold">{s.session_count}</td>
+                    {/* How far the student got in the coach flow */}
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const stage = s.reached_stage || "Greeting";
+                        const cls: Record<string, string> = {
+                          "Roadmap": "bg-emerald-100 text-emerald-700",
+                          "Career Analysis": "bg-violet-100 text-violet-700",
+                          "Profiling": "bg-amber-100 text-amber-800",
+                          "Greeting": "bg-neutral-100 text-neutral-500",
+                        };
+                        return (
+                          <div className="flex flex-col gap-0.5">
+                            <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-bold ${cls[stage] ?? cls["Greeting"]}`}>
+                              {stage}
+                            </span>
+                            {s.dashboard_ready && (
+                              <span className="text-[9px] font-semibold text-emerald-600">dashboard ready</span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className="px-4 py-3">
                       {s.has_resume ? (
                         <button
@@ -931,7 +955,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={9} className="px-4 py-10 text-center text-sm text-neutral-400">
+                    <td colSpan={10} className="px-4 py-10 text-center text-sm text-neutral-400">
                       {loading ? "Loading…" : "No students yet."}
                     </td>
                   </tr>
