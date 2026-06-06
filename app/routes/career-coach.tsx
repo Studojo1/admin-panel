@@ -312,6 +312,114 @@ const STATE_PILL: Record<string, string> = {
   ONGOING_SUPPORT: "bg-emerald-100 text-emerald-800",
 };
 
+// ── Anonymous Sessions Panel ───────────────────────────────────────────────
+
+interface AnonMessage { role: string; content: string; state?: string | null; at?: string | null; }
+interface AnonSession { conversation_id: string; created_at?: string | null; last_state?: string | null; message_count: number; title: string; messages: AnonMessage[]; }
+interface AnonStudent { student_id: string; first_seen?: string | null; last_seen?: string | null; session_count: number; message_count: number; sessions: AnonSession[]; }
+
+function AnonSessionsPanel({ ccHeaders }: { ccHeaders: () => Record<string, string> }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<AnonStudent[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  async function load() {
+    if (data) { setOpen(true); return; }
+    setLoading(true);
+    setOpen(true);
+    try {
+      const r = await fetch(`${CC_API}/admin/anonymous-sessions`, { headers: ccHeaders() });
+      const d = r.ok ? await r.json() : null;
+      setData(Array.isArray(d?.anonymous_students) ? d.anonymous_students : []);
+    } catch { setData([]); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div className="mt-6 rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50 p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="font-['Satoshi'] text-sm font-bold text-neutral-600">Anonymous / Pre-login Sessions</div>
+          <div className="text-xs text-neutral-400">Students who chatted before creating an account — not linked to any email</div>
+        </div>
+        <button
+          onClick={open ? () => setOpen(false) : load}
+          className="rounded-full border-2 border-neutral-400 bg-white px-4 py-1.5 text-xs font-bold text-neutral-600 shadow-[2px_2px_0px_0px_rgba(25,26,35,0.3)] hover:border-neutral-900 hover:text-neutral-900"
+        >
+          {open ? "Hide" : "View sessions →"}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-4">
+          {loading ? (
+            <p className="text-xs text-neutral-400">Loading…</p>
+          ) : !data || data.length === 0 ? (
+            <p className="text-xs text-neutral-400">No anonymous sessions found.</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-[11px] font-semibold text-neutral-500">
+                {data.length} anonymous visitor{data.length === 1 ? "" : "s"} · {data.reduce((n, s) => n + s.message_count, 0)} messages total
+              </div>
+              {data.map((anon, ai) => (
+                <div key={anon.student_id} className="rounded-xl border border-neutral-200 bg-white">
+                  <button
+                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                    onClick={() => setExpanded(expanded === anon.student_id ? null : anon.student_id)}
+                  >
+                    <div>
+                      <span className="font-['Satoshi'] text-xs font-bold text-neutral-700">Visitor {ai + 1}</span>
+                      <span className="ml-2 text-[10px] text-neutral-400">
+                        {anon.session_count} session{anon.session_count === 1 ? "" : "s"} · {anon.message_count} msgs
+                      </span>
+                      {anon.first_seen ? (
+                        <span className="ml-2 text-[10px] text-neutral-400">
+                          · first seen {new Date(anon.first_seen).toLocaleDateString("en-IN")}
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className="text-[10px] text-neutral-400">{expanded === anon.student_id ? "▲ hide" : "▼ show chats"}</span>
+                  </button>
+
+                  {expanded === anon.student_id && (
+                    <div className="space-y-3 border-t border-neutral-100 p-3">
+                      {anon.sessions.map((sess, si) => (
+                        <div key={sess.conversation_id} className="rounded-lg border border-neutral-100 bg-neutral-50">
+                          <div className="flex items-center justify-between border-b border-neutral-100 px-3 py-2">
+                            <div className="flex items-center gap-2">
+                              <span className="rounded-full bg-neutral-200 px-2 py-0.5 text-[10px] font-bold text-neutral-600">Session {si + 1}</span>
+                              <span className="truncate text-xs font-semibold text-neutral-700">{sess.title}</span>
+                            </div>
+                            <span className="shrink-0 text-[10px] text-neutral-400">
+                              {sess.message_count} msgs{sess.created_at ? ` · ${new Date(sess.created_at).toLocaleDateString("en-IN")}` : ""}
+                            </span>
+                          </div>
+                          <div className="space-y-2 p-3">
+                            {sess.messages.map((m, mi) => (
+                              <div key={mi} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                                <div className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-[12px] leading-relaxed ${
+                                  m.role === "user" ? "bg-neutral-700 text-white" : "border border-neutral-200 bg-white text-neutral-800"
+                                }`}>
+                                  {m.content}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export default function CareerCoachAdmin(_: Route.ComponentProps) {
@@ -1035,6 +1143,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
 
         {/* ── Students ─────────────────────────────────────────────────────── */}
         {tab === "students" && (
+          <>
           <div className="rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] overflow-x-auto">
             <table className="w-full min-w-[1100px] border-collapse">
               <thead>
@@ -1161,6 +1270,10 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
               </tbody>
             </table>
           </div>
+
+          {/* Anonymous / pre-login sessions */}
+          <AnonSessionsPanel ccHeaders={ccHeaders} />
+          </>
         )}
 
         {/* ── Scores ───────────────────────────────────────────────────────── */}
