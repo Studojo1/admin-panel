@@ -1510,34 +1510,62 @@ function StudentPanel({
           loadingTranscripts ? (
             <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-4 text-xs text-neutral-400">Loading transcripts…</div>
           ) : transcripts && transcripts.length ? (
-            <div className="space-y-4">
-              {transcripts.map((conv) => (
-                <div key={conv.conversation_id} className="rounded-xl border border-neutral-200 bg-white">
-                  <div className="flex items-center justify-between border-b border-neutral-100 px-3 py-2">
-                    <span className="truncate text-xs font-bold text-neutral-700">{conv.title}</span>
-                    <span className="shrink-0 text-[10px] text-neutral-400">
-                      {conv.message_count} msgs{conv.last_state ? ` · ${conv.last_state}` : ""}
-                    </span>
+            (() => {
+              // Show every separate session this student had, oldest → newest, so
+              // the full journey reads chronologically. Each card is one
+              // conversation (a "leave and come back" creates a new one).
+              const ordered = [...transcripts].sort(
+                (a, b) => (a.created_at || "").localeCompare(b.created_at || ""),
+              );
+              const totalMsgs = ordered.reduce((n, c) => n + (c.message_count || 0), 0);
+              return (
+                <div className="space-y-4">
+                  <div className="rounded-lg bg-neutral-50 px-3 py-2 text-[11px] font-semibold text-neutral-500">
+                    {ordered.length} session{ordered.length === 1 ? "" : "s"} · {totalMsgs} messages total
+                    {ordered.length > 1 ? " — scroll through every conversation below, oldest first" : ""}
                   </div>
-                  <div className="max-h-80 space-y-2 overflow-y-auto p-3">
-                    {conv.messages.map((m, i) => (
-                      <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                        <div
-                          className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-[12px] leading-relaxed ${
-                            m.role === "user"
-                              ? "bg-violet-500 text-white"
-                              : "border border-neutral-200 bg-neutral-50 text-neutral-800"
-                          }`}
-                          title={m.at ? new Date(m.at).toLocaleString("en-IN") : undefined}
-                        >
-                          {m.content}
+                  {ordered.map((conv, idx) => (
+                    <div key={conv.conversation_id} className="rounded-xl border border-neutral-200 bg-white">
+                      <div className="flex items-center justify-between gap-2 border-b border-neutral-100 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">
+                              Session {idx + 1}
+                            </span>
+                            <span className="truncate text-xs font-bold text-neutral-700">{conv.title}</span>
+                          </div>
+                          {conv.created_at ? (
+                            <div className="mt-0.5 text-[10px] text-neutral-400">
+                              {new Date(conv.created_at).toLocaleString("en-IN")}
+                              {conv.thread_type && conv.thread_type !== "main" ? ` · ${conv.thread_type.replace(/_/g, " ")}` : ""}
+                            </div>
+                          ) : null}
                         </div>
+                        <span className="shrink-0 text-[10px] text-neutral-400">
+                          {conv.message_count} msgs{conv.last_state ? ` · ${conv.last_state}` : ""}
+                        </span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="space-y-2 p-3">
+                        {conv.messages.map((m, i) => (
+                          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                            <div
+                              className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-[12px] leading-relaxed ${
+                                m.role === "user"
+                                  ? "bg-violet-500 text-white"
+                                  : "border border-neutral-200 bg-neutral-50 text-neutral-800"
+                              }`}
+                              title={m.at ? new Date(m.at).toLocaleString("en-IN") : undefined}
+                            >
+                              {m.content}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })()
           ) : (
             <p className="text-xs text-neutral-400">No chat logs for this student yet.</p>
           )
