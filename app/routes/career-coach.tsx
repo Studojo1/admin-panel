@@ -94,6 +94,7 @@ interface StudentRow {
   session_count: number;
   reached_stage?: string;
   dashboard_ready?: boolean;
+  location?: { city?: string | null; region?: string | null; country?: string | null } | null;
   last_seen: string | null;
   created_at: string | null;
   has_resume: boolean;
@@ -910,7 +911,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-neutral-50">
-                  {["ID · Last used", "Name", "Email", "Sign-in", "Tools used", "Sessions", "Reached", "Resume", "Last Seen", ""].map((h) => (
+                  {["ID · Last used", "Name", "Email", "Sign-in", "Location", "Tools used", "Sessions", "Reached", "Resume", "Last Seen", ""].map((h) => (
                     <th key={h} className="border-b-2 border-neutral-900 px-4 py-3 text-left text-xs font-bold uppercase tracking-widest text-neutral-400">
                       {h}
                     </th>
@@ -944,6 +945,17 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                       ) : (
                         <span className="text-[10px] text-neutral-300">no email</span>
                       )}
+                    </td>
+                    {/* Location (from most recent login IP) */}
+                    <td className="px-4 py-3 text-xs">
+                      {s.location && (s.location.city || s.location.country) ? (
+                        <div>
+                          <div className="font-semibold text-neutral-700">{s.location.city || s.location.country}</div>
+                          {s.location.city && s.location.country && (
+                            <div className="text-[10px] text-neutral-400">{s.location.country}</div>
+                          )}
+                        </div>
+                      ) : <span className="text-[10px] text-neutral-300">—</span>}
                     </td>
                     {/* Tools used on the main platform */}
                     <td className="px-4 py-3">
@@ -1013,7 +1025,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={10} className="px-4 py-10 text-center text-sm text-neutral-400">
+                    <td colSpan={11} className="px-4 py-10 text-center text-sm text-neutral-400">
                       {loading ? "Loading…" : "No students yet."}
                     </td>
                   </tr>
