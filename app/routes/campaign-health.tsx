@@ -162,11 +162,12 @@ const STAGE_DOTS: { key: keyof StageTimes; short: string }[] = [
   { key: "campaign_completed",   short: "Done" },
 ];
 
-function FunnelDots({ ts }: { ts: StageTimes }) {
+function FunnelDots({ ts, gmailConnected }: { ts: StageTimes; gmailConnected: boolean }) {
   return (
     <div className="flex items-center gap-1">
       {STAGE_DOTS.map(({ key, short }) => {
-        const reached = !!ts[key];
+        // Gmail dot: use the authoritative bool, not just whether the timestamp exists
+        const reached = key === "gmail_connected" ? gmailConnected : !!ts[key];
         const isPause = key === "campaign_paused";
         const isDone  = key === "campaign_completed";
         const fill = reached
@@ -174,10 +175,11 @@ function FunnelDots({ ts }: { ts: StageTimes }) {
           : isPause ? "bg-amber-500 border-amber-700"
           : "bg-violet-500 border-violet-700"
           : "bg-white border-neutral-300";
+        const dateLabel = ts[key] ? `: ${fmt(ts[key])}` : key === "gmail_connected" && gmailConnected ? " (no timestamp)" : " — not reached";
         return (
           <span
             key={key}
-            title={`${short}${ts[key] ? ": " + fmt(ts[key]) : " — not reached"}`}
+            title={`${short}${dateLabel}`}
             className={`inline-block h-2.5 w-2.5 rounded-full border ${fill}`}
           />
         );
@@ -235,7 +237,7 @@ function UserRow({
 
       {/* Funnel dots */}
       <td className="px-4 py-3">
-        <FunnelDots ts={u.stage_timestamps} />
+        <FunnelDots ts={u.stage_timestamps} gmailConnected={u.gmail_connected} />
       </td>
 
       {/* Paid on */}
@@ -370,12 +372,29 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
               <ModalSection title="Funnel Journey">
                 <div className="flex flex-wrap gap-2">
                   {STAGE_DOTS.map(({ key, short }) => {
+                    // Gmail: use authoritative bool; other stages: timestamp presence
+                    const reached = key === "gmail_connected"
+                      ? user.gmail_connected
+                      : !!user.stage_timestamps[key];
                     const ts = user.stage_timestamps[key];
+                    const isPause = key === "campaign_paused";
+                    const isDone  = key === "campaign_completed";
+                    const dotColor = reached
+                      ? isDone  ? "bg-emerald-500"
+                      : isPause ? "bg-amber-500"
+                      : "bg-violet-500"
+                      : "bg-neutral-300";
+                    const borderColor = reached
+                      ? isDone  ? "border-emerald-300 bg-emerald-50"
+                      : isPause ? "border-amber-300 bg-amber-50"
+                      : "border-violet-300 bg-violet-50"
+                      : "border-neutral-200 bg-neutral-50 opacity-40";
                     return (
-                      <div key={key} className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 ${ts ? "border-violet-300 bg-violet-50" : "border-neutral-200 bg-neutral-50 opacity-40"}`}>
-                        <span className={`h-2 w-2 rounded-full ${ts ? "bg-violet-500" : "bg-neutral-300"}`} />
+                      <div key={key} className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 ${borderColor}`}>
+                        <span className={`h-2 w-2 rounded-full ${dotColor}`} />
                         <span className="font-['Satoshi'] text-xs font-medium text-neutral-700">{short}</span>
                         {ts && <span className="font-['Satoshi'] text-[10px] text-neutral-400">{fmt(ts)}</span>}
+                        {!ts && reached && <span className="font-['Satoshi'] text-[10px] text-neutral-400">connected</span>}
                       </div>
                     );
                   })}
@@ -584,8 +603,8 @@ function FunnelBar({ users }: { users: PaidUser[] }) {
     { label: "Resume up",       count: users.filter(u => u.stage_timestamps.resume_uploaded).length,      color: "bg-blue-400" },
     { label: "Gmail",           count: users.filter(u => u.gmail_connected).length,                       color: "bg-violet-400" },
     { label: "Launched",        count: users.filter(u => u.stage_timestamps.campaign_launched).length,    color: "bg-amber-400" },
-    { label: "Running",         count: users.filter(u => u.campaign?.status === "running").length,        color: "bg-green-500" },
-    { label: "Completed",       count: users.filter(u => u.stage_timestamps.campaign_completed).length,   color: "bg-emerald-600" },
+    { label: "Running",         count: users.filter(u => u.funnel_status === "running").length,           color: "bg-green-500" },
+    { label: "Completed",       count: users.filter(u => u.funnel_status === "completed").length,         color: "bg-emerald-600" },
   ];
   return (
     <div className="rounded-2xl border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
@@ -626,24 +645,39 @@ async function fetchPaidFunnel(): Promise<PaidUser[]> {
   return data.users ?? [];
 }
 
+const AUTO_REFRESH_MS = 60_000; // refresh every 60 seconds
+
 export default function CampaignHealth() {
   const { isAuthorized, isPending } = useAdminGuard();
   const [users, setUsers]           = useState<PaidUser[]>([]);
   const [loading, setLoading]       = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [selected, setSelected]     = useState<PaidUser | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (silent) setRefreshing(true);
+      else setLoading(true);
       setUsers(await fetchPaidFunnel());
+      setLastUpdated(new Date());
     } catch (err: any) {
       toast.error(err.message || "Failed to load campaign health data");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
+  // Initial load
   useEffect(() => { if (isAuthorized) load(); }, [isAuthorized, load]);
+
+  // Auto-refresh every 60s — silently updates data without showing spinner
+  useEffect(() => {
+    if (!isAuthorized) return;
+    const interval = setInterval(() => load(true), AUTO_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [isAuthorized, load]);
 
   if (isPending || isAuthorized === null) {
     return (
@@ -680,12 +714,52 @@ export default function CampaignHealth() {
 
         {/* Page title */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-          <h1 className="font-['Clash_Display'] text-3xl font-medium leading-tight tracking-tight text-neutral-950 md:text-4xl">
-            Campaign Health
-          </h1>
-          <p className="mt-2 font-['Satoshi'] text-base text-gray-600">
-            End-to-end funnel for every real paid user — click any row for full profile + lead quality drill-down.
-          </p>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h1 className="font-['Clash_Display'] text-3xl font-medium leading-tight tracking-tight text-neutral-950 md:text-4xl">
+                Campaign Health
+              </h1>
+              <p className="mt-2 font-['Satoshi'] text-base text-gray-600">
+                End-to-end funnel for every real paid user — click any row for full profile + lead quality drill-down.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              {lastUpdated && (
+                <span className="font-['Satoshi'] text-xs text-neutral-400">
+                  Updated {ago(lastUpdated.toISOString())}
+                  {refreshing && <span className="ml-1 text-violet-500">↻</span>}
+                </span>
+              )}
+              <button
+                onClick={() => load(false)}
+                disabled={loading}
+                className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:opacity-40"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {/* Journey dot legend */}
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-2.5">
+            <span className="font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-400 mr-1">Journey dots:</span>
+            {[
+              { label: "CV uploaded",       color: "bg-violet-500 border-violet-700" },
+              { label: "Quiz done",         color: "bg-violet-500 border-violet-700" },
+              { label: "Leads generated",   color: "bg-violet-500 border-violet-700" },
+              { label: "Gmail connected",   color: "bg-violet-500 border-violet-700" },
+              { label: "Style selected",    color: "bg-violet-500 border-violet-700" },
+              { label: "Campaign launched", color: "bg-violet-500 border-violet-700" },
+              { label: "Campaign paused",   color: "bg-amber-500 border-amber-700" },
+              { label: "Campaign done",     color: "bg-emerald-500 border-emerald-700" },
+              { label: "Not reached",       color: "bg-white border-neutral-300" },
+            ].map(({ label, color }) => (
+              <div key={label} className="flex items-center gap-1.5">
+                <span className={`inline-block h-2.5 w-2.5 rounded-full border ${color}`} />
+                <span className="font-['Satoshi'] text-xs text-neutral-600">{label}</span>
+              </div>
+            ))}
+          </div>
         </motion.div>
 
         {loading ? (
