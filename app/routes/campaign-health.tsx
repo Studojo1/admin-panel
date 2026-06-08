@@ -74,6 +74,7 @@ interface PaidUser {
   paid_at: string;
   total_paid_cents: number;
   currency: string;
+  gmail_connected: boolean;   // authoritative: email_accounts row exists
   funnel_status: string;
   stage_timestamps: StageTimes;
   campaign: CampaignData | null;
@@ -581,7 +582,7 @@ function FunnelBar({ users }: { users: PaidUser[] }) {
   const stages = [
     { label: "Paid",            count: total,                                              color: "bg-neutral-400" },
     { label: "Resume up",       count: users.filter(u => u.stage_timestamps.resume_uploaded).length,      color: "bg-blue-400" },
-    { label: "Gmail",           count: users.filter(u => u.stage_timestamps.gmail_connected).length,      color: "bg-violet-400" },
+    { label: "Gmail",           count: users.filter(u => u.gmail_connected).length,                       color: "bg-violet-400" },
     { label: "Launched",        count: users.filter(u => u.stage_timestamps.campaign_launched).length,    color: "bg-amber-400" },
     { label: "Running",         count: users.filter(u => u.campaign?.status === "running").length,        color: "bg-green-500" },
     { label: "Completed",       count: users.filter(u => u.stage_timestamps.campaign_completed).length,   color: "bg-emerald-600" },
@@ -654,11 +655,13 @@ export default function CampaignHealth() {
   if (!isAuthorized) return null;
 
   // ── Segment users into funnel buckets ──────────────────────────────────────
-  const running   = users.filter(u => u.campaign?.status === "running");
-  const paused    = users.filter(u => u.campaign?.status === "paused" || u.campaign?.status === "cancelled");
-  const completed = users.filter(u => u.stage_timestamps.campaign_completed);
-  const noGmail   = users.filter(u => !u.stage_timestamps.gmail_connected);
-  const noLaunch  = users.filter(u => u.stage_timestamps.gmail_connected && !u.stage_timestamps.campaign_launched);
+  const running   = users.filter(u => u.funnel_status === "running");
+  const paused    = users.filter(u => u.funnel_status === "paused" || u.funnel_status === "cancelled");
+  const completed = users.filter(u => u.funnel_status === "completed");
+  // Never connected Gmail = no email_accounts row at all (authoritative bool from backend)
+  const noGmail   = users.filter(u => !u.gmail_connected);
+  // Connected Gmail but never launched any campaign
+  const noLaunch  = users.filter(u => u.gmail_connected && !u.stage_timestamps.campaign_launched && u.funnel_status === "gmail_connected");
   const breaking  = running.filter(u => {
     const sig = healthSignal(u);
     return sig.label !== "Healthy" && sig.label !== "N/A";
