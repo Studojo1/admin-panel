@@ -25,12 +25,14 @@ interface StageTimes {
 }
 
 interface CampaignStats {
-  sent: number;
+  leads_contacted: number;  // unique leads (initial emails only)
   replied: number;
   bounced: number;
   failed: number;
   queued: number;
   reply_rate: number;
+  followups_sent: number;
+  followups_replied: number;
   last_email_sent: string | null;
 }
 
@@ -119,13 +121,14 @@ function healthSignal(u: PaidUser): { icon: string; label: string; color: string
   const c = u.campaign;
   if (!c || c.status !== "running") return { icon: "–", label: "N/A", color: "text-neutral-400" };
   const s = c.stats;
-  if (s.failed > 50 || (s.sent > 20 && s.failed / (s.sent + s.failed) > 0.3))
+  const contacted = s.leads_contacted;
+  if (s.failed > 50 || (contacted > 20 && s.failed / (contacted + s.failed) > 0.3))
     return { icon: "🔴", label: "High failures", color: "text-red-600" };
-  if (s.sent > 50 && s.replied === 0)
+  if (contacted > 50 && s.replied === 0)
     return { icon: "🔴", label: "0 replies", color: "text-red-600" };
-  if (s.sent === 0)
+  if (contacted === 0 && s.queued === 0)
     return { icon: "🔴", label: "Queue stuck", color: "text-red-600" };
-  if (s.bounced / Math.max(s.sent, 1) > 0.04)
+  if (s.bounced / Math.max(contacted, 1) > 0.04)
     return { icon: "🟠", label: "High bounce", color: "text-orange-600" };
   if (s.last_email_sent && daysSince(s.last_email_sent) >= 2 && s.queued === 0)
     return { icon: "🟡", label: "Silent 2d+", color: "text-yellow-600" };
@@ -261,10 +264,10 @@ function UserRow({
       {showCampaign && c && (
         <td className="px-4 py-3">
           <div className="flex items-center gap-1.5">
-            <StatPill value={c.stats.sent}    label="Sent"    color="bg-green-50" />
-            <StatPill value={c.stats.replied} label="Reply"   color="bg-emerald-50" />
-            <StatPill value={c.stats.failed}  label="Failed"  color="bg-red-50" />
-            <StatPill value={`${c.stats.reply_rate}%`} label="Rate" color="bg-violet-50" />
+            <StatPill value={c.stats.leads_contacted} label="Leads"  color="bg-green-50" />
+            <StatPill value={c.stats.replied}         label="Reply"  color="bg-emerald-50" />
+            <StatPill value={c.stats.failed}          label="Failed" color="bg-red-50" />
+            <StatPill value={`${c.stats.reply_rate}%`} label="Rate"  color="bg-violet-50" />
           </div>
         </td>
       )}
@@ -389,15 +392,21 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
                     {c.started_at && <span className="font-['Satoshi'] text-xs text-neutral-500">Started {fmt(c.started_at)}</span>}
                   </div>
                   <div className="grid grid-cols-6 gap-2">
-                    <StatPill value={c.stats.sent}    label="Sent"      color="bg-green-50" />
-                    <StatPill value={c.stats.replied} label="Replied"   color="bg-emerald-50" />
-                    <StatPill value={c.stats.bounced} label="Bounced"   color="bg-red-50" />
-                    <StatPill value={c.stats.failed}  label="Failed"    color="bg-orange-50" />
-                    <StatPill value={c.stats.queued}  label="Queued"    color="bg-neutral-50" />
-                    <StatPill value={`${c.stats.reply_rate}%`} label="Rate" color="bg-violet-50" />
+                    <StatPill value={c.stats.leads_contacted} label="Leads"   color="bg-green-50" />
+                    <StatPill value={c.stats.replied}         label="Replied" color="bg-emerald-50" />
+                    <StatPill value={c.stats.bounced}         label="Bounced" color="bg-red-50" />
+                    <StatPill value={c.stats.failed}          label="Failed"  color="bg-orange-50" />
+                    <StatPill value={c.stats.queued}          label="Queued"  color="bg-neutral-50" />
+                    <StatPill value={`${c.stats.reply_rate}%`} label="Rate"   color="bg-violet-50" />
                   </div>
-                  {c.stats.last_email_sent && (
+                  {(c.stats.followups_sent > 0) && (
                     <p className="mt-2 font-['Satoshi'] text-xs text-neutral-500">
+                      Follow-ups: <strong>{c.stats.followups_sent}</strong> sent
+                      {c.stats.followups_replied > 0 && <>, <strong>{c.stats.followups_replied}</strong> replied</>}
+                    </p>
+                  )}
+                  {c.stats.last_email_sent && (
+                    <p className="mt-1 font-['Satoshi'] text-xs text-neutral-500">
                       Last email: {ago(c.stats.last_email_sent)} ({fmt(c.stats.last_email_sent)})
                     </p>
                   )}
