@@ -68,6 +68,11 @@ export async function loader({ request }: Route.LoaderArgs) {
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
+    if (type === "paid_funnel") {
+      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/paid-funnel`, { headers });
+      return Response.json(await res.json(), { status: res.status, headers: noCache });
+    }
+
     return Response.json({ error: "Unknown type" }, { status: 400 });
   } catch (err: any) {
     return Response.json({ error: err.message }, { status: 500 });
