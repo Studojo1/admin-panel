@@ -152,7 +152,7 @@ function SectionHeader({ title, count, color }: { title: string; count: number; 
 // ── Funnel dot strip ──────────────────────────────────────────────────────────
 
 const STAGE_DOTS: { key: keyof StageTimes; short: string }[] = [
-  { key: "resume_uploaded",      short: "CV" },
+  { key: "resume_uploaded",      short: "Resume" },
   { key: "quiz_completed",       short: "Quiz" },
   { key: "leads_generated",      short: "Leads" },
   { key: "gmail_connected",      short: "Gmail" },
@@ -164,24 +164,28 @@ const STAGE_DOTS: { key: keyof StageTimes; short: string }[] = [
 
 function FunnelDots({ ts, gmailConnected }: { ts: StageTimes; gmailConnected: boolean }) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-2">
       {STAGE_DOTS.map(({ key, short }) => {
-        // Gmail dot: use the authoritative bool, not just whether the timestamp exists
         const reached = key === "gmail_connected" ? gmailConnected : !!ts[key];
         const isPause = key === "campaign_paused";
         const isDone  = key === "campaign_completed";
-        const fill = reached
+        const dotFill = reached
           ? isDone  ? "bg-emerald-500 border-emerald-700"
           : isPause ? "bg-amber-500 border-amber-700"
           : "bg-violet-500 border-violet-700"
           : "bg-white border-neutral-300";
-        const dateLabel = ts[key] ? `: ${fmt(ts[key])}` : key === "gmail_connected" && gmailConnected ? " (no timestamp)" : " — not reached";
+        const dateLabel = ts[key]
+          ? fmt(ts[key])
+          : key === "gmail_connected" && gmailConnected
+          ? "connected"
+          : "—";
         return (
-          <span
-            key={key}
-            title={`${short}${dateLabel}`}
-            className={`inline-block h-2.5 w-2.5 rounded-full border ${fill}`}
-          />
+          <div key={key} className="flex flex-col items-center gap-0.5" title={`${short}: ${dateLabel}`}>
+            <span className={`inline-block h-2.5 w-2.5 rounded-full border ${dotFill}`} />
+            <span className={`font-['Satoshi'] text-[9px] leading-none ${reached ? "text-neutral-500" : "text-neutral-300"}`}>
+              {short}
+            </span>
+          </div>
         );
       })}
     </div>
@@ -740,23 +744,18 @@ export default function CampaignHealth() {
             </div>
           </div>
 
-          {/* Journey dot legend */}
-          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-2.5">
-            <span className="font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-400 mr-1">Journey dots:</span>
+          {/* Compact dot legend — one line, right under title */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="font-['Satoshi'] text-xs text-neutral-400">Journey dots →</span>
             {[
-              { label: "CV uploaded",       color: "bg-violet-500 border-violet-700" },
-              { label: "Quiz done",         color: "bg-violet-500 border-violet-700" },
-              { label: "Leads generated",   color: "bg-violet-500 border-violet-700" },
-              { label: "Gmail connected",   color: "bg-violet-500 border-violet-700" },
-              { label: "Style selected",    color: "bg-violet-500 border-violet-700" },
-              { label: "Campaign launched", color: "bg-violet-500 border-violet-700" },
-              { label: "Campaign paused",   color: "bg-amber-500 border-amber-700" },
-              { label: "Campaign done",     color: "bg-emerald-500 border-emerald-700" },
-              { label: "Not reached",       color: "bg-white border-neutral-300" },
+              { label: "Resume · Quiz · Leads · Gmail · Style · Launch", color: "bg-violet-500 border-violet-700" },
+              { label: "Paused",    color: "bg-amber-500 border-amber-700" },
+              { label: "Completed", color: "bg-emerald-500 border-emerald-700" },
+              { label: "Not reached", color: "bg-white border-neutral-300" },
             ].map(({ label, color }) => (
               <div key={label} className="flex items-center gap-1.5">
                 <span className={`inline-block h-2.5 w-2.5 rounded-full border ${color}`} />
-                <span className="font-['Satoshi'] text-xs text-neutral-600">{label}</span>
+                <span className="font-['Satoshi'] text-xs text-neutral-500">{label}</span>
               </div>
             ))}
           </div>
