@@ -300,7 +300,8 @@ function UserRow({
       {showCampaign && c && (
         <td className="px-4 py-3">
           <div className="flex items-center gap-1.5">
-            <StatPill value={c.stats.leads_contacted} label="Leads"  color="bg-green-50" />
+            <StatPill value={c.stats.leads_contacted} label="Reached" color="bg-green-50" />
+            <StatPill value={c.stats.leads_contacted + (c.stats.followups_sent || 0)} label="Sent" color="bg-blue-50" />
             <StatPill value={c.stats.replied}         label="Reply"  color="bg-emerald-50" />
             <StatPill value={c.stats.failed}          label="Failed" color="bg-red-50" />
             <StatPill value={`${c.stats.reply_rate}%`} label="Rate"  color="bg-violet-50" />
@@ -447,16 +448,20 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
                     <span className="font-['Satoshi'] text-xs text-neutral-500">Daily limit: {c.daily_limit}</span>
                     {c.started_at && <span className="font-['Satoshi'] text-xs text-neutral-500">Started {fmt(c.started_at)}</span>}
                   </div>
-                  <div className="grid grid-cols-6 gap-2">
-                    <StatPill value={c.stats.leads_contacted} label="Leads"   color="bg-green-50" />
+                  <div className="grid grid-cols-7 gap-2">
+                    <StatPill value={c.stats.leads_contacted} label="Reached" color="bg-green-50" />
+                    <StatPill value={c.stats.leads_contacted + (c.stats.followups_sent || 0)} label="Sent" color="bg-blue-50" />
                     <StatPill value={c.stats.replied}         label="Replied" color="bg-emerald-50" />
                     <StatPill value={c.stats.bounced}         label="Bounced" color="bg-red-50" />
                     <StatPill value={c.stats.failed}          label="Failed"  color="bg-orange-50" />
                     <StatPill value={c.stats.queued}          label="Queued"  color="bg-neutral-50" />
                     <StatPill value={`${c.stats.reply_rate}%`} label="Rate"   color="bg-violet-50" />
                   </div>
+                  <p className="mt-2 font-['Satoshi'] text-xs text-neutral-500">
+                    <strong>Reached</strong> = unique people we sent an initial email to. <strong>Sent</strong> = total emails (incl. follow-ups). The campaign detail view shows individual email rows, so its count will match <strong>Sent</strong> plus anything still queued/cancelled.
+                  </p>
                   {(c.stats.followups_sent > 0) && (
-                    <p className="mt-2 font-['Satoshi'] text-xs text-neutral-500">
+                    <p className="mt-1 font-['Satoshi'] text-xs text-neutral-500">
                       Follow-ups: <strong>{c.stats.followups_sent}</strong> sent
                       {c.stats.followups_replied > 0 && <>, <strong>{c.stats.followups_replied}</strong> replied</>}
                     </p>
