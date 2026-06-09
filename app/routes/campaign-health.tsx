@@ -181,17 +181,24 @@ const STAGE_DOTS: { key: keyof StageTimes; short: string }[] = [
   { key: "campaign_completed",   short: "Done" },
 ];
 
-function FunnelDots({ ts, gmailConnected }: { ts: StageTimes; gmailConnected: boolean }) {
-  const campaignCompleted = !!ts.campaign_completed;
+function FunnelDots({ ts, gmailConnected, funnelStatus }: {
+  ts: StageTimes;
+  gmailConnected: boolean;
+  funnelStatus: string;
+}) {
+  const campaignCompleted  = !!ts.campaign_completed;
+  // Pause dot only fills amber when campaign is CURRENTLY paused or cancelled.
+  // If it was paused historically but resumed (funnel_status=running), show hollow —
+  // the amber would wrongly imply the campaign is still paused.
+  const currentlyPaused = funnelStatus === "paused" || funnelStatus === "cancelled";
   return (
     <div className="flex items-center gap-2">
       {STAGE_DOTS.map(({ key, short }) => {
         const reached =
           key === "gmail_connected"
             ? (gmailConnected === true || !!ts[key])
-            // Pause dot hidden when campaign is done — it happened but is no longer relevant
             : key === "campaign_paused"
-            ? !!ts[key] && !campaignCompleted
+            ? !!ts[key] && !campaignCompleted && currentlyPaused
             : !!ts[key];
         const isPause = key === "campaign_paused";
         const isDone  = key === "campaign_completed";
@@ -263,7 +270,7 @@ function UserRow({
 
       {/* Funnel dots */}
       <td className="px-4 py-3">
-        <FunnelDots ts={u.stage_timestamps} gmailConnected={u.gmail_connected} />
+        <FunnelDots ts={u.stage_timestamps} gmailConnected={u.gmail_connected} funnelStatus={u.funnel_status} />
       </td>
 
       {/* Paid on */}
@@ -398,11 +405,12 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
               <ModalSection title="Funnel Journey">
                 <div className="flex flex-wrap gap-2">
                   {STAGE_DOTS.map(({ key, short }) => {
-                    const modalCompleted = !!user.stage_timestamps.campaign_completed;
+                    const modalCompleted   = !!user.stage_timestamps.campaign_completed;
+                    const modalCurPaused   = user.funnel_status === "paused" || user.funnel_status === "cancelled";
                     const reached = key === "gmail_connected"
                       ? (user.gmail_connected === true || !!user.stage_timestamps[key])
                       : key === "campaign_paused"
-                      ? !!user.stage_timestamps[key] && !modalCompleted
+                      ? !!user.stage_timestamps[key] && !modalCompleted && modalCurPaused
                       : !!user.stage_timestamps[key];
                     const ts = user.stage_timestamps[key];
                     const isPause = key === "campaign_paused";
