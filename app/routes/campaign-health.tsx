@@ -598,35 +598,79 @@ function KV({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ── Stat chips row ────────────────────────────────────────────────────────────
+// ── Funnel progress bar ───────────────────────────────────────────────────────
+// All counts use funnel_status (derived from campaign rows) or gmail_connected
+// (derived from email_accounts), both back-filled from system records so they
+// are accurate regardless of which outreach_orders columns were missing.
 
-function StatChips({ users }: { users: PaidUser[] }) {
-  const total     = users.length;
-  const running   = users.filter(u => u.funnel_status === "running").length;
-  const paused    = users.filter(u => u.funnel_status === "paused").length;
-  const completed = users.filter(u => u.funnel_status === "completed").length;
-  const noGmail   = users.filter(u => !u.gmail_connected).length;
-  const breaking  = users.filter(u => {
-    const s = healthSignal(u);
-    return s.label !== "Healthy" && s.label !== "N/A";
-  }).length;
+function FunnelBar({ users }: { users: PaidUser[] }) {
+  const total = users.length;
+  if (total === 0) return null;
 
-  const chips = [
-    { label: "Paid",      value: total,     color: "bg-neutral-100 border-neutral-300 text-neutral-800" },
-    { label: "Running",   value: running,   color: "bg-green-100 border-green-300 text-green-800" },
-    { label: "Paused",    value: paused,    color: "bg-amber-100 border-amber-300 text-amber-800" },
-    { label: "Completed", value: completed, color: "bg-emerald-100 border-emerald-300 text-emerald-800" },
-    { label: "Breaking",  value: breaking,  color: "bg-red-100 border-red-300 text-red-800" },
-    { label: "No Gmail",  value: noGmail,   color: "bg-neutral-100 border-neutral-300 text-neutral-500" },
+  const stages = [
+    {
+      label: "Paid",
+      count: total,
+      color: "bg-neutral-500",
+      note: "every real paid user",
+    },
+    {
+      label: "Resume uploaded",
+      count: users.filter(u => !!u.stage_timestamps.resume_uploaded).length,
+      color: "bg-blue-400",
+      note: "uploaded a resume",
+    },
+    {
+      label: "Gmail connected",
+      // Uses email_accounts truth — accurate for all users
+      count: users.filter(u => u.gmail_connected).length,
+      color: "bg-violet-500",
+      note: "connected Gmail (from email_accounts)",
+    },
+    {
+      label: "Campaign launched",
+      count: users.filter(u => !!u.stage_timestamps.campaign_launched).length,
+      color: "bg-amber-400",
+      note: "launched at least one campaign",
+    },
+    {
+      label: "Running now",
+      count: users.filter(u => u.funnel_status === "running").length,
+      color: "bg-green-500",
+      note: "campaign actively running",
+    },
+    {
+      label: "Completed",
+      count: users.filter(u => u.funnel_status === "completed").length,
+      color: "bg-emerald-600",
+      note: "campaign finished",
+    },
   ];
+
   return (
-    <div className="flex flex-wrap gap-3">
-      {chips.map(c => (
-        <div key={c.label} className={`flex items-center gap-2 rounded-xl border-2 px-4 py-2 ${c.color}`}>
-          <span className="font-['Clash_Display'] text-xl font-bold">{c.value}</span>
-          <span className="font-['Satoshi'] text-sm font-medium">{c.label}</span>
-        </div>
-      ))}
+    <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+      <p className="mb-5 font-['Clash_Display'] text-xl font-medium text-neutral-950">
+        Funnel — {total} paid users
+      </p>
+      <div className="space-y-3">
+        {stages.map((s) => (
+          <div key={s.label} className="flex items-center gap-4" title={s.note}>
+            <span className="w-36 shrink-0 font-['Satoshi'] text-xs text-neutral-500">{s.label}</span>
+            <div className="flex-1 overflow-hidden rounded-full bg-neutral-100 h-4">
+              <div
+                className={`h-4 rounded-full ${s.color} transition-all duration-500`}
+                style={{ width: `${(s.count / total) * 100}%` }}
+              />
+            </div>
+            <span className="w-8 shrink-0 text-right font-['Satoshi'] text-sm font-bold text-neutral-900">
+              {s.count}
+            </span>
+            <span className="w-10 shrink-0 text-right font-['Satoshi'] text-xs text-neutral-400">
+              {Math.round((s.count / total) * 100)}%
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -757,9 +801,9 @@ export default function CampaignHealth() {
         ) : (
           <div className="mt-10 space-y-10">
 
-            {/* Stat chips */}
+            {/* Funnel bar */}
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05 }}>
-              <StatChips users={users} />
+              <FunnelBar users={users} />
             </motion.div>
 
             {/* ── Section 1: Breaking campaigns ── */}
