@@ -598,38 +598,35 @@ function KV({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ── Funnel summary bar ────────────────────────────────────────────────────────
+// ── Stat chips row ────────────────────────────────────────────────────────────
 
-function FunnelBar({ users }: { users: PaidUser[] }) {
-  const total = users.length;
-  const stages = [
-    { label: "Paid",            count: total,                                              color: "bg-neutral-400" },
-    { label: "Resume up",       count: users.filter(u => u.stage_timestamps.resume_uploaded).length,      color: "bg-blue-400" },
-    { label: "Gmail",           count: users.filter(u => u.gmail_connected).length,                       color: "bg-violet-400" },
-    { label: "Launched",        count: users.filter(u => u.stage_timestamps.campaign_launched).length,    color: "bg-amber-400" },
-    { label: "Running",         count: users.filter(u => u.funnel_status === "running").length,           color: "bg-green-500" },
-    { label: "Completed",       count: users.filter(u => u.funnel_status === "completed").length,         color: "bg-emerald-600" },
+function StatChips({ users }: { users: PaidUser[] }) {
+  const total     = users.length;
+  const running   = users.filter(u => u.funnel_status === "running").length;
+  const paused    = users.filter(u => u.funnel_status === "paused").length;
+  const completed = users.filter(u => u.funnel_status === "completed").length;
+  const noGmail   = users.filter(u => !u.gmail_connected).length;
+  const breaking  = users.filter(u => {
+    const s = healthSignal(u);
+    return s.label !== "Healthy" && s.label !== "N/A";
+  }).length;
+
+  const chips = [
+    { label: "Paid",      value: total,     color: "bg-neutral-100 border-neutral-300 text-neutral-800" },
+    { label: "Running",   value: running,   color: "bg-green-100 border-green-300 text-green-800" },
+    { label: "Paused",    value: paused,    color: "bg-amber-100 border-amber-300 text-amber-800" },
+    { label: "Completed", value: completed, color: "bg-emerald-100 border-emerald-300 text-emerald-800" },
+    { label: "Breaking",  value: breaking,  color: "bg-red-100 border-red-300 text-red-800" },
+    { label: "No Gmail",  value: noGmail,   color: "bg-neutral-100 border-neutral-300 text-neutral-500" },
   ];
   return (
-    <div className="rounded-2xl border-2 border-neutral-900 bg-white p-5 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
-      <p className="mb-4 font-['Clash_Display'] text-lg font-medium text-neutral-950">Funnel Overview — {total} paid users</p>
-      <div className="space-y-2">
-        {stages.map((s) => (
-          <div key={s.label} className="flex items-center gap-3">
-            <span className="w-24 shrink-0 font-['Satoshi'] text-xs text-neutral-500">{s.label}</span>
-            <div className="flex-1 overflow-hidden rounded-full bg-neutral-100 h-5">
-              <div
-                className={`h-5 rounded-full ${s.color} transition-all duration-500`}
-                style={{ width: `${total > 0 ? (s.count / total) * 100 : 0}%` }}
-              />
-            </div>
-            <span className="w-12 shrink-0 text-right font-['Satoshi'] text-sm font-bold text-neutral-900">{s.count}</span>
-            <span className="w-10 shrink-0 text-right font-['Satoshi'] text-xs text-neutral-400">
-              {total > 0 ? Math.round((s.count / total) * 100) : 0}%
-            </span>
-          </div>
-        ))}
-      </div>
+    <div className="flex flex-wrap gap-3">
+      {chips.map(c => (
+        <div key={c.label} className={`flex items-center gap-2 rounded-xl border-2 px-4 py-2 ${c.color}`}>
+          <span className="font-['Clash_Display'] text-xl font-bold">{c.value}</span>
+          <span className="font-['Satoshi'] text-sm font-medium">{c.label}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -744,20 +741,12 @@ export default function CampaignHealth() {
             </div>
           </div>
 
-          {/* Compact dot legend — one line, right under title */}
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className="font-['Satoshi'] text-xs text-neutral-400">Journey dots →</span>
-            {[
-              { label: "Resume · Quiz · Leads · Gmail · Style · Launch", color: "bg-violet-500 border-violet-700" },
-              { label: "Paused",    color: "bg-amber-500 border-amber-700" },
-              { label: "Completed", color: "bg-emerald-500 border-emerald-700" },
-              { label: "Not reached", color: "bg-white border-neutral-300" },
-            ].map(({ label, color }) => (
-              <div key={label} className="flex items-center gap-1.5">
-                <span className={`inline-block h-2.5 w-2.5 rounded-full border ${color}`} />
-                <span className="font-['Satoshi'] text-xs text-neutral-500">{label}</span>
-              </div>
-            ))}
+          {/* Dot colour key — minimal, one line */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 font-['Satoshi'] text-xs text-neutral-400">
+            <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-violet-500 border border-violet-700" /> Reached</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-amber-500 border border-amber-700" /> Paused</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500 border border-emerald-700" /> Completed</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-white border border-neutral-300" /> Not reached</span>
           </div>
         </motion.div>
 
@@ -768,9 +757,9 @@ export default function CampaignHealth() {
         ) : (
           <div className="mt-10 space-y-10">
 
-            {/* Funnel bar */}
+            {/* Stat chips */}
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05 }}>
-              <FunnelBar users={users} />
+              <StatChips users={users} />
             </motion.div>
 
             {/* ── Section 1: Breaking campaigns ── */}
