@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import type { LoaderFunctionArgs } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
@@ -9,6 +10,24 @@ export function meta() {
     { title: "Campaign Health – Admin Panel" },
     { name: "description", content: "Funnel-by-funnel breakdown of every paid user's campaign status" },
   ];
+}
+
+// Force browser to never cache this page — ensures new JS bundle is always loaded
+export function headers() {
+  return {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+  };
+}
+
+export async function loader({}: LoaderFunctionArgs) {
+  return new Response(null, {
+    status: 200,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+      "Pragma": "no-cache",
+    },
+  });
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
