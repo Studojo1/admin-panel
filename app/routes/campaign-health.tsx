@@ -615,17 +615,17 @@ function FunnelBar({ users }: { users: PaidUser[] }) {
       note: "every real paid user",
     },
     {
-      label: "Resume uploaded",
+      label: "Started onboarding",
       count: users.filter(u => !!u.stage_timestamps.resume_uploaded).length,
       color: "bg-blue-400",
-      note: "uploaded a resume",
+      note: "uploaded resume and entered the funnel",
     },
     {
       label: "Gmail connected",
-      // Uses email_accounts truth — accurate for all users
-      count: users.filter(u => u.gmail_connected).length,
+      // OR both sources: the bool field AND the back-filled timestamp
+      count: users.filter(u => u.gmail_connected === true || !!u.stage_timestamps.gmail_connected).length,
       color: "bg-violet-500",
-      note: "connected Gmail (from email_accounts)",
+      note: "connected Gmail",
     },
     {
       label: "Campaign launched",
@@ -744,8 +744,9 @@ export default function CampaignHealth() {
   const running   = allRunning.filter(u => !breakingIds.has(u.user_id));
   const paused    = users.filter(u => u.funnel_status === "paused" || u.funnel_status === "cancelled");
   const completed = users.filter(u => u.funnel_status === "completed");
-  const noGmail   = users.filter(u => !u.gmail_connected);
-  const noLaunch  = users.filter(u => u.gmail_connected && !u.stage_timestamps.campaign_launched && u.funnel_status === "gmail_connected");
+  const isGmailConnected = (u: PaidUser) => u.gmail_connected === true || !!u.stage_timestamps.gmail_connected;
+  const noGmail   = users.filter(u => !isGmailConnected(u));
+  const noLaunch  = users.filter(u => isGmailConnected(u) && !u.stage_timestamps.campaign_launched && u.funnel_status === "gmail_connected");
 
   const RUNNING_HEADERS   = ["User", "Paid", "Journey", "Since", "Campaign", "Email Stats", "Health", "Last Email"];
   const PAUSED_HEADERS    = ["User", "Paid", "Journey", "Since", "Campaign", "Email Stats", "Last Email"];
