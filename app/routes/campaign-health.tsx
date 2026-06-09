@@ -166,7 +166,12 @@ function FunnelDots({ ts, gmailConnected }: { ts: StageTimes; gmailConnected: bo
   return (
     <div className="flex items-center gap-2">
       {STAGE_DOTS.map(({ key, short }) => {
-        const reached = key === "gmail_connected" ? gmailConnected : !!ts[key];
+        // Gmail: use both the bool AND the timestamp — if either is truthy, dot is filled.
+        // The backend always back-fills stage_timestamps.gmail_connected from email_accounts
+        // when the bool is true, so both should agree. We OR them as a safety net.
+        const reached = key === "gmail_connected"
+          ? (gmailConnected === true || !!ts[key])
+          : !!ts[key];
         const isPause = key === "campaign_paused";
         const isDone  = key === "campaign_completed";
         const dotFill = reached
@@ -174,11 +179,7 @@ function FunnelDots({ ts, gmailConnected }: { ts: StageTimes; gmailConnected: bo
           : isPause ? "bg-amber-500 border-amber-700"
           : "bg-violet-500 border-violet-700"
           : "bg-white border-neutral-300";
-        const dateLabel = ts[key]
-          ? fmt(ts[key])
-          : key === "gmail_connected" && gmailConnected
-          ? "connected"
-          : "—";
+        const dateLabel = ts[key] ? fmt(ts[key]) : reached ? "connected" : "—";
         return (
           <div key={key} className="flex flex-col items-center gap-0.5" title={`${short}: ${dateLabel}`}>
             <span className={`inline-block h-2.5 w-2.5 rounded-full border ${dotFill}`} />
@@ -376,9 +377,8 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
               <ModalSection title="Funnel Journey">
                 <div className="flex flex-wrap gap-2">
                   {STAGE_DOTS.map(({ key, short }) => {
-                    // Gmail: use authoritative bool; other stages: timestamp presence
                     const reached = key === "gmail_connected"
-                      ? user.gmail_connected
+                      ? (user.gmail_connected === true || !!user.stage_timestamps[key])
                       : !!user.stage_timestamps[key];
                     const ts = user.stage_timestamps[key];
                     const isPause = key === "campaign_paused";
