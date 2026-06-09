@@ -677,10 +677,12 @@ function FunnelBar({ users }: { users: PaidUser[] }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+const PAID_FUNNEL_VERSION = "v4"; // bump to bust browser cache
+
 async function fetchPaidFunnel(): Promise<PaidUser[]> {
   const token = await getToken();
   if (!token) throw new Error("Not authenticated");
-  const res = await fetch(`/api/outreach?type=paid_funnel&_t=${Date.now()}`, {
+  const res = await fetch(`/api/outreach?type=paid_funnel&_v=${PAID_FUNNEL_VERSION}&_t=${Date.now()}`, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "include",
     cache: "no-store",
@@ -704,7 +706,16 @@ export default function CampaignHealth() {
     try {
       if (silent) setRefreshing(true);
       else setLoading(true);
-      setUsers(await fetchPaidFunnel());
+      const fresh = await fetchPaidFunnel();
+      // Verify data integrity — log first user's stage_timestamps for debugging
+      if (fresh.length > 0) {
+        const sample = fresh.find(u => u.email === "stayal@usc.edu") ?? fresh[0];
+        console.log("[CampaignHealth] sample user:", sample.email,
+          "| gmail_connected:", sample.gmail_connected,
+          "| resume_ts:", sample.stage_timestamps.resume_uploaded,
+          "| total users:", fresh.length);
+      }
+      setUsers(fresh);
       setLastUpdated(new Date());
     } catch (err: any) {
       toast.error(err.message || "Failed to load campaign health data");
