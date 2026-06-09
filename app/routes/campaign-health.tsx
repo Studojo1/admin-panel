@@ -733,18 +733,19 @@ export default function CampaignHealth() {
   }
   if (!isAuthorized) return null;
 
-  // ── Segment users into funnel buckets ──────────────────────────────────────
-  const running   = users.filter(u => u.funnel_status === "running");
-  const paused    = users.filter(u => u.funnel_status === "paused" || u.funnel_status === "cancelled");
-  const completed = users.filter(u => u.funnel_status === "completed");
-  // Never connected Gmail = no email_accounts row at all (authoritative bool from backend)
-  const noGmail   = users.filter(u => !u.gmail_connected);
-  // Connected Gmail but never launched any campaign
-  const noLaunch  = users.filter(u => u.gmail_connected && !u.stage_timestamps.campaign_launched && u.funnel_status === "gmail_connected");
-  const breaking  = running.filter(u => {
+  // ── Segment users into mutually exclusive funnel buckets ──────────────────
+  const allRunning = users.filter(u => u.funnel_status === "running");
+  const breaking   = allRunning.filter(u => {
     const sig = healthSignal(u);
     return sig.label !== "Healthy" && sig.label !== "N/A";
   });
+  // Healthy running = running but NOT in breaking (no overlap)
+  const breakingIds = new Set(breaking.map(u => u.user_id));
+  const running   = allRunning.filter(u => !breakingIds.has(u.user_id));
+  const paused    = users.filter(u => u.funnel_status === "paused" || u.funnel_status === "cancelled");
+  const completed = users.filter(u => u.funnel_status === "completed");
+  const noGmail   = users.filter(u => !u.gmail_connected);
+  const noLaunch  = users.filter(u => u.gmail_connected && !u.stage_timestamps.campaign_launched && u.funnel_status === "gmail_connected");
 
   const RUNNING_HEADERS   = ["User", "Paid", "Journey", "Since", "Campaign", "Email Stats", "Health", "Last Email"];
   const PAUSED_HEADERS    = ["User", "Paid", "Journey", "Since", "Campaign", "Email Stats", "Last Email"];
@@ -818,9 +819,9 @@ export default function CampaignHealth() {
               </motion.div>
             )}
 
-            {/* ── Section 2: Active running campaigns ── */}
+            {/* ── Section 2: Healthy running campaigns (Breaking excluded) ── */}
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.15 }} className="space-y-3">
-              <SectionHeader title="✅ Running Campaigns" count={running.length} color="bg-green-50" />
+              <SectionHeader title="✅ Running — Healthy" count={running.length} color="bg-green-50" />
               {running.length === 0 ? (
                 <p className="font-['Satoshi'] text-sm text-neutral-400">No running campaigns.</p>
               ) : (
