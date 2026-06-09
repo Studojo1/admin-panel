@@ -182,15 +182,17 @@ const STAGE_DOTS: { key: keyof StageTimes; short: string }[] = [
 ];
 
 function FunnelDots({ ts, gmailConnected }: { ts: StageTimes; gmailConnected: boolean }) {
+  const campaignCompleted = !!ts.campaign_completed;
   return (
     <div className="flex items-center gap-2">
       {STAGE_DOTS.map(({ key, short }) => {
-        // Gmail: use both the bool AND the timestamp — if either is truthy, dot is filled.
-        // The backend always back-fills stage_timestamps.gmail_connected from email_accounts
-        // when the bool is true, so both should agree. We OR them as a safety net.
-        const reached = key === "gmail_connected"
-          ? (gmailConnected === true || !!ts[key])
-          : !!ts[key];
+        const reached =
+          key === "gmail_connected"
+            ? (gmailConnected === true || !!ts[key])
+            // Pause dot hidden when campaign is done — it happened but is no longer relevant
+            : key === "campaign_paused"
+            ? !!ts[key] && !campaignCompleted
+            : !!ts[key];
         const isPause = key === "campaign_paused";
         const isDone  = key === "campaign_completed";
         const dotFill = reached
@@ -396,8 +398,11 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
               <ModalSection title="Funnel Journey">
                 <div className="flex flex-wrap gap-2">
                   {STAGE_DOTS.map(({ key, short }) => {
+                    const modalCompleted = !!user.stage_timestamps.campaign_completed;
                     const reached = key === "gmail_connected"
                       ? (user.gmail_connected === true || !!user.stage_timestamps[key])
+                      : key === "campaign_paused"
+                      ? !!user.stage_timestamps[key] && !modalCompleted
                       : !!user.stage_timestamps[key];
                     const ts = user.stage_timestamps[key];
                     const isPause = key === "campaign_paused";
