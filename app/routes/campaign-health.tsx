@@ -75,11 +75,21 @@ interface CampaignData {
   stats: CampaignStats;
 }
 
+interface ScoreBreakdown {
+  title: number | null;       // max 35, min -25 — title match vs target roles
+  department: number | null;  // max 20, min 5  — department alignment
+  industry: number | null;    // max 8,  min 5  — industry match
+  seniority: number | null;   // max 10, min 0  — seniority level fit
+  location: number | null;    // max 8,  min 0  — location relevance
+}
+
 interface LeadQuality {
   total: number;
   with_email: number;
   email_verified: number;
   avg_score: number | null;
+  score_breakdown: ScoreBreakdown | null;
+  score_distribution: { high: number; medium: number; low: number } | null;
   email_rate: number;
   verified_rate: number;
   top_industries: { label: string; count: number }[];
@@ -581,12 +591,14 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
               {/* Lead quality */}
               {lq && lq.total > 0 && (
                 <ModalSection title="Lead Quality">
-                  <div className="mb-3 grid grid-cols-4 gap-2">
+                  <div className="mb-4 grid grid-cols-4 gap-2">
                     <StatPill value={lq.total}           label="Total Leads"  color="bg-neutral-50" />
                     <StatPill value={lq.with_email}      label="Has Email"    color="bg-blue-50" />
                     <StatPill value={lq.email_verified}  label="Verified"     color="bg-green-50" />
                     <StatPill value={lq.avg_score != null ? lq.avg_score : "—"} label="Avg Score" color="bg-violet-50" />
                   </div>
+                  {/* Score breakdown with dimension bars */}
+                  <LeadScoreCard lq={lq} />
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {lq.top_industries.length > 0 && (
                       <div>
@@ -791,6 +803,190 @@ function BreakingDetail({ u, onSelect }: { u: PaidUser; onSelect: (u: PaidUser) 
         </a>
       </div>
     </motion.div>
+  );
+}
+
+// ── Issue classification table ────────────────────────────────────────────────
+// Summarises every breaking campaign's issues in a compact table for quick scanning
+
+interface IssueRow {
+  name: string;
+  email: string;
+  issues: string[];
+  campaign_id: number;
+}
+
+function IssueTable({ breaking }: { breaking: PaidUser[] }) {
+  if (breaking.length === 0) return null;
+
+  const ISSUE_TYPES = [
+    { key: "auth",       label: "Auth Expired",   color: "bg-red-100 text-red-700 border-red-300" },
+    { key: "enrichment", label: "Enrichment",      color: "bg-orange-100 text-orange-700 border-orange-300" },
+    { key: "bad_email",  label: "Bad Emails",      color: "bg-yellow-100 text-yellow-700 border-yellow-300" },
+    { key: "bounce",     label: "High Bounce",     color: "bg-orange-100 text-orange-700 border-orange-300" },
+    { key: "no_reply",   label: "Zero Replies",    color: "bg-red-100 text-red-700 border-red-300" },
+    { key: "stuck",      label: "Worker Stuck",    color: "bg-red-100 text-red-700 border-red-300" },
+    { key: "silent",     label: "Gone Silent",     color: "bg-yellow-100 text-yellow-700 border-yellow-300" },
+    { key: "other",      label: "Other Failures",  color: "bg-neutral-100 text-neutral-600 border-neutral-300" },
+  ];
+
+  const getIssueKeys = (u: PaidUser): Set<string> => {
+    const keys = new Set<string>();
+    const c = u.campaign;
+    if (!c) return keys;
+    const s = c.stats;
+    const fb = s.failure_breakdown;
+    const contacted = s.leads_contacted;
+    if (fb?.auth > 0)                                                   keys.add("auth");
+    if (fb?.enrichment > 0)                                             keys.add("enrichment");
+    if (fb?.bad_email > 0)                                              keys.add("bad_email");
+    if (s.bounced > 0 && contacted > 0 && s.bounced/contacted > 0.04)  keys.add("bounce");
+    if (contacted > 50 && s.replied === 0)                              keys.add("no_reply");
+    if (contacted === 0 && s.queued === 0)                              keys.add("stuck");
+    if (s.last_email_sent && daysSince(s.last_email_sent) >= 2 && s.queued === 0) keys.add("silent");
+    if (fb?.other > 20)                                                 keys.add("other");
+    return keys;
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="border-b-2 border-neutral-900 bg-neutral-50">
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">User</th>
+            {ISSUE_TYPES.map(t => (
+              <th key={t.key} className="px-3 py-3 text-center font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">
+                {t.label}
+              </th>
+            ))}
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">Emails</th>
+          </tr>
+        </thead>
+        <tbody>
+          {breaking.map(u => {
+            const keys = getIssueKeys(u);
+            const s = u.campaign?.stats;
+            return (
+              <tr key={u.user_id} className="border-b border-neutral-100 hover:bg-neutral-50">
+                <td className="px-4 py-3">
+                  <p className="font-['Satoshi'] text-sm font-semibold text-neutral-900">{u.name}</p>
+                  <p className="font-['Satoshi'] text-xs text-neutral-500">{u.email}</p>
+                </td>
+                {ISSUE_TYPES.map(t => (
+                  <td key={t.key} className="px-3 py-3 text-center">
+                    {keys.has(t.key) ? (
+                      <span className={`inline-block rounded border px-2 py-0.5 font-['Satoshi'] text-[10px] font-medium ${t.color}`}>
+                        Yes
+                      </span>
+                    ) : (
+                      <span className="font-['Satoshi'] text-xs text-neutral-200">—</span>
+                    )}
+                  </td>
+                ))}
+                <td className="px-4 py-3">
+                  {s && (
+                    <div className="font-['Satoshi'] text-xs text-neutral-600">
+                      <span>{s.leads_contacted} sent</span>
+                      <span className="mx-1 text-neutral-300">·</span>
+                      <span>{s.replied} replied</span>
+                      <span className="mx-1 text-neutral-300">·</span>
+                      <span className={s.failed > 20 ? "text-red-600 font-semibold" : ""}>{s.failed} failed</span>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Lead quality score explanation ───────────────────────────────────────────
+// The scoring system rates each lead on 5 dimensions. Max possible = 81.
+// Title relevance is the dominant signal — negative scores mean wrong seniority.
+//
+// Dimension   Max   Min   What it means
+// title        35   -25   How well the lead's job title matches target roles
+//                         Negative = wrong seniority (e.g. CEO when targeting manager)
+// department   20     5   Department alignment with the student's field
+// industry      8     5   Industry match
+// seniority    10     0   Seniority level fit (entry/mid/senior)
+// location      8     0   Geographic relevance
+
+function LeadScoreCard({ lq }: { lq: LeadQuality }) {
+  const sb = lq.score_breakdown;
+  const sd = lq.score_distribution;
+  if (!sb && !sd) return null;
+
+  const avg = lq.avg_score ?? 0;
+  const scoreColor = avg >= 75 ? "text-emerald-600" : avg >= 55 ? "text-amber-600" : "text-red-600";
+  const scoreLabel = avg >= 75 ? "Good" : avg >= 55 ? "Fair" : "Poor";
+
+  const dims: { label: string; value: number | null; max: number; min: number; meaning: string }[] = [
+    { label: "Title",      value: sb?.title,      max: 35, min: -25, meaning: "Job title match vs target roles. Negative = wrong seniority level." },
+    { label: "Department", value: sb?.department, max: 20, min: 5,   meaning: "Department alignment with student's field of study/work." },
+    { label: "Industry",   value: sb?.industry,   max: 8,  min: 5,   meaning: "Industry match to student's target sectors." },
+    { label: "Seniority",  value: sb?.seniority,  max: 10, min: 0,   meaning: "Seniority level fit — hiring manager vs too senior/junior." },
+    { label: "Location",   value: sb?.location,   max: 8,  min: 0,   meaning: "Geographic relevance to student's target location." },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Overall score */}
+      <div className="flex items-center gap-4">
+        <div className="text-center">
+          <p className={`font-['Clash_Display'] text-3xl font-bold ${scoreColor}`}>{avg}</p>
+          <p className={`font-['Satoshi'] text-xs font-medium ${scoreColor}`}>{scoreLabel}</p>
+          <p className="font-['Satoshi'] text-[10px] text-neutral-400">out of 81 max</p>
+        </div>
+        {sd && (
+          <div className="flex gap-3">
+            <div className="text-center">
+              <p className="font-['Clash_Display'] text-lg font-bold text-emerald-600">{sd.high}</p>
+              <p className="font-['Satoshi'] text-[10px] text-neutral-400">High (80+)</p>
+            </div>
+            <div className="text-center">
+              <p className="font-['Clash_Display'] text-lg font-bold text-amber-600">{sd.medium}</p>
+              <p className="font-['Satoshi'] text-[10px] text-neutral-400">Medium (60-79)</p>
+            </div>
+            <div className="text-center">
+              <p className="font-['Clash_Display'] text-lg font-bold text-red-600">{sd.low}</p>
+              <p className="font-['Satoshi'] text-[10px] text-neutral-400">Low (&lt;60)</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Dimension bars */}
+      {sb && (
+        <div className="space-y-2">
+          {dims.map(d => {
+            if (d.value === null) return null;
+            const range = d.max - d.min;
+            const pct = Math.max(0, Math.min(100, ((d.value - d.min) / range) * 100));
+            const barColor = d.value < 0 ? "bg-red-400" : d.value < d.max * 0.5 ? "bg-amber-400" : "bg-emerald-400";
+            return (
+              <div key={d.label} title={d.meaning}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="font-['Satoshi'] text-xs text-neutral-500">{d.label}</span>
+                  <span className={`font-['Satoshi'] text-xs font-bold ${d.value < 0 ? "text-red-600" : "text-neutral-700"}`}>
+                    {d.value > 0 ? "+" : ""}{d.value?.toFixed(1)} / {d.max}
+                  </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-100">
+                  <div className={`h-2 rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })}
+          <p className="font-['Satoshi'] text-[10px] text-neutral-400 mt-1">
+            Hover each row for what the dimension means. Title score drives overall quality — negative means wrong seniority.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1015,10 +1211,13 @@ export default function CampaignHealth() {
               <FunnelBar users={users} />
             </motion.div>
 
-            {/* ── Section 1: Breaking campaigns — detailed view ── */}
+            {/* ── Section 1: Breaking campaigns — classification table + detail cards ── */}
             {breaking.length > 0 && (
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="space-y-3">
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="space-y-4">
                 <SectionHeader title="Breaking Campaigns — Needs Action" count={breaking.length} color="bg-red-50" />
+                {/* Issue classification table — one row per user, one column per issue type */}
+                <IssueTable breaking={breaking} />
+                {/* Detailed breakdown cards */}
                 <div className="space-y-4">
                   {breaking.map(u => (
                     <BreakingDetail key={u.user_id} u={u} onSelect={setSelected} />
