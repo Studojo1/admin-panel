@@ -43,8 +43,15 @@ interface StageTimes {
   campaign_completed: string | null;
 }
 
+interface FailureBreakdown {
+  enrichment: number;  // lead enrichment failed — no email found
+  auth: number;        // Gmail OAuth token expired / invalid
+  bad_email: number;   // recipient address doesn't exist
+  other: number;       // everything else
+}
+
 interface CampaignStats {
-  leads_contacted: number;  // unique leads (initial emails only)
+  leads_contacted: number;
   replied: number;
   bounced: number;
   failed: number;
@@ -53,6 +60,8 @@ interface CampaignStats {
   followups_sent: number;
   followups_replied: number;
   last_email_sent: string | null;
+  failure_breakdown: FailureBreakdown | null;
+  sample_errors: string[];
 }
 
 interface CampaignData {
@@ -61,9 +70,9 @@ interface CampaignData {
   status: "running" | "paused" | "cancelled" | "completed" | "draft";
   daily_limit: number;
   started_at: string | null;
+  gmail_account: string | null;
+  token_expiry: string | null;
   stats: CampaignStats;
-  all_campaigns_sent: number;
-  all_campaigns_replied: number;
 }
 
 interface LeadQuality {
@@ -635,6 +644,156 @@ function KV({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ── Breaking campaign detail row ─────────────────────────────────────────────
+
+function BreakingDetail({ u, onSelect }: { u: PaidUser; onSelect: (u: PaidUser) => void }) {
+  const c  = u.campaign!;
+  const s  = c.stats;
+  const fb = s.failure_breakdown;
+  const sig = healthSignal(u);
+
+  // Derive specific issues to highlight
+  const issues: { color: string; label: string; detail: string }[] = [];
+
+  if (fb?.auth > 0) {
+    issues.push({
+      color: "bg-red-100 border-red-400 text-red-800",
+      label: "🔑 Gmail Auth Expired",
+      detail: `${fb.auth} emails failed — OAuth token invalid. User must reconnect Gmail.`,
+    });
+  }
+  if (fb?.enrichment > 0) {
+    issues.push({
+      color: "bg-orange-100 border-orange-400 text-orange-800",
+      label: "📧 Enrichment Failures",
+      detail: `${fb.enrichment} leads had no email found after 3 attempts. Lead quality issue.`,
+    });
+  }
+  if (fb?.bad_email > 0) {
+    issues.push({
+      color: "bg-yellow-100 border-yellow-400 text-yellow-800",
+      label: "❌ Bad Email Addresses",
+      detail: `${fb.bad_email} bounced as non-existent / inactive. Verify lead targeting.`,
+    });
+  }
+  if (s.bounced > 0 && s.leads_contacted > 0 && s.bounced / s.leads_contacted > 0.04) {
+    issues.push({
+      color: "bg-orange-100 border-orange-400 text-orange-800",
+      label: "📉 High Bounce Rate",
+      detail: `${s.bounced} bounces on ${s.leads_contacted} sent = ${Math.round(s.bounced/s.leads_contacted*100)}%. Risk of domain reputation damage.`,
+    });
+  }
+  if (s.leads_contacted > 50 && s.replied === 0) {
+    issues.push({
+      color: "bg-red-100 border-red-400 text-red-800",
+      label: "🔇 Zero Replies",
+      detail: `${s.leads_contacted} leads contacted, 0 responses. Emails may be going to spam or targeting is off.`,
+    });
+  }
+  if (s.leads_contacted === 0 && s.queued === 0) {
+    issues.push({
+      color: "bg-red-100 border-red-400 text-red-800",
+      label: "🛑 Worker Stuck",
+      detail: "Nothing sent and nothing queued. Campaign is running but the worker isn't processing it.",
+    });
+  }
+  if (s.last_email_sent && daysSince(s.last_email_sent) >= 2 && s.queued === 0) {
+    issues.push({
+      color: "bg-yellow-100 border-yellow-400 text-yellow-800",
+      label: "⏸ Gone Silent",
+      detail: `Last email ${daysSince(s.last_email_sent)}d ago, nothing queued. May have exhausted leads or daily limit hit.`,
+    });
+  }
+  if (fb?.other > 20) {
+    issues.push({
+      color: "bg-neutral-100 border-neutral-400 text-neutral-700",
+      label: "⚠️ Other Failures",
+      detail: `${fb.other} unclassified failures. Check campaign email logs for details.`,
+    });
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-2xl border-2 border-red-200 bg-white shadow-[3px_3px_0px_0px_rgba(239,68,68,0.3)] overflow-hidden"
+    >
+      {/* Header row */}
+      <div
+        className="flex items-center justify-between gap-4 px-5 py-4 cursor-pointer hover:bg-red-50 transition-colors"
+        onClick={() => onSelect(u)}
+      >
+        <div className="flex items-center gap-4 flex-wrap">
+          <div>
+            <p className="font-['Satoshi'] text-sm font-bold text-neutral-900">{u.name}</p>
+            <p className="font-['Satoshi'] text-xs text-neutral-500">{u.email}</p>
+          </div>
+          <FunnelDots ts={u.stage_timestamps} gmailConnected={u.gmail_connected} funnelStatus={u.funnel_status} />
+        </div>
+        <div className="flex items-center gap-3 shrink-0 flex-wrap">
+          {/* Quick stats */}
+          <StatPill value={s.leads_contacted} label="Leads"  color="bg-green-50" />
+          <StatPill value={s.replied}         label="Reply"  color="bg-emerald-50" />
+          <StatPill value={s.failed}          label="Failed" color="bg-red-50" />
+          <StatPill value={s.bounced}         label="Bounce" color="bg-orange-50" />
+          <StatPill value={`${s.reply_rate}%`} label="Rate"  color="bg-violet-50" />
+          <span className={`font-['Satoshi'] text-xs font-semibold ${sig.color}`}>{sig.icon} {sig.label}</span>
+        </div>
+      </div>
+
+      {/* Issue cards */}
+      <div className="border-t border-red-100 px-5 py-4 bg-red-50">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {issues.map((issue) => (
+            <div key={issue.label} className={`rounded-xl border-2 px-4 py-3 ${issue.color}`}>
+              <p className="font-['Satoshi'] text-sm font-bold">{issue.label}</p>
+              <p className="mt-0.5 font-['Satoshi'] text-xs leading-relaxed opacity-80">{issue.detail}</p>
+            </div>
+          ))}
+        </div>
+        {/* Gmail account + token expiry */}
+        {c.gmail_account && (
+          <div className="mt-3 flex flex-wrap items-center gap-4 font-['Satoshi'] text-xs text-neutral-500">
+            <span>Gmail: <strong className="text-neutral-800">{c.gmail_account}</strong></span>
+            {c.token_expiry && (
+              <span>Token expires: <strong className={
+                new Date(c.token_expiry) < new Date() ? "text-red-600" : "text-neutral-800"
+              }>{fmt(c.token_expiry)}</strong></span>
+            )}
+            {s.last_email_sent && (
+              <span>Last email: <strong className="text-neutral-800">{ago(s.last_email_sent)}</strong></span>
+            )}
+          </div>
+        )}
+        {/* Sample errors */}
+        {s.sample_errors && s.sample_errors.length > 0 && (
+          <details className="mt-3">
+            <summary className="cursor-pointer font-['Satoshi'] text-xs font-semibold text-neutral-500 hover:text-neutral-800">
+              View error samples ({s.sample_errors.length})
+            </summary>
+            <div className="mt-2 space-y-1">
+              {s.sample_errors.map((err, i) => (
+                <p key={i} className="font-mono text-[10px] text-neutral-600 bg-white rounded border border-neutral-200 px-2 py-1 break-all">
+                  {err.slice(0, 200)}{err.length > 200 ? "…" : ""}
+                </p>
+              ))}
+            </div>
+          </details>
+        )}
+        <a
+          href={`/outreach-campaign?campaign_id=${c.id}`}
+          target="_blank"
+          rel="noreferrer"
+          onClick={e => e.stopPropagation()}
+          className="mt-3 inline-block rounded-lg border-2 border-red-700 bg-red-600 px-4 py-2 font-['Satoshi'] text-xs font-semibold text-white shadow-[2px_2px_0px_0px_rgba(153,27,27,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+        >
+          View All Emails →
+        </a>
+      </div>
+    </motion.div>
+  );
+}
+
 // ── Funnel progress bar ───────────────────────────────────────────────────────
 // All counts use funnel_status (derived from campaign rows) or gmail_connected
 // (derived from email_accounts), both back-filled from system records so they
@@ -856,15 +1015,15 @@ export default function CampaignHealth() {
               <FunnelBar users={users} />
             </motion.div>
 
-            {/* ── Section 1: Breaking campaigns ── */}
+            {/* ── Section 1: Breaking campaigns — detailed view ── */}
             {breaking.length > 0 && (
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="space-y-3">
                 <SectionHeader title="🔴 Breaking Campaigns — Needs Action" count={breaking.length} color="bg-red-50" />
-                <Table headers={BREAKING_HEADERS}>
+                <div className="space-y-4">
                   {breaking.map(u => (
-                    <UserRow key={u.user_id} u={u} showCampaign showHealth onSelect={setSelected} />
+                    <BreakingDetail key={u.user_id} u={u} onSelect={setSelected} />
                   ))}
-                </Table>
+                </div>
               </motion.div>
             )}
 
