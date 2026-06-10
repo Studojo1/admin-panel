@@ -987,97 +987,73 @@ function BreakingTable({ breaking, onSelect }: { breaking: PaidUser[]; onSelect:
   );
 }
 
-// ── Issue classification table ────────────────────────────────────────────────
-// Summarises every breaking campaign's issues in a compact table for quick scanning
+// ── Issue pivot table ─────────────────────────────────────────────────────────
+// Columns = error types. Each column lists the users who have that error.
 
-interface IssueRow {
-  name: string;
-  email: string;
-  issues: string[];
-  campaign_id: number;
-}
-
-function IssueTable({ breaking }: { breaking: PaidUser[] }) {
+function IssuePivotTable({ breaking, onSelect }: { breaking: PaidUser[]; onSelect: (u: PaidUser) => void }) {
   if (breaking.length === 0) return null;
 
-  const ISSUE_TYPES = [
-    { key: "auth",       label: "Auth Expired",   color: "bg-red-100 text-red-700 border-red-300" },
-    { key: "enrichment", label: "Enrichment",      color: "bg-orange-100 text-orange-700 border-orange-300" },
-    { key: "bad_email",  label: "Bad Emails",      color: "bg-yellow-100 text-yellow-700 border-yellow-300" },
-    { key: "bounce",     label: "High Bounce",     color: "bg-orange-100 text-orange-700 border-orange-300" },
-    { key: "no_reply",   label: "Zero Replies",    color: "bg-red-100 text-red-700 border-red-300" },
-    { key: "stuck",      label: "Worker Stuck",    color: "bg-red-100 text-red-700 border-red-300" },
-    { key: "silent",     label: "Gone Silent",     color: "bg-yellow-100 text-yellow-700 border-yellow-300" },
-    { key: "other",      label: "Other Failures",  color: "bg-neutral-100 text-neutral-600 border-neutral-300" },
-  ];
-
-  const getIssueKeys = (u: PaidUser): Set<string> => {
-    const keys = new Set<string>();
-    const c = u.campaign;
-    if (!c) return keys;
-    const s = c.stats;
-    const fb = s.failure_breakdown;
-    const contacted = s.leads_contacted;
-    if (fb?.auth > 0)                                                   keys.add("auth");
-    if (fb?.enrichment > 0)                                             keys.add("enrichment");
-    if (fb?.bad_email > 0)                                              keys.add("bad_email");
-    if (s.bounced > 0 && contacted > 0 && s.bounced/contacted > 0.04)  keys.add("bounce");
-    if (contacted > 50 && s.replied === 0)                              keys.add("no_reply");
-    if (contacted === 0 && s.queued === 0)                              keys.add("stuck");
-    if (s.last_email_sent && daysSince(s.last_email_sent) >= 2 && s.queued === 0) keys.add("silent");
-    if (fb?.other > 20)                                                 keys.add("other");
-    return keys;
-  };
+  // Build column → users mapping
+  const columns = ISSUE_DEFS.map(def => ({
+    ...def,
+    users: breaking.filter(u => getIssueKeys(u).includes(def.key)),
+  })).filter(col => col.users.length > 0); // only show columns with at least one user
 
   return (
     <div className="overflow-x-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
       <table className="w-full border-collapse">
         <thead>
           <tr className="border-b-2 border-neutral-900 bg-neutral-50">
-            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">User</th>
-            {ISSUE_TYPES.map(t => (
-              <th key={t.key} className="px-3 py-3 text-center font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">
-                {t.label}
+            {columns.map(col => (
+              <th key={col.key} className="px-4 py-4 text-left align-top">
+                <div>
+                  <span className={`inline-block rounded border px-2 py-0.5 font-['Satoshi'] text-xs font-bold ${col.color}`}>
+                    {col.label}
+                  </span>
+                  <p className="mt-1.5 font-['Satoshi'] text-[10px] leading-snug text-neutral-400 max-w-[160px]">
+                    {col.desc}
+                  </p>
+                  <p className="mt-1 font-['Clash_Display'] text-lg font-bold text-neutral-900">
+                    {col.users.length}
+                  </p>
+                </div>
               </th>
             ))}
-            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">Emails</th>
           </tr>
         </thead>
         <tbody>
-          {breaking.map(u => {
-            const keys = getIssueKeys(u);
-            const s = u.campaign?.stats;
-            return (
-              <tr key={u.user_id} className="border-b border-neutral-100 hover:bg-neutral-50">
-                <td className="px-4 py-3">
-                  <p className="font-['Satoshi'] text-sm font-semibold text-neutral-900">{u.name}</p>
-                  <p className="font-['Satoshi'] text-xs text-neutral-500">{u.email}</p>
-                </td>
-                {ISSUE_TYPES.map(t => (
-                  <td key={t.key} className="px-3 py-3 text-center">
-                    {keys.has(t.key) ? (
-                      <span className={`inline-block rounded border px-2 py-0.5 font-['Satoshi'] text-[10px] font-medium ${t.color}`}>
-                        Yes
-                      </span>
-                    ) : (
-                      <span className="font-['Satoshi'] text-xs text-neutral-200">—</span>
-                    )}
+          {/* Find the max number of users across all columns to know how many rows to render */}
+          {Array.from({ length: Math.max(...columns.map(c => c.users.length)) }).map((_, rowIdx) => (
+            <tr key={rowIdx} className="border-b border-neutral-100">
+              {columns.map(col => {
+                const u = col.users[rowIdx];
+                if (!u) return <td key={col.key} className="px-4 py-3" />;
+                const s = u.campaign?.stats;
+                return (
+                  <td key={col.key} className="px-4 py-3 align-top">
+                    <button
+                      onClick={() => onSelect(u)}
+                      className="text-left w-full group"
+                    >
+                      <p className="font-['Satoshi'] text-sm font-semibold text-neutral-900 group-hover:text-violet-600 transition-colors">
+                        {u.name}
+                      </p>
+                      <p className="font-['Satoshi'] text-xs text-neutral-400">{u.email}</p>
+                      {s && (
+                        <div className="mt-1 flex items-center gap-2 font-['Satoshi'] text-[10px] text-neutral-500">
+                          <span>{s.leads_contacted} sent</span>
+                          <span>·</span>
+                          <span className={s.failed > 0 ? "text-red-500 font-semibold" : ""}>{s.failed} failed</span>
+                          <span>·</span>
+                          <span>{s.reply_rate}% reply</span>
+                        </div>
+                      )}
+                    </button>
                   </td>
-                ))}
-                <td className="px-4 py-3">
-                  {s && (
-                    <div className="font-['Satoshi'] text-xs text-neutral-600">
-                      <span>{s.leads_contacted} sent</span>
-                      <span className="mx-1 text-neutral-300">·</span>
-                      <span>{s.replied} replied</span>
-                      <span className="mx-1 text-neutral-300">·</span>
-                      <span className={s.failed > 20 ? "text-red-600 font-semibold" : ""}>{s.failed} failed</span>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
+                );
+              })}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -1392,11 +1368,18 @@ export default function CampaignHealth() {
               <FunnelBar users={users} />
             </motion.div>
 
-            {/* ── Section 1: Breaking campaigns — table with expandable issue dropdown ── */}
+            {/* ── Section 1: Breaking campaigns ── */}
             {breaking.length > 0 && (
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="space-y-3">
                 <SectionHeader title="Breaking Campaigns — Needs Action" count={breaking.length} color="bg-red-50" />
-                <BreakingTable breaking={breaking} onSelect={setSelected} />
+                {/* Pivot: each column = one error type, lists users with that error */}
+                <IssuePivotTable breaking={breaking} onSelect={setSelected} />
+                {/* Standard table for the full row view */}
+                <Table headers={BREAKING_HEADERS}>
+                  {breaking.map(u => (
+                    <UserRow key={u.user_id} u={u} showCampaign showHealth onSelect={setSelected} />
+                  ))}
+                </Table>
               </motion.div>
             )}
 
