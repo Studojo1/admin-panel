@@ -806,6 +806,187 @@ function BreakingDetail({ u, onSelect }: { u: PaidUser; onSelect: (u: PaidUser) 
   );
 }
 
+// ── Breaking campaigns table with expandable issue dropdown ──────────────────
+
+const ISSUE_DEFS = [
+  { key: "auth",       label: "Auth Expired",    color: "bg-red-100 text-red-700 border-red-300",         desc: "Gmail OAuth token is invalid or expired. User must reconnect their Gmail account." },
+  { key: "enrichment", label: "Enrichment",       color: "bg-orange-100 text-orange-700 border-orange-300", desc: "Leads could not be enriched with email addresses after 3 attempts. Lead quality or targeting may be too narrow." },
+  { key: "bad_email",  label: "Bad Emails",       color: "bg-yellow-100 text-yellow-700 border-yellow-300", desc: "Recipient addresses bounced as non-existent or inactive. Leads may be outdated or incorrectly targeted." },
+  { key: "bounce",     label: "High Bounce",      color: "bg-orange-100 text-orange-700 border-orange-300", desc: "Bounce rate exceeds 4%. Repeated bounces damage domain sender reputation and can trigger spam filters." },
+  { key: "no_reply",   label: "Zero Replies",     color: "bg-red-100 text-red-700 border-red-300",         desc: "50+ leads contacted with no responses. Emails may be landing in spam or the targeting/messaging is off." },
+  { key: "stuck",      label: "Worker Stuck",     color: "bg-red-100 text-red-700 border-red-300",         desc: "Nothing sent and nothing queued despite campaign being running. The worker is not processing this campaign." },
+  { key: "silent",     label: "Gone Silent",      color: "bg-yellow-100 text-yellow-700 border-yellow-300", desc: "No email sent in 2+ days with nothing queued. Campaign may have exhausted leads or hit daily limits." },
+  { key: "other",      label: "Other Failures",   color: "bg-neutral-100 text-neutral-600 border-neutral-300", desc: "20+ unclassified failures. Review the email logs for specific error messages." },
+] as const;
+
+type IssueKey = typeof ISSUE_DEFS[number]["key"];
+
+function getIssueKeys(u: PaidUser): IssueKey[] {
+  const keys: IssueKey[] = [];
+  const c = u.campaign;
+  if (!c) return keys;
+  const s = c.stats;
+  const fb = s.failure_breakdown;
+  const contacted = s.leads_contacted;
+  if (fb && fb.auth > 0)                                                      keys.push("auth");
+  if (fb && fb.enrichment > 0)                                                keys.push("enrichment");
+  if (fb && fb.bad_email > 0)                                                 keys.push("bad_email");
+  if (s.bounced > 0 && contacted > 0 && s.bounced / contacted > 0.04)        keys.push("bounce");
+  if (contacted > 50 && s.replied === 0)                                      keys.push("no_reply");
+  if (contacted === 0 && s.queued === 0)                                      keys.push("stuck");
+  if (s.last_email_sent && daysSince(s.last_email_sent) >= 2 && s.queued === 0) keys.push("silent");
+  if (fb && fb.other > 20)                                                    keys.push("other");
+  return keys;
+}
+
+function BreakingTable({ breaking, onSelect }: { breaking: PaidUser[]; onSelect: (u: PaidUser) => void }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  return (
+    <div className="overflow-x-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="border-b-2 border-neutral-900 bg-neutral-50">
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">User</th>
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">Paid</th>
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">Journey</th>
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">Since</th>
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">Email Stats</th>
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">Issues</th>
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">Health</th>
+            <th className="px-4 py-3 text-left font-['Satoshi'] text-xs font-bold uppercase tracking-wider text-neutral-500">Last Email</th>
+            <th className="px-4 py-3 w-8" />
+          </tr>
+        </thead>
+        <tbody>
+          {breaking.map(u => {
+            const c = u.campaign;
+            const s = c?.stats;
+            const sig = healthSignal(u);
+            const issues = getIssueKeys(u);
+            const isOpen = expanded === u.user_id;
+
+            return (
+              <AnimatePresence key={u.user_id} mode="wait">
+                {/* Main row */}
+                <tr
+                  className={`border-b border-neutral-100 transition-colors hover:bg-red-50 ${isOpen ? "bg-red-50" : ""}`}
+                  onClick={() => onSelect(u)}
+                >
+                  <td className="px-4 py-3">
+                    <p className="font-['Satoshi'] text-sm font-semibold text-neutral-900">{u.name}</p>
+                    <p className="font-['Satoshi'] text-xs text-neutral-500">{u.email}</p>
+                  </td>
+                  <td className="px-4 py-3 font-['Satoshi'] text-sm font-semibold text-neutral-900">
+                    {fmtMoney(u.total_paid_cents, u.currency)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <FunnelDots ts={u.stage_timestamps} gmailConnected={u.gmail_connected} funnelStatus={u.funnel_status} />
+                  </td>
+                  <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-600">
+                    {fmt(u.paid_at)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {s && (
+                      <div className="flex items-center gap-1.5">
+                        <StatPill value={s.leads_contacted} label="Leads"  color="bg-green-50" />
+                        <StatPill value={s.replied}         label="Reply"  color="bg-emerald-50" />
+                        <StatPill value={s.failed}          label="Failed" color="bg-red-50" />
+                        <StatPill value={`${s.reply_rate}%`} label="Rate" color="bg-violet-50" />
+                      </div>
+                    )}
+                  </td>
+                  {/* Issue tags — inline chips */}
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {issues.map(key => {
+                        const def = ISSUE_DEFS.find(d => d.key === key)!;
+                        return (
+                          <span key={key} className={`inline-block rounded border px-2 py-0.5 font-['Satoshi'] text-[10px] font-medium ${def.color}`}>
+                            {def.label}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </td>
+                  <td className={`px-4 py-3 font-['Satoshi'] text-sm font-medium ${sig.color}`}>
+                    {sig.label}
+                  </td>
+                  <td className="px-4 py-3 font-['Satoshi'] text-xs text-neutral-500">
+                    {s ? ago(s.last_email_sent) : "—"}
+                  </td>
+                  {/* Expand/collapse toggle */}
+                  <td className="px-3 py-3">
+                    <button
+                      onClick={e => { e.stopPropagation(); setExpanded(isOpen ? null : u.user_id); }}
+                      className="rounded-lg border border-neutral-300 px-2 py-1 font-['Satoshi'] text-xs text-neutral-500 hover:bg-neutral-100 transition-colors"
+                    >
+                      {isOpen ? "▲" : "▼"}
+                    </button>
+                  </td>
+                </tr>
+
+                {/* Expandable dropdown row — issue breakdown */}
+                {isOpen && (
+                  <tr className="border-b border-red-100 bg-red-50">
+                    <td colSpan={9} className="px-6 py-4">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                        {issues.map(key => {
+                          const def = ISSUE_DEFS.find(d => d.key === key)!;
+                          return (
+                            <div key={key} className={`rounded-xl border-2 px-4 py-3 ${def.color}`}>
+                              <p className="font-['Satoshi'] text-sm font-bold">{def.label}</p>
+                              <p className="mt-0.5 font-['Satoshi'] text-xs leading-relaxed opacity-80">{def.desc}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* Gmail account + token + errors */}
+                      {c && (
+                        <div className="mt-3 flex flex-wrap items-center gap-4 font-['Satoshi'] text-xs text-neutral-500 border-t border-red-200 pt-3">
+                          {c.gmail_account && (
+                            <span>Gmail: <strong className="text-neutral-800">{c.gmail_account}</strong></span>
+                          )}
+                          {c.token_expiry && (
+                            <span>Token expires: <strong className={new Date(c.token_expiry) < new Date() ? "text-red-600" : "text-neutral-800"}>
+                              {fmt(c.token_expiry)}
+                            </strong></span>
+                          )}
+                          {s?.last_email_sent && (
+                            <span>Last email: <strong className="text-neutral-800">{ago(s.last_email_sent)}</strong></span>
+                          )}
+                          <a
+                            href={`/outreach-campaign?campaign_id=${c.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="ml-auto rounded-lg border-2 border-red-700 bg-red-600 px-3 py-1.5 font-['Satoshi'] text-xs font-semibold text-white shadow-[2px_2px_0px_0px_rgba(153,27,27,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+                          >
+                            View All Emails →
+                          </a>
+                        </div>
+                      )}
+                      {s?.sample_errors && s.sample_errors.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                          <p className="font-['Satoshi'] text-[10px] font-bold uppercase tracking-wide text-neutral-400">Sample Errors</p>
+                          {s.sample_errors.map((err, i) => (
+                            <p key={i} className="font-mono text-[10px] text-neutral-600 bg-white rounded border border-neutral-200 px-2 py-1 break-all">
+                              {err.slice(0, 200)}{err.length > 200 ? "…" : ""}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </AnimatePresence>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Issue classification table ────────────────────────────────────────────────
 // Summarises every breaking campaign's issues in a compact table for quick scanning
 
@@ -1211,18 +1392,11 @@ export default function CampaignHealth() {
               <FunnelBar users={users} />
             </motion.div>
 
-            {/* ── Section 1: Breaking campaigns — classification table + detail cards ── */}
+            {/* ── Section 1: Breaking campaigns — table with expandable issue dropdown ── */}
             {breaking.length > 0 && (
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="space-y-4">
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="space-y-3">
                 <SectionHeader title="Breaking Campaigns — Needs Action" count={breaking.length} color="bg-red-50" />
-                {/* Issue classification table — one row per user, one column per issue type */}
-                <IssueTable breaking={breaking} />
-                {/* Detailed breakdown cards */}
-                <div className="space-y-4">
-                  {breaking.map(u => (
-                    <BreakingDetail key={u.user_id} u={u} onSelect={setSelected} />
-                  ))}
-                </div>
+                <BreakingTable breaking={breaking} onSelect={setSelected} />
               </motion.div>
             )}
 
