@@ -61,6 +61,9 @@ interface CampaignStats {
   last_email_sent: string | null;
   failure_breakdown: FailureBreakdown | null;
   sample_errors: string[];
+  replacements_bounce: number;
+  replacements_enrichment: number;
+  replacement_cap_remaining: number;
 }
 
 interface CampaignData {
@@ -326,6 +329,13 @@ function UserRow({
               color="bg-emerald-50"
             />
             <StatPill value={c.stats.failed}          label="Failed" color="bg-red-50" />
+            {((c.stats.replacements_bounce || 0) + (c.stats.replacements_enrichment || 0)) > 0 && (
+              <StatPill
+                value={(c.stats.replacements_bounce || 0) + (c.stats.replacements_enrichment || 0)}
+                label="Replaced"
+                color="bg-sky-50"
+              />
+            )}
             <StatPill value={`${c.stats.reply_rate}%`} label="Rate"  color="bg-violet-50" />
           </div>
         </td>
@@ -479,6 +489,13 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
                     <StatPill value={c.stats.queued}          label="Queued"  color="bg-neutral-50" />
                     <StatPill value={`${c.stats.reply_rate}%`} label="Rate"   color="bg-violet-50" />
                   </div>
+                  {((c.stats.replacements_bounce || 0) + (c.stats.replacements_enrichment || 0)) > 0 && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <StatPill value={c.stats.replacements_bounce || 0}      label="Bounce-replaced"  color="bg-sky-50" />
+                      <StatPill value={c.stats.replacements_enrichment || 0}  label="Enrich-replaced"  color="bg-indigo-50" />
+                      <span className="font-['Satoshi'] text-xs text-neutral-500">{c.stats.replacement_cap_remaining || 0} replacements remaining in cap</span>
+                    </div>
+                  )}
                   <p className="mt-2 font-['Satoshi'] text-xs text-neutral-500">
                     <strong>Reached</strong> = unique people we sent an initial email to. <strong>Sent</strong> = total emails (incl. follow-ups). The campaign detail view shows individual email rows, so its count will match <strong>Sent</strong> plus anything still queued/cancelled.
                   </p>
