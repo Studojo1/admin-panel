@@ -45,8 +45,7 @@ interface StageTimes {
 
 interface FailureBreakdown {
   enrichment: number;  // lead enrichment failed — no email found
-  auth: number;        // Gmail OAuth token expired / invalid
-  bad_email: number;   // recipient address doesn't exist
+  auth: number;        // Gmail OAuth token expired / invalid (last 7d only)
   other: number;       // everything else
 }
 
@@ -321,7 +320,11 @@ function UserRow({
           <div className="flex items-center gap-1.5">
             <StatPill value={c.stats.leads_contacted} label="Reached" color="bg-green-50" />
             <StatPill value={c.stats.leads_contacted + (c.stats.followups_sent || 0)} label="Sent" color="bg-blue-50" />
-            <StatPill value={c.stats.replied}         label="Reply"  color="bg-emerald-50" />
+            <StatPill
+              value={c.stats.replied + (c.stats.followups_replied || 0)}
+              label={c.stats.followups_replied > 0 ? `Reply (+${c.stats.followups_replied} f/u)` : "Reply"}
+              color="bg-emerald-50"
+            />
             <StatPill value={c.stats.failed}          label="Failed" color="bg-red-50" />
             <StatPill value={`${c.stats.reply_rate}%`} label="Rate"  color="bg-violet-50" />
           </div>
@@ -681,25 +684,18 @@ function BreakingDetail({ u, onSelect }: { u: PaidUser; onSelect: (u: PaidUser) 
       detail: `${fb.enrichment} leads had no email found after 3 attempts. Lead quality issue.`,
     });
   }
-  if (fb?.bad_email > 0) {
-    issues.push({
-      color: "bg-yellow-100 border-yellow-400 text-yellow-800",
-      label: "Bad Email Addresses",
-      detail: `${fb.bad_email} bounced as non-existent / inactive. Verify lead targeting.`,
-    });
-  }
-  if (s.bounced > 0 && s.leads_contacted > 0 && s.bounced / s.leads_contacted > 0.04) {
+  if (s.bounced > 0 && s.leads_contacted >= 50 && s.bounced / s.leads_contacted > 0.04) {
     issues.push({
       color: "bg-orange-100 border-orange-400 text-orange-800",
       label: "High Bounce Rate",
       detail: `${s.bounced} bounces on ${s.leads_contacted} sent = ${Math.round(s.bounced/s.leads_contacted*100)}%. Risk of domain reputation damage.`,
     });
   }
-  if (s.leads_contacted > 50 && s.replied === 0) {
+  if (s.leads_contacted > 50 && s.replied === 0 && (s.followups_replied || 0) === 0) {
     issues.push({
       color: "bg-red-100 border-red-400 text-red-800",
       label: "Zero Replies",
-      detail: `${s.leads_contacted} leads contacted, 0 responses. Emails may be going to spam or targeting is off.`,
+      detail: `${s.leads_contacted} leads contacted, 0 responses across initials and follow-ups. Emails may be going to spam or targeting is off.`,
     });
   }
   if (s.leads_contacted === 0 && s.queued === 0) {
@@ -809,11 +805,10 @@ function BreakingDetail({ u, onSelect }: { u: PaidUser; onSelect: (u: PaidUser) 
 // ── Breaking campaigns table with expandable issue dropdown ──────────────────
 
 const ISSUE_DEFS = [
-  { key: "auth",       label: "Auth Expired",    color: "bg-red-100 text-red-700 border-red-300",         desc: "Gmail OAuth token is invalid or expired. User must reconnect their Gmail account." },
-  { key: "enrichment", label: "Enrichment",       color: "bg-orange-100 text-orange-700 border-orange-300", desc: "Leads could not be enriched with email addresses after 3 attempts. Lead quality or targeting may be too narrow." },
-  { key: "bad_email",  label: "Bad Emails",       color: "bg-yellow-100 text-yellow-700 border-yellow-300", desc: "Recipient addresses bounced as non-existent or inactive. Leads may be outdated or incorrectly targeted." },
-  { key: "bounce",     label: "High Bounce",      color: "bg-orange-100 text-orange-700 border-orange-300", desc: "Bounce rate exceeds 4%. Repeated bounces damage domain sender reputation and can trigger spam filters." },
-  { key: "no_reply",   label: "Zero Replies",     color: "bg-red-100 text-red-700 border-red-300",         desc: "50+ leads contacted with no responses. Emails may be landing in spam or the targeting/messaging is off." },
+  { key: "auth",       label: "Auth Expired",    color: "bg-red-100 text-red-700 border-red-300",         desc: "Gmail OAuth token had auth failures in the last 7 days. User likely needs to reconnect their Gmail account." },
+  { key: "enrichment", label: "Enrichment",       color: "bg-orange-100 text-orange-700 border-orange-300", desc: "10+ leads could not be enriched with email addresses after 3 attempts. Lead quality or targeting may be too narrow." },
+  { key: "bounce",     label: "High Bounce",      color: "bg-orange-100 text-orange-700 border-orange-300", desc: "Bounce rate exceeds 4% on 50+ sends. Repeated bounces damage domain sender reputation and can trigger spam filters." },
+  { key: "no_reply",   label: "Zero Replies",     color: "bg-red-100 text-red-700 border-red-300",         desc: "50+ leads contacted with no responses (counting follow-ups). Emails may be landing in spam or targeting/messaging is off." },
   { key: "stuck",      label: "Worker Stuck",     color: "bg-red-100 text-red-700 border-red-300",         desc: "Nothing sent and nothing queued despite campaign being running. The worker is not processing this campaign." },
   { key: "silent",     label: "Gone Silent",      color: "bg-yellow-100 text-yellow-700 border-yellow-300", desc: "No email sent in 2+ days with nothing queued. Campaign may have exhausted leads or hit daily limits." },
   { key: "other",      label: "Other Failures",   color: "bg-neutral-100 text-neutral-600 border-neutral-300", desc: "20+ unclassified failures. Review the email logs for specific error messages." },
@@ -829,10 +824,9 @@ function getIssueKeys(u: PaidUser): IssueKey[] {
   const fb = s.failure_breakdown;
   const contacted = s.leads_contacted;
   if (fb && fb.auth > 0)                                                      keys.push("auth");
-  if (fb && fb.enrichment > 0)                                                keys.push("enrichment");
-  if (fb && fb.bad_email > 0)                                                 keys.push("bad_email");
-  if (s.bounced > 0 && contacted > 0 && s.bounced / contacted > 0.04)        keys.push("bounce");
-  if (contacted > 50 && s.replied === 0)                                      keys.push("no_reply");
+  if (fb && fb.enrichment >= 10)                                              keys.push("enrichment");
+  if (s.bounced > 0 && contacted >= 50 && s.bounced / contacted > 0.04)       keys.push("bounce");
+  if (contacted > 50 && s.replied === 0 && (s.followups_replied || 0) === 0)  keys.push("no_reply");
   if (contacted === 0 && s.queued === 0)                                      keys.push("stuck");
   if (s.last_email_sent && daysSince(s.last_email_sent) >= 2 && s.queued === 0) keys.push("silent");
   if (fb && fb.other > 20)                                                    keys.push("other");
