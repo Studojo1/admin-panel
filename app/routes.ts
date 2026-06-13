@@ -42,5 +42,7 @@ export default [
   route("api/analytics", "routes/api.analytics.tsx"),
   route("api/outreach", "routes/api.outreach.tsx"),
   route("career-coach", "routes/career-coach.tsx"),
+  route("webinar-registrations", "routes/webinar-registrations.tsx"),
+  route("api/webinar-registrations", "routes/api.webinar-registrations.tsx"),
 ] satisfies RouteConfig;
 
