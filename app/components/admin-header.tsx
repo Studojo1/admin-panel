@@ -18,6 +18,7 @@ const NAV_LINKS = [
   { to: "/ops-alerts", label: "Ops Alerts" },
   { to: "/tickets", label: "Tickets" },
   { to: "/consultation-signups", label: "Free Call Signups" },
+  { to: "/webinar-registrations", label: "Webinar Signups" },
   { to: "/email-sequences", label: "Emails" },
   { to: "/analytics", label: "Analytics" },
   { to: "/utm-builder", label: "UTM Builder" },
