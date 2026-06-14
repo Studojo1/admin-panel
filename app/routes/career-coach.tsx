@@ -456,6 +456,25 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   const [resumeViewFor, setResumeViewFor] = useState<{ id: string; name: string } | null>(null);
   const [loadingResume, setLoadingResume] = useState(false);
 
+  // Career paths drill-down: click a role/industry bar to see who's targeting it
+  const [pathDrilldown, setPathDrilldown] = useState<{
+    label: string; type: "role" | "industry";
+    students: { id: string; name?: string | null; email?: string | null; target_role?: string | null; target_industry?: string | null; last_seen?: string | null }[];
+    loading: boolean;
+  } | null>(null);
+
+  async function loadPathDrilldown(label: string, type: "role" | "industry") {
+    setPathDrilldown({ label, type, students: [], loading: true });
+    const param = type === "role" ? `role=${encodeURIComponent(label)}` : `industry=${encodeURIComponent(label)}`;
+    try {
+      const r = await fetch(`${CC_API}/admin/career-paths/students?${param}`, { headers: { "Content-Type": "application/json" } });
+      const d = r.ok ? await r.json() : [];
+      setPathDrilldown({ label, type, students: Array.isArray(d) ? d : [], loading: false });
+    } catch {
+      setPathDrilldown({ label, type, students: [], loading: false });
+    }
+  }
+
   // Fire data load immediately on mount — don't wait for the two-round-trip auth
   // check to complete first. The CC API has no secrets (admin panel login is the
   // only gate), so loading optimistically is safe. Auth redirect still fires if
@@ -1310,15 +1329,77 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
 
         {/* ── Career Paths ─────────────────────────────────────────────────── */}
         {tab === "paths" && (
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
-              <h3 className="mb-5 font-['Clash_Display'] text-base font-bold">Top Target Roles</h3>
-              <BarList items={(paths?.top_target_roles ?? []).map((r) => ({ label: r.role, count: r.count }))} color="var(--color-violet-500, #8B5CF6)" />
+          <div className="space-y-6">
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">Top Target Roles</h3>
+                <p className="mb-4 text-xs text-neutral-400">Click a role to see who's targeting it</p>
+                <BarList
+                  items={(paths?.top_target_roles ?? []).map((r) => ({ label: r.role, count: r.count }))}
+                  color="var(--color-violet-500, #8B5CF6)"
+                  onLabelClick={(label) => loadPathDrilldown(label, "role")}
+                />
+              </div>
+              <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                <h3 className="mb-1 font-['Clash_Display'] text-base font-bold">Top Target Industries</h3>
+                <p className="mb-4 text-xs text-neutral-400">Click an industry to see who's targeting it</p>
+                <BarList
+                  items={(paths?.top_target_industries ?? []).slice(0, 8).map((i) => ({ label: i.industry, count: i.count }))}
+                  color="#3B82F6"
+                  onLabelClick={(label) => loadPathDrilldown(label, "industry")}
+                />
+              </div>
             </div>
-            <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
-              <h3 className="mb-5 font-['Clash_Display'] text-base font-bold">Top Target Industries</h3>
-              <BarList items={(paths?.top_target_industries ?? []).slice(0, 8).map((i) => ({ label: i.industry, count: i.count }))} color="#3B82F6" />
-            </div>
+
+            {/* Drill-down panel */}
+            {pathDrilldown && (
+              <div className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-widest text-neutral-400">
+                      {pathDrilldown.type === "role" ? "Targeting role" : "Targeting industry"}
+                    </div>
+                    <h3 className="font-['Clash_Display'] text-lg font-bold">{pathDrilldown.label}</h3>
+                  </div>
+                  <button
+                    onClick={() => setPathDrilldown(null)}
+                    className="rounded-full border-2 border-neutral-300 px-3 py-1 text-xs font-bold text-neutral-500 hover:border-neutral-900 hover:text-neutral-900"
+                  >
+                    ✕ Close
+                  </button>
+                </div>
+                {pathDrilldown.loading ? (
+                  <p className="text-sm text-neutral-400">Loading…</p>
+                ) : pathDrilldown.students.length === 0 ? (
+                  <p className="text-sm text-neutral-400">No students found.</p>
+                ) : (
+                  <div className="divide-y divide-neutral-100">
+                    {pathDrilldown.students.map((s) => (
+                      <div key={s.id} className="flex items-center justify-between py-3">
+                        <div className="min-w-0">
+                          <button
+                            className="truncate text-sm font-bold text-neutral-800 hover:text-violet-600 text-left"
+                            onClick={() => { setTab("students"); openStudentPanel(s.id); }}
+                          >
+                            {s.name || s.email || s.id.slice(0, 8)}
+                          </button>
+                          {s.email && s.name && <div className="truncate text-xs text-neutral-400">{s.email}</div>}
+                          {pathDrilldown.type === "role" && s.target_industry && (
+                            <div className="text-xs text-neutral-400">Industry: {s.target_industry}</div>
+                          )}
+                          {pathDrilldown.type === "industry" && s.target_role && (
+                            <div className="text-xs text-neutral-400">Role: {s.target_role}</div>
+                          )}
+                        </div>
+                        {s.last_seen && (
+                          <div className="shrink-0 text-xs text-neutral-400">{fmtDateTime(s.last_seen)}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1487,15 +1568,24 @@ function EmptyState({ loading }: { loading: boolean }) {
   );
 }
 
-function BarList({ items, color }: { items: { label: string; count: number }[]; color: string }) {
+function BarList({ items, color, onLabelClick }: { items: { label: string; count: number }[]; color: string; onLabelClick?: (label: string) => void }) {
   const max = Math.max(...items.map((i) => i.count), 1);
   return items.length ? (
     <div className="space-y-3">
       {items.map((item) => (
         <div key={item.label}>
           <div className="mb-1 flex justify-between text-sm font-semibold">
-            <span>{item.label}</span>
-            <span>{item.count}</span>
+            {onLabelClick ? (
+              <button
+                className="truncate text-left hover:text-violet-600 hover:underline"
+                onClick={() => onLabelClick(item.label)}
+              >
+                {item.label}
+              </button>
+            ) : (
+              <span>{item.label}</span>
+            )}
+            <span className="shrink-0 pl-2">{item.count}</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-neutral-100">
             <div
