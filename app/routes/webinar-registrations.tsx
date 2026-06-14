@@ -24,10 +24,7 @@ interface Registration {
 
 interface Stats {
   total: string;
-  last_2_days: string;
-  last_4_days: string;
-  last_7_days: string;
-  last_30_days: string;
+  last_24_hours: string;
 }
 
 const NOT_SPECIFIED = "__none__";
@@ -78,6 +75,21 @@ export default function WebinarRegistrations() {
     return rows.filter((r) => r.life_stage === stageFilter);
   }, [rows, stageFilter]);
 
+  // Count occurrences of a field across all rows, sorted by count desc.
+  // Blank/null values are grouped under "Not specified".
+  const countBy = (key: (r: Registration) => string | null) =>
+    Object.entries(
+      rows.reduce<Record<string, number>>((acc, r) => {
+        const label = (key(r) || "").trim() || "Not specified";
+        acc[label] = (acc[label] || 0) + 1;
+        return acc;
+      }, {})
+    ).sort((a, b) => b[1] - a[1]);
+
+  const stageBreakdown = useMemo(() => countBy((r) => r.life_stage), [rows]);
+  const yearBreakdown = useMemo(() => countBy((r) => r.year_of_study), [rows]);
+  const gradYearBreakdown = useMemo(() => countBy((r) => r.graduation_year), [rows]);
+
   const fmt = (iso: string) =>
     new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -97,13 +109,10 @@ export default function WebinarRegistrations() {
         </div>
 
         {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+          <div className="grid grid-cols-2 gap-4 mb-6">
             {[
-              { label: "Total", value: stats.total },
-              { label: "Last 2 days", value: stats.last_2_days },
-              { label: "Last 4 days", value: stats.last_4_days },
-              { label: "Last 7 days", value: stats.last_7_days },
-              { label: "Last 30 days", value: stats.last_30_days },
+              { label: "Total students", value: stats.total },
+              { label: "Past 24 hours", value: stats.last_24_hours },
             ].map((s) => (
               <div key={s.label} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{s.label}</p>
@@ -115,6 +124,15 @@ export default function WebinarRegistrations() {
 
         {error && (
           <div className="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>
+        )}
+
+        {/* Breakdowns */}
+        {!loading && rows.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <BreakdownCard title="Stage in life" items={stageBreakdown} />
+            <BreakdownCard title="Year of study" items={yearBreakdown} />
+            <BreakdownCard title="Graduation year" items={gradYearBreakdown} />
+          </div>
         )}
 
         {/* Stage filter */}
@@ -179,6 +197,32 @@ export default function WebinarRegistrations() {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function BreakdownCard({ title, items }: { title: string; items: [string, number][] }) {
+  const max = items.reduce((m, [, n]) => Math.max(m, n), 0) || 1;
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">{title}</p>
+      {items.length === 0 ? (
+        <p className="text-sm text-gray-400">No data.</p>
+      ) : (
+        <div className="space-y-2.5">
+          {items.map(([label, count]) => (
+            <div key={label}>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-700">{label}</span>
+                <span className="font-semibold text-gray-900">{count}</span>
+              </div>
+              <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+                <div className="h-full rounded-full bg-violet-500" style={{ width: `${(count / max) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
