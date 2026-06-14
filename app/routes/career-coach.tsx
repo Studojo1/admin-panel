@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
@@ -395,7 +395,7 @@ function AnonSessionsPanel({ ccHeaders }: { ccHeaders: () => Record<string, stri
                                 <div className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-[12px] leading-relaxed ${
                                   m.role === "user" ? "bg-neutral-700 text-white" : "border border-neutral-200 bg-white text-neutral-800"
                                 }`}>
-                                  {m.content}
+                                  {renderAdminMsg(m.content)}
                                 </div>
                               </div>
                             ))}
@@ -411,6 +411,44 @@ function AnonSessionsPanel({ ccHeaders }: { ccHeaders: () => Record<string, stri
         </div>
       )}
     </div>
+  );
+}
+
+// ── Admin message renderer ─────────────────────────────────────────────────
+// Converts raw agent text into readable nodes, replacing known Studojo URLs
+// with clickable buttons so the admin sees what students actually see.
+
+const ADMIN_TOOL_LINKS = [
+  { re: /(?:https?:\/\/)?(?:www\.)?studojo\.com\/outreach(?:\/onboarding\/upload)?[^\s)]*/gi, label: "Outreach Dojo →", href: "https://studojo.com/outreach" },
+  { re: /(?:https?:\/\/)?(?:www\.)?studojo\.com\/resume-maker[^\s)]*/gi, label: "Resume Maker →", href: "https://studojo.com/resume-maker" },
+  { re: /(?:https?:\/\/)?(?:www\.)?studojo\.com\/dojos\/internships[^\s)]*/gi, label: "Internship Dojo →", href: "https://studojo.com/dojos/internships" },
+  { re: /(?:https?:\/\/)?(?:www\.)?studojo\.com\/reports[^\s)]*/gi, label: "Reports →", href: "https://studojo.com/reports" },
+  { re: /(?:https?:\/\/)?(?:www\.)?studojo\.com\/dojos\/ai-risk[^\s)]*/gi, label: "AI Risk Dojo →", href: "https://studojo.com/dojos/ai-risk" },
+];
+
+function renderAdminMsg(content: string): React.ReactNode {
+  if (!content) return null;
+  let text = content;
+  const buttons: { label: string; href: string }[] = [];
+  for (const tool of ADMIN_TOOL_LINKS) {
+    tool.re.lastIndex = 0;
+    if (tool.re.test(text)) {
+      tool.re.lastIndex = 0;
+      text = text.replace(tool.re, "").replace(/\s*:\s*$/, "").replace(/\s{2,}/g, " ").trim();
+      buttons.push({ label: tool.label, href: tool.href });
+    }
+  }
+  // Render remaining text + buttons
+  return (
+    <>
+      {text}
+      {buttons.map((b, i) => (
+        <a key={i} href={b.href} target="_blank" rel="noopener noreferrer"
+          className="mt-1.5 flex w-fit items-center gap-1 rounded-lg border border-violet-300 bg-violet-50 px-2.5 py-1 text-[11px] font-bold text-violet-700 hover:bg-violet-100 no-underline">
+          {b.label}
+        </a>
+      ))}
+    </>
   );
 }
 
@@ -1135,7 +1173,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                             {d.last_messages.map((m, i) => (
                               <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                                 <div className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-[12px] leading-relaxed ${m.role === "user" ? "bg-violet-500 text-white" : "border border-neutral-200 bg-white text-neutral-800"}`}>
-                                  {m.content}
+                                  {renderAdminMsg(m.content)}
                                 </div>
                               </div>
                             ))}
@@ -1752,7 +1790,7 @@ function StudentPanel({
                               }`}
                               title={m.at ? new Date(m.at).toLocaleString("en-IN") : undefined}
                             >
-                              {m.content}
+                              {renderAdminMsg(m.content)}
                             </div>
                           </div>
                         ))}
