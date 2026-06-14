@@ -50,10 +50,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     db.execute(sql`
       SELECT
         COUNT(*) AS total,
-        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '2 days') AS last_2_days,
-        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '4 days') AS last_4_days,
-        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') AS last_7_days,
-        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS last_30_days
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS last_24_hours
       FROM webinar_registrations
     `),
   ]);
