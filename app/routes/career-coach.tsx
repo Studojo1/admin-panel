@@ -456,19 +456,24 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   const [resumeViewFor, setResumeViewFor] = useState<{ id: string; name: string } | null>(null);
   const [loadingResume, setLoadingResume] = useState(false);
 
-  // No key needed — the admin panel login is the only gate. Load on mount once
-  // BetterAuth has authorized the admin.
+  // Fire data load immediately on mount — don't wait for the two-round-trip auth
+  // check to complete first. The CC API has no secrets (admin panel login is the
+  // only gate), so loading optimistically is safe. Auth redirect still fires if
+  // the user isn't an admin; they just won't see the data.
+  useEffect(() => {
+    loadAll();
+  }, []);
+
   useEffect(() => {
     if (isAuthorized) {
       setAuthenticated(true);
-      loadAll();
     }
   }, [isAuthorized]);
 
   // Lazy-load the dropout analysis the first time the Dropouts tab is opened
   // (it scans all messages, so we don't run it on every dashboard load).
   useEffect(() => {
-    if (tab !== "dropouts" || dropouts || loadingDropouts || !authenticated) return;
+    if (tab !== "dropouts" || dropouts || loadingDropouts) return;
     setLoadingDropouts(true);
     fetch(`${CC_API}/admin/dropouts`, { headers: { "Content-Type": "application/json" } })
       .then((r) => (r.ok ? r.json() : null))
@@ -629,13 +634,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     }
   }
 
-  if (isPending || isAuthorized === null) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-neutral-50">
-        <div className="text-neutral-500 font-['Satoshi']">Loading…</div>
-      </div>
-    );
-  }
+  // Auth check runs in background — don't block rendering on it.
 
   if (!authenticated) {
     // No key prompt — the admin panel is already behind login. We auto-authenticate
