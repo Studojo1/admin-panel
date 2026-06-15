@@ -27,6 +27,22 @@ function formatAmount(cents: number, currency: string): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+function tierLabel(tier: number | null | undefined): string {
+  if (tier === 50)  return "Starter (50)";
+  if (tier === 200) return "Growth (200)";
+  if (tier === 350) return "Pro (350)";
+  if (tier === 500) return "Scale (500)";
+  return tier != null ? String(tier) : "—";
+}
+
+function tierBadgeClass(tier: number | null | undefined): string {
+  if (tier === 50)  return "bg-amber-50 text-amber-700 border-amber-300";
+  if (tier === 200) return "bg-blue-50 text-blue-700 border-blue-300";
+  if (tier === 350) return "bg-violet-50 text-violet-700 border-violet-300";
+  if (tier === 500) return "bg-emerald-50 text-emerald-700 border-emerald-300";
+  return "bg-neutral-100 text-neutral-700 border-neutral-300";
+}
+
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -153,7 +169,7 @@ function DetailModal({ payment, onClose }: DetailModalProps) {
                     </span>
                   }
                 />
-                <Row label="Plan tier" value={payment.tier === 350 ? "Pro (350)" : "Standard (200)"} />
+                <Row label="Plan tier" value={tierLabel(payment.tier)} />
                 <Row label="Credits granted" value={String(payment.credits_granted)} />
                 <Row
                   label="Status"
@@ -473,8 +489,8 @@ export default function PaidUsers() {
 
                             {/* Plan */}
                             <td className="px-4 py-4">
-                              <span className="inline-block rounded border border-neutral-300 bg-neutral-100 px-2 py-0.5 font-['Satoshi'] text-xs font-medium text-neutral-700">
-                                {p.tier === 350 ? "Pro" : "Standard"}
+                              <span className={`inline-block rounded border px-2 py-0.5 font-['Satoshi'] text-xs font-medium ${tierBadgeClass(p.tier)}`}>
+                                {tierLabel(p.tier)}
                               </span>
                             </td>
 

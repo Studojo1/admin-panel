@@ -13,6 +13,14 @@ import { toast } from "sonner";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
+function tierLabel(tier: number | null | undefined): string {
+  if (tier === 50)  return "Starter (50)";
+  if (tier === 200) return "Growth (200)";
+  if (tier === 350) return "Pro (350)";
+  if (tier === 500) return "Scale (500)";
+  return tier != null ? String(tier) : "—";
+}
+
 type Props = {
   userId: string | null;
   isOpen: boolean;
@@ -396,7 +404,7 @@ export function OutreachUserDetailModal({ userId, isOpen, onClose }: Props) {
                           {detail.payments.map((p) => (
                             <tr key={p.id} className="border-b border-neutral-100">
                               <td className="px-3 py-2 font-['Satoshi'] text-xs text-neutral-700">{fmtDate(p.created_at)}</td>
-                              <td className="px-3 py-2 font-['Satoshi'] text-xs font-medium text-neutral-900">{p.tier || "—"}</td>
+                              <td className="px-3 py-2 font-['Satoshi'] text-xs font-medium text-neutral-900">{tierLabel(p.tier)}</td>
                               <td className="px-3 py-2 font-['Satoshi'] text-xs font-medium text-neutral-900">{fmtCurrency(p.amount_cents)}</td>
                               <td className="px-3 py-2 font-['Satoshi'] text-xs text-neutral-700">{p.credits_granted}</td>
                               <td className="px-3 py-2"><StatusBadge status={p.status} /></td>
