@@ -49,6 +49,37 @@ function quizHogql(days: number) {
       AND isNotNull(properties.question_number)
     GROUP BY q ORDER BY q ASC LIMIT 20`;
 }
+const DETAIL_EVENTS = [
+  "resume_upload_started", "resume_uploaded", "resume_upload_failed",
+  "quiz_started", "profile_quiz_completed",
+  "lead_contact_clicked", "get_emails_clicked",
+  "tier_selected", "pay_now_clicked", "coupon_applied",
+  "checkout_opened", "checkout_abandoned", "payment_failed", "payment_confirmed",
+  "back_to_leads_clicked",
+];
+function detailHogql(days: number) {
+  const list = DETAIL_EVENTS.map((e) => `'${e}'`).join(",");
+  return `
+    SELECT event, uniq(person_id) AS people, count() AS total
+    FROM events WHERE event IN (${list}) AND timestamp >= now() - INTERVAL ${days} DAY
+    GROUP BY event ORDER BY people DESC`;
+}
+const DIMS: Record<string, { label: string; expr: string }> = {
+  device: { label: "Device", expr: "properties.$device_type" },
+  country: { label: "Country", expr: "properties.$geoip_country_name" },
+  source: { label: "Traffic source", expr: "coalesce(nullIf(properties.utm_source, ''), properties.$referring_domain, '(direct)')" },
+};
+function breakdownHogql(days: number, dim: string) {
+  return `
+    SELECT ${DIMS[dim].expr} AS seg,
+      uniqIf(person_id, event='$pageview') AS visits,
+      uniqIf(person_id, event='$pageview' AND properties.$pathname LIKE '/outreach%') AS outreach,
+      uniqIf(person_id, event='resume_uploaded') AS resume,
+      uniqIf(person_id, event='leads_loaded') AS leads,
+      uniqIf(person_id, event='payment_confirmed') AS paid
+    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY
+    GROUP BY seg ORDER BY visits DESC LIMIT 12`;
+}
 function checkoutHogql(days: number) {
   return `
     SELECT
@@ -67,6 +98,10 @@ export default function FunnelPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [quiz, setQuiz] = useState<{ q: number; people: number }[]>([]);
   const [checkout, setCheckout] = useState<Record<string, number>>({});
+  const [detail, setDetail] = useState<{ event: string; people: number; total: number }[]>([]);
+  const [dim, setDim] = useState<"none" | "device" | "country" | "source">("none");
+  const [bdRows, setBdRows] = useState<any[]>([]);
+  const [bdLoading, setBdLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -75,10 +110,11 @@ export default function FunnelPage() {
     try {
       const end = isoDate(new Date());
       const start = isoDate(new Date(Date.now() - d * 86400000));
-      const [macro, quizRes, coRes, signupsRes] = await Promise.all([
+      const [macro, quizRes, coRes, detailRes, signupsRes] = await Promise.all([
         phQuery(macroHogql(d)),
         phQuery(quizHogql(d)),
         phQuery(checkoutHogql(d)),
+        phQuery(detailHogql(d)),
         fetch(`/api/analytics?start=${start}&end=${end}`, { credentials: "include" }).then((r) => r.json()).catch(() => ({ daily: [] })),
       ]);
       const signupMap: Record<string, number> = {};
@@ -92,12 +128,25 @@ export default function FunnelPage() {
       setQuiz((quizRes.results ?? []).map((r: any[]) => ({ q: +r[0], people: +r[1] || 0 })));
       const co = coRes.results?.[0] ?? [];
       setCheckout({ clicked: +co[0] || 0, opened: +co[1] || 0, paid: +co[2] || 0, abandoned: +co[3] || 0, failed: +co[4] || 0 });
+      setDetail((detailRes.results ?? []).map((r: any[]) => ({ event: String(r[0]), people: +r[1] || 0, total: +r[2] || 0 })));
     } catch (e: any) {
       setError(e?.message || "Failed to load funnel");
     } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(days); }, [days, load]);
+
+  // Breakdown by device / country / source — runs only when a dimension is picked.
+  useEffect(() => {
+    if (dim === "none") { setBdRows([]); return; }
+    let cancelled = false;
+    setBdLoading(true);
+    phQuery(breakdownHogql(days, dim))
+      .then((res) => { if (!cancelled) setBdRows(res.results ?? []); })
+      .catch(() => { if (!cancelled) setBdRows([]); })
+      .finally(() => { if (!cancelled) setBdLoading(false); });
+    return () => { cancelled = true; };
+  }, [dim, days]);
 
   const totals = STEPS.reduce((a, s) => { a[s.key] = rows.reduce((sum, r) => sum + (r[s.key] || 0), 0); return a; }, {} as Record<string, number>);
   const topTotal = totals["visits"] || 0;
@@ -203,6 +252,77 @@ export default function FunnelPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Breakdown by segment */}
+            <div className={`mb-8 p-5 md:p-6 ${card}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="font-['Clash_Display'] text-xl font-bold">Funnel by segment</h2>
+                  <p className="text-xs text-neutral-500 mt-0.5">Compare conversion across device, country, or traffic source.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {(["none", "device", "country", "source"] as const).map((d) => (
+                    <button key={d} onClick={() => setDim(d)} className={`rounded-xl border-2 border-neutral-900 px-3 py-1.5 text-xs font-semibold shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] ${dim === d ? "bg-violet-500 text-white" : "bg-white text-neutral-900 hover:bg-neutral-50"}`}>{d === "none" ? "None" : DIMS[d].label}</button>
+                  ))}
+                </div>
+              </div>
+              {dim === "none" ? (
+                <p className="text-sm text-neutral-400 py-6 text-center">Pick a dimension above to break the funnel down.</p>
+              ) : bdLoading ? (
+                <div className="flex justify-center py-8"><div className="h-6 w-6 animate-spin rounded-full border-[3px] border-violet-500 border-t-transparent" /></div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead><tr className="bg-neutral-50 text-left text-neutral-700">
+                      <th className="px-3 py-2 border-b border-neutral-200">{DIMS[dim].label}</th>
+                      {["Visits", "Reached outreach", "Resume", "Saw leads", "Paid", "Visit→Paid"].map((h) => <th key={h} className="px-3 py-2 text-right border-b border-neutral-200 whitespace-nowrap">{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {bdRows.map((r, i) => {
+                        const [seg, v, o, re, le, pa] = [String(r[0] ?? "(unknown)"), +r[1] || 0, +r[2] || 0, +r[3] || 0, +r[4] || 0, +r[5] || 0];
+                        return (
+                          <tr key={i} className={i % 2 ? "bg-neutral-50/40" : "bg-white"}>
+                            <td className="px-3 py-2 font-medium border-b border-neutral-100 max-w-[200px] truncate">{seg}</td>
+                            <td className="px-3 py-2 text-right border-b border-neutral-100 tabular-nums">{fmt(v)}</td>
+                            <td className="px-3 py-2 text-right border-b border-neutral-100 tabular-nums">{fmt(o)}</td>
+                            <td className="px-3 py-2 text-right border-b border-neutral-100 tabular-nums">{fmt(re)}</td>
+                            <td className="px-3 py-2 text-right border-b border-neutral-100 tabular-nums">{fmt(le)}</td>
+                            <td className="px-3 py-2 text-right border-b border-neutral-100 tabular-nums font-semibold">{fmt(pa)}</td>
+                            <td className={`px-3 py-2 text-right border-b border-neutral-100 tabular-nums font-bold ${pct(pa, v) >= 2 ? "text-emerald-600" : "text-neutral-500"}`}>{pct(pa, v)}%</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* All tracked events */}
+            <div className={`mb-8 p-5 md:p-6 ${card}`}>
+              <h2 className="font-['Clash_Display'] text-xl font-bold mb-1">All tracked events</h2>
+              <p className="text-xs text-neutral-500 mb-4">Every semantic event in the last {days} days. People = unique users, Total = raw count.</p>
+              {detail.length === 0 ? <p className="text-sm text-neutral-400 py-6 text-center">No events yet (new events start collecting after the latest deploy).</p> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead><tr className="bg-neutral-50 text-left text-neutral-700">
+                      <th className="px-3 py-2 border-b border-neutral-200">Event</th>
+                      <th className="px-3 py-2 text-right border-b border-neutral-200">People</th>
+                      <th className="px-3 py-2 text-right border-b border-neutral-200">Total</th>
+                    </tr></thead>
+                    <tbody>
+                      {detail.map((e, i) => (
+                        <tr key={e.event} className={i % 2 ? "bg-neutral-50/40" : "bg-white"}>
+                          <td className="px-3 py-2 font-mono text-[13px] border-b border-neutral-100">{e.event}</td>
+                          <td className="px-3 py-2 text-right border-b border-neutral-100 tabular-nums font-semibold">{fmt(e.people)}</td>
+                          <td className="px-3 py-2 text-right border-b border-neutral-100 tabular-nums text-neutral-500">{fmt(e.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             {/* Per-day grid */}
