@@ -6,7 +6,7 @@ import { authClient } from "~/lib/auth-client";
 const NAV_LINKS = [
   { to: "/", label: "Dashboard" },
   { to: "/users", label: "Users" },
-  { to: "/partner-users", label: "Partner Users" },
+  { to: "/funnel", label: "Funnel" },
   { to: "/assignments", label: "Assignments" },
   { to: "/dissertations", label: "Dissertations" },
   { to: "/outreach-orders", label: "Outreach Orders" },
