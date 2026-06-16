@@ -30,7 +30,13 @@ const STEPS = [
 
 type Row = Record<string, any> & { day: string };
 
-function macroHogql(days: number) {
+// Environment filter — events carry $host (studojo.com = prod, studojo.pro = staging).
+function envWhere(env: string) {
+  if (env === "prod") return "AND properties.$host LIKE '%studojo.com%'";
+  if (env === "staging") return "AND properties.$host LIKE '%studojo.pro%'";
+  return "";
+}
+function macroHogql(days: number, env: string) {
   return `
     SELECT toDate(timestamp) AS day,
       uniqIf(person_id, event='$pageview') AS visits,
@@ -39,13 +45,13 @@ function macroHogql(days: number) {
       uniqIf(person_id, event='profile_quiz_completed') AS quiz,
       uniqIf(person_id, event='leads_loaded') AS leads,
       uniqIf(person_id, event='payment_confirmed') AS paid
-    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY
+    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
     GROUP BY day ORDER BY day DESC`;
 }
-function quizHogql(days: number) {
+function quizHogql(days: number, env: string) {
   return `
     SELECT toInt(properties.question_number) AS q, uniq(person_id) AS people
-    FROM events WHERE event='quiz_question_answered' AND timestamp >= now() - INTERVAL ${days} DAY
+    FROM events WHERE event='quiz_question_answered' AND timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
       AND isNotNull(properties.question_number)
     GROUP BY q ORDER BY q ASC LIMIT 20`;
 }
@@ -57,19 +63,42 @@ const DETAIL_EVENTS = [
   "checkout_opened", "checkout_abandoned", "payment_failed", "payment_confirmed",
   "back_to_leads_clicked",
 ];
-function detailHogql(days: number) {
+function detailHogql(days: number, env: string) {
   const list = DETAIL_EVENTS.map((e) => `'${e}'`).join(",");
   return `
     SELECT event, uniq(person_id) AS people, count() AS total
-    FROM events WHERE event IN (${list}) AND timestamp >= now() - INTERVAL ${days} DAY
+    FROM events WHERE event IN (${list}) AND timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
     GROUP BY event ORDER BY people DESC`;
+}
+// Median time between key steps (seconds), per person, first occurrence of each.
+const TIMINGS = [
+  { key: "quiz", label: "Quiz: start → complete", a: "quiz_started", b: "profile_quiz_completed" },
+  { key: "leads", label: "Resume → saw leads", a: "resume_uploaded", b: "leads_loaded" },
+  { key: "pay", label: "Tapped pay → paid", a: "pay_now_clicked", b: "payment_confirmed" },
+  { key: "visitpay", label: "First visit → paid", a: "$pageview", b: "payment_confirmed" },
+];
+function timingHogql(days: number, env: string) {
+  const cols = TIMINGS.map((t) =>
+    `medianIf(dateDiff('second', t_${t.key}_a, t_${t.key}_b), t_${t.key}_a > toDateTime('2000-01-01') AND t_${t.key}_b > t_${t.key}_a) AS ${t.key}`
+  ).join(",\n      ");
+  const inner = TIMINGS.map((t) =>
+    `minIf(timestamp, event='${t.a}') AS t_${t.key}_a, minIf(timestamp, event='${t.b}') AS t_${t.key}_b`
+  ).join(",\n        ");
+  return `
+    SELECT ${cols}
+    FROM (
+      SELECT person_id,
+        ${inner}
+      FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
+      GROUP BY person_id
+    )`;
 }
 const DIMS: Record<string, { label: string; expr: string }> = {
   device: { label: "Device", expr: "properties.$device_type" },
   country: { label: "Country", expr: "properties.$geoip_country_name" },
   source: { label: "Traffic source", expr: "coalesce(nullIf(properties.utm_source, ''), properties.$referring_domain, '(direct)')" },
 };
-function breakdownHogql(days: number, dim: string) {
+function breakdownHogql(days: number, dim: string, env: string) {
   return `
     SELECT ${DIMS[dim].expr} AS seg,
       uniqIf(person_id, event='$pageview') AS visits,
@@ -77,10 +106,10 @@ function breakdownHogql(days: number, dim: string) {
       uniqIf(person_id, event='resume_uploaded') AS resume,
       uniqIf(person_id, event='leads_loaded') AS leads,
       uniqIf(person_id, event='payment_confirmed') AS paid
-    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY
+    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
     GROUP BY seg ORDER BY visits DESC LIMIT 12`;
 }
-function checkoutHogql(days: number) {
+function checkoutHogql(days: number, env: string) {
   return `
     SELECT
       uniqIf(person_id, event='pay_now_clicked') AS clicked,
@@ -88,10 +117,19 @@ function checkoutHogql(days: number) {
       uniqIf(person_id, event='payment_confirmed') AS paid,
       uniqIf(person_id, event='checkout_abandoned') AS abandoned,
       uniqIf(person_id, event='payment_failed') AS failed
-    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY`;
+    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}`;
 }
+const fmtDur = (s: number) => {
+  if (!s || s < 0) return "—";
+  if (s < 60) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+  return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
+};
 
 const PRESETS = [7, 14, 30] as const;
+const ENVS: { key: "all" | "prod" | "staging"; label: string }[] = [
+  { key: "all", label: "All" }, { key: "prod", label: "studojo.com" }, { key: "staging", label: "studojo.pro" },
+];
 
 export default function FunnelPage() {
   const [days, setDays] = useState(14);
@@ -99,22 +137,25 @@ export default function FunnelPage() {
   const [quiz, setQuiz] = useState<{ q: number; people: number }[]>([]);
   const [checkout, setCheckout] = useState<Record<string, number>>({});
   const [detail, setDetail] = useState<{ event: string; people: number; total: number }[]>([]);
+  const [timing, setTiming] = useState<Record<string, number>>({});
+  const [env, setEnv] = useState<"all" | "prod" | "staging">("all");
   const [dim, setDim] = useState<"none" | "device" | "country" | "source">("none");
   const [bdRows, setBdRows] = useState<any[]>([]);
   const [bdLoading, setBdLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = useCallback(async (d: number) => {
+  const load = useCallback(async (d: number, e: string) => {
     setLoading(true); setError("");
     try {
       const end = isoDate(new Date());
       const start = isoDate(new Date(Date.now() - d * 86400000));
-      const [macro, quizRes, coRes, detailRes, signupsRes] = await Promise.all([
-        phQuery(macroHogql(d)),
-        phQuery(quizHogql(d)),
-        phQuery(checkoutHogql(d)),
-        phQuery(detailHogql(d)),
+      const [macro, quizRes, coRes, detailRes, timingRes, signupsRes] = await Promise.all([
+        phQuery(macroHogql(d, e)),
+        phQuery(quizHogql(d, e)),
+        phQuery(checkoutHogql(d, e)),
+        phQuery(detailHogql(d, e)),
+        phQuery(timingHogql(d, e)),
         fetch(`/api/analytics?start=${start}&end=${end}`, { credentials: "include" }).then((r) => r.json()).catch(() => ({ daily: [] })),
       ]);
       const signupMap: Record<string, number> = {};
@@ -129,24 +170,28 @@ export default function FunnelPage() {
       const co = coRes.results?.[0] ?? [];
       setCheckout({ clicked: +co[0] || 0, opened: +co[1] || 0, paid: +co[2] || 0, abandoned: +co[3] || 0, failed: +co[4] || 0 });
       setDetail((detailRes.results ?? []).map((r: any[]) => ({ event: String(r[0]), people: +r[1] || 0, total: +r[2] || 0 })));
+      const tr = timingRes.results?.[0] ?? [];
+      const tObj: Record<string, number> = {};
+      TIMINGS.forEach((t, i) => { tObj[t.key] = +tr[i] || 0; });
+      setTiming(tObj);
     } catch (e: any) {
       setError(e?.message || "Failed to load funnel");
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(days); }, [days, load]);
+  useEffect(() => { load(days, env); }, [days, env, load]);
 
   // Breakdown by device / country / source — runs only when a dimension is picked.
   useEffect(() => {
     if (dim === "none") { setBdRows([]); return; }
     let cancelled = false;
     setBdLoading(true);
-    phQuery(breakdownHogql(days, dim))
+    phQuery(breakdownHogql(days, dim, env))
       .then((res) => { if (!cancelled) setBdRows(res.results ?? []); })
       .catch(() => { if (!cancelled) setBdRows([]); })
       .finally(() => { if (!cancelled) setBdLoading(false); });
     return () => { cancelled = true; };
-  }, [dim, days]);
+  }, [dim, days, env]);
 
   const totals = STEPS.reduce((a, s) => { a[s.key] = rows.reduce((sum, r) => sum + (r[s.key] || 0), 0); return a; }, {} as Record<string, number>);
   const topTotal = totals["visits"] || 0;
@@ -163,7 +208,12 @@ export default function FunnelPage() {
             <h1 className="font-['Clash_Display'] text-3xl font-bold text-neutral-900">Funnel</h1>
             <p className="text-sm text-neutral-600 mt-1">Every step from website visit to paid, plus quiz and checkout drop-off.</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded-xl border-2 border-neutral-900 bg-white p-0.5 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]">
+              {ENVS.map((e) => (
+                <button key={e.key} onClick={() => setEnv(e.key)} className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${env === e.key ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"}`}>{e.label}</button>
+              ))}
+            </div>
             {PRESETS.map((p) => (
               <button key={p} onClick={() => setDays(p)} className={`rounded-xl border-2 border-neutral-900 px-3 py-1.5 text-sm font-semibold shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] ${days === p ? "bg-violet-500 text-white" : "bg-white text-neutral-900 hover:bg-neutral-50"}`}>{p}d</button>
             ))}
@@ -251,6 +301,20 @@ export default function FunnelPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Time between steps */}
+            <div className={`mb-8 p-5 md:p-6 ${card}`}>
+              <h2 className="font-['Clash_Display'] text-xl font-bold mb-1">Time between steps</h2>
+              <p className="text-xs text-neutral-500 mb-4">Median time people take to move from one step to the next.</p>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {TIMINGS.map((t) => (
+                  <div key={t.key} className="rounded-xl border-2 border-neutral-900 bg-neutral-50 p-4 text-center">
+                    <p className="font-['Clash_Display'] text-2xl font-bold text-neutral-900">{fmtDur(timing[t.key] || 0)}</p>
+                    <p className="text-[11px] text-neutral-600 mt-1">{t.label}</p>
+                  </div>
+                ))}
               </div>
             </div>
 
