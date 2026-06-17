@@ -8,6 +8,7 @@ const NAV_LINKS = [
   { to: "/users", label: "Users" },
   { to: "/daily", label: "Daily Dashboard" },
   { to: "/funnel", label: "Funnel" },
+  { to: "/journeys", label: "User Journeys" },
   { to: "/assignments", label: "Assignments" },
   { to: "/dissertations", label: "Dissertations" },
   { to: "/outreach-orders", label: "Outreach Orders" },

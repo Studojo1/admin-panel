@@ -102,8 +102,16 @@ export async function loader({ request }: { request: Request }) {
               properties.enriched_count,
               properties.email_address,
               properties.error_type,
-              properties.coupon_code
-            FROM events WHERE person_id = '${personId}' ORDER BY timestamp DESC LIMIT 15`,
+              properties.coupon_code,
+              properties.question_number,
+              properties.answer_type,
+              properties.provider,
+              properties.covered_by_credits,
+              properties.reason,
+              properties.company,
+              properties.$device_type,
+              properties.$geoip_country_name
+            FROM events WHERE person_id = '${personId}' ORDER BY timestamp DESC LIMIT 80`,
           },
         }),
       });
