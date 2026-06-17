@@ -5,6 +5,8 @@ export default [
   route("login", "routes/login.tsx"),
   route("users", "routes/users.tsx"),
   route("funnel", "routes/funnel.tsx"),
+  route("daily", "routes/daily-dashboard.tsx"),
+  route("api/dashboard", "routes/api.dashboard.tsx"),
   route("assignments", "routes/assignments.tsx"),
   route("dissertations", "routes/dissertations.tsx"),
   route("outreach-orders", "routes/outreach-orders.tsx"),
