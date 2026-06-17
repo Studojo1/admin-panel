@@ -12,7 +12,6 @@ async function phQuery(query: string) {
   if (!res.ok) throw new Error(`PostHog query failed: ${res.status}`);
   return res.json();
 }
-const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 const fmt = (n: number) => (n ?? 0).toLocaleString("en-US");
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
 const niceDay = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -36,21 +35,27 @@ function envWhere(env: string) {
   if (env === "staging") return "AND properties.$host LIKE '%studojo.pro%'";
   return "";
 }
-function macroHogql(days: number, env: string) {
+// Time filter in IST (events are UTC; +330 min → India calendar day), so
+// "Today"/"Yesterday" mean the founder's day. `tc` is a full WHERE fragment.
+const IST_DAY = "toDate(timestamp + INTERVAL 330 MINUTE)";
+function timeClause(start: string, end: string) {
+  return `${IST_DAY} >= toDate('${start}') AND ${IST_DAY} <= toDate('${end}')`;
+}
+function macroHogql(tc: string, env: string) {
   return `
-    SELECT toDate(timestamp) AS day,
+    SELECT ${IST_DAY} AS day,
       uniqIf(person_id, event='$pageview') AS visits,
       uniqIf(person_id, event='$pageview' AND properties.$pathname LIKE '/outreach%') AS outreach,
       uniqIf(person_id, event='resume_uploaded') AS resume,
       uniqIf(person_id, event='profile_quiz_completed') AS quiz,
       uniqIf(person_id, event='leads_loaded') AS leads,
       uniqIf(person_id, event='payment_confirmed') AS paid
-    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
+    FROM events WHERE ${tc} ${envWhere(env)}
     GROUP BY day ORDER BY day DESC`;
 }
 // True nested funnel: range-level unique people, each step requires ALL prior
 // steps, so counts are always monotonic (no more ">100% kept"). One row.
-function nestedHogql(days: number, env: string) {
+function nestedHogql(tc: string, env: string) {
   return `
     SELECT
       countIf(v) AS visited,
@@ -65,14 +70,14 @@ function nestedHogql(days: number, env: string) {
         max(event='resume_uploaded') AS ru,
         max(event='profile_quiz_completed') AS qz,
         max(event='leads_loaded') AS ld
-      FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
+      FROM events WHERE ${tc} ${envWhere(env)}
       GROUP BY person_id
     )`;
 }
-function quizHogql(days: number, env: string) {
+function quizHogql(tc: string, env: string) {
   return `
     SELECT toInt(properties.question_number) AS q, uniq(person_id) AS people
-    FROM events WHERE event='quiz_question_answered' AND timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
+    FROM events WHERE event='quiz_question_answered' AND ${tc} ${envWhere(env)}
       AND isNotNull(properties.question_number)
     GROUP BY q ORDER BY q ASC LIMIT 20`;
 }
@@ -84,11 +89,11 @@ const DETAIL_EVENTS = [
   "checkout_opened", "checkout_abandoned", "payment_failed", "payment_confirmed",
   "back_to_leads_clicked",
 ];
-function detailHogql(days: number, env: string) {
+function detailHogql(tc: string, env: string) {
   const list = DETAIL_EVENTS.map((e) => `'${e}'`).join(",");
   return `
     SELECT event, uniq(person_id) AS people, count() AS total
-    FROM events WHERE event IN (${list}) AND timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
+    FROM events WHERE event IN (${list}) AND ${tc} ${envWhere(env)}
     GROUP BY event ORDER BY people DESC`;
 }
 // Median time between key steps (seconds), per person, first occurrence of each.
@@ -98,7 +103,7 @@ const TIMINGS = [
   { key: "pay", label: "Tapped pay → paid", a: "pay_now_clicked", b: "payment_confirmed" },
   { key: "visitpay", label: "First visit → paid", a: "$pageview", b: "payment_confirmed" },
 ];
-function timingHogql(days: number, env: string) {
+function timingHogql(tc: string, env: string) {
   const cols = TIMINGS.map((t) =>
     `medianIf(dateDiff('second', t_${t.key}_a, t_${t.key}_b), t_${t.key}_a > toDateTime('2000-01-01') AND t_${t.key}_b > t_${t.key}_a) AS ${t.key}`
   ).join(",\n      ");
@@ -110,7 +115,7 @@ function timingHogql(days: number, env: string) {
     FROM (
       SELECT person_id,
         ${inner}
-      FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
+      FROM events WHERE ${tc} ${envWhere(env)}
       GROUP BY person_id
     )`;
 }
@@ -119,7 +124,7 @@ const DIMS: Record<string, { label: string; expr: string }> = {
   country: { label: "Country", expr: "properties.$geoip_country_name" },
   source: { label: "Traffic source", expr: "coalesce(nullIf(properties.utm_source, ''), properties.$referring_domain, '(direct)')" },
 };
-function breakdownHogql(days: number, dim: string, env: string) {
+function breakdownHogql(tc: string, dim: string, env: string) {
   return `
     SELECT ${DIMS[dim].expr} AS seg,
       uniqIf(person_id, event='$pageview') AS visits,
@@ -127,10 +132,10 @@ function breakdownHogql(days: number, dim: string, env: string) {
       uniqIf(person_id, event='resume_uploaded') AS resume,
       uniqIf(person_id, event='leads_loaded') AS leads,
       uniqIf(person_id, event='payment_confirmed') AS paid
-    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
+    FROM events WHERE ${tc} ${envWhere(env)}
     GROUP BY seg ORDER BY visits DESC LIMIT 12`;
 }
-function checkoutHogql(days: number, env: string) {
+function checkoutHogql(tc: string, env: string) {
   return `
     SELECT
       uniqIf(person_id, event='pay_now_clicked') AS clicked,
@@ -138,7 +143,7 @@ function checkoutHogql(days: number, env: string) {
       uniqIf(person_id, event='payment_confirmed') AS paid,
       uniqIf(person_id, event='checkout_abandoned') AS abandoned,
       uniqIf(person_id, event='payment_failed') AS failed
-    FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}`;
+    FROM events WHERE ${tc} ${envWhere(env)}`;
 }
 const fmtDur = (s: number) => {
   if (!s || s < 0) return "—";
@@ -147,13 +152,21 @@ const fmtDur = (s: number) => {
   return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
 };
 
-const PRESETS = [7, 14, 30] as const;
+// IST calendar date, `offsetDays` ago (0 = today).
+const istDate = (offsetDays = 0) => new Date(Date.now() + 330 * 60000 - offsetDays * 86400000).toISOString().slice(0, 10);
+const RANGES = [
+  { key: "today", label: "Today", range: () => ({ start: istDate(0), end: istDate(0) }) },
+  { key: "yesterday", label: "Yesterday", range: () => ({ start: istDate(1), end: istDate(1) }) },
+  { key: "7d", label: "7d", range: () => ({ start: istDate(6), end: istDate(0) }) },
+  { key: "14d", label: "14d", range: () => ({ start: istDate(13), end: istDate(0) }) },
+  { key: "30d", label: "30d", range: () => ({ start: istDate(29), end: istDate(0) }) },
+] as const;
 const ENVS: { key: "all" | "prod" | "staging"; label: string }[] = [
   { key: "all", label: "All" }, { key: "prod", label: "studojo.com" }, { key: "staging", label: "studojo.pro" },
 ];
 
 export default function FunnelPage() {
-  const [days, setDays] = useState(14);
+  const [rangeKey, setRangeKey] = useState("7d");
   const [rows, setRows] = useState<Row[]>([]);
   const [funnel, setFunnel] = useState<Record<string, number>>({ visited: 0, reached: 0, resume: 0, quiz: 0, leads: 0 });
   const [dbTotals, setDbTotals] = useState<{ signups: number; paid: number }>({ signups: 0, paid: 0 });
@@ -168,18 +181,18 @@ export default function FunnelPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = useCallback(async (d: number, e: string) => {
+  const load = useCallback(async (rk: string, e: string) => {
     setLoading(true); setError("");
     try {
-      const end = isoDate(new Date());
-      const start = isoDate(new Date(Date.now() - d * 86400000));
+      const { start, end } = (RANGES.find((r) => r.key === rk) ?? RANGES[2]).range();
+      const tc = timeClause(start, end);
       const [macro, nestedRes, quizRes, coRes, detailRes, timingRes, signupsRes] = await Promise.all([
-        phQuery(macroHogql(d, e)),
-        phQuery(nestedHogql(d, e)),
-        phQuery(quizHogql(d, e)),
-        phQuery(checkoutHogql(d, e)),
-        phQuery(detailHogql(d, e)),
-        phQuery(timingHogql(d, e)),
+        phQuery(macroHogql(tc, e)),
+        phQuery(nestedHogql(tc, e)),
+        phQuery(quizHogql(tc, e)),
+        phQuery(checkoutHogql(tc, e)),
+        phQuery(detailHogql(tc, e)),
+        phQuery(timingHogql(tc, e)),
         fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include" }).then((r) => r.json()).catch(() => ({ daily: [] })),
       ]);
       // Signups AND paid come from Postgres (authoritative). PostHog's
@@ -216,19 +229,23 @@ export default function FunnelPage() {
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(days, env); }, [days, env, load]);
+  useEffect(() => { load(rangeKey, env); }, [rangeKey, env, load]);
 
   // Breakdown by device / country / source — runs only when a dimension is picked.
   useEffect(() => {
     if (dim === "none") { setBdRows([]); return; }
     let cancelled = false;
     setBdLoading(true);
-    phQuery(breakdownHogql(days, dim, env))
+    const { start, end } = (RANGES.find((r) => r.key === rangeKey) ?? RANGES[2]).range();
+    phQuery(breakdownHogql(timeClause(start, end), dim, env))
       .then((res) => { if (!cancelled) setBdRows(res.results ?? []); })
       .catch(() => { if (!cancelled) setBdRows([]); })
       .finally(() => { if (!cancelled) setBdLoading(false); });
     return () => { cancelled = true; };
-  }, [dim, days, env]);
+  }, [dim, rangeKey, env]);
+
+  const rangeLabel = RANGES.find((r) => r.key === rangeKey)?.label ?? rangeKey;
+  const rangeTitle = rangeKey === "today" ? "Today" : rangeKey === "yesterday" ? "Yesterday" : `Last ${rangeLabel}`;
 
   // Strict outreach funnel (nested) + acquisition context. Paid from DB.
   const visited = funnel.visited || 0;
@@ -258,8 +275,8 @@ export default function FunnelPage() {
                 <button key={e.key} onClick={() => setEnv(e.key)} className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${env === e.key ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"}`}>{e.label}</button>
               ))}
             </div>
-            {PRESETS.map((p) => (
-              <button key={p} onClick={() => setDays(p)} className={`rounded-xl border-2 border-neutral-900 px-3 py-1.5 text-sm font-semibold shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] ${days === p ? "bg-violet-500 text-white" : "bg-white text-neutral-900 hover:bg-neutral-50"}`}>{p}d</button>
+            {RANGES.map((r) => (
+              <button key={r.key} onClick={() => setRangeKey(r.key)} className={`rounded-xl border-2 border-neutral-900 px-3 py-1.5 text-sm font-semibold shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] ${rangeKey === r.key ? "bg-violet-500 text-white" : "bg-white text-neutral-900 hover:bg-neutral-50"}`}>{r.label}</button>
             ))}
           </div>
         </div>
@@ -273,8 +290,8 @@ export default function FunnelPage() {
             {/* Macro funnel */}
             <div className={`mb-8 p-5 md:p-6 ${card}`}>
               <div className="flex items-baseline justify-between mb-4">
-                <h2 className="font-['Clash_Display'] text-xl font-bold">Last {days} days</h2>
-                <span className="text-xs text-neutral-500">nested funnel · unique people who completed every prior step</span>
+                <h2 className="font-['Clash_Display'] text-xl font-bold">{rangeTitle}</h2>
+                <span className="text-xs text-neutral-500">nested funnel · unique people who completed every prior step · IST</span>
               </div>
 
               {/* Acquisition (top of funnel, not strictly sequential) */}
@@ -424,7 +441,7 @@ export default function FunnelPage() {
             {/* All tracked events */}
             <div className={`mb-8 p-5 md:p-6 ${card}`}>
               <h2 className="font-['Clash_Display'] text-xl font-bold mb-1">All tracked events</h2>
-              <p className="text-xs text-neutral-500 mb-4">Every semantic event in the last {days} days. People = unique users, Total = raw count.</p>
+              <p className="text-xs text-neutral-500 mb-4">Every semantic event · {rangeTitle.toLowerCase()}. People = unique users, Total = raw count.</p>
               {detail.length === 0 ? <p className="text-sm text-neutral-400 py-6 text-center">No events yet (new events start collecting after the latest deploy).</p> : (
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">

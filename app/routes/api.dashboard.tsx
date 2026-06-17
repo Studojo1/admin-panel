@@ -18,20 +18,21 @@ export async function loader({ request }: Route.LoaderArgs) {
   try {
     const q = async (query: any) => (await db.execute(query)).rows as any[];
 
+    // Dates bucketed in IST (+5:30) so "today"/"yesterday" match the founder's day.
     const [signups, orders, emails, replies, paid] = await Promise.all([
-      q(sql`SELECT DATE(created_at) AS day, COUNT(*)::int AS n FROM "user"
-            WHERE DATE(created_at) BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
-      q(sql`SELECT DATE(created_at) AS day, COUNT(*)::int AS n FROM outreach_orders
-            WHERE DATE(created_at) BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
-      q(sql`SELECT DATE(sent_at) AS day, COUNT(*)::int AS n FROM emails_sent
+      q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM "user"
+            WHERE DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM outreach_orders
+            WHERE DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      q(sql`SELECT DATE(sent_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM emails_sent
             WHERE sent_at IS NOT NULL AND is_test = false
-              AND DATE(sent_at) BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
-      q(sql`SELECT DATE(reply_received_at) AS day, COUNT(*)::int AS n FROM emails_sent
+              AND DATE(sent_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      q(sql`SELECT DATE(reply_received_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM emails_sent
             WHERE reply_received_at IS NOT NULL AND is_test = false
-              AND DATE(reply_received_at) BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
-      q(sql`SELECT DATE(created_at) AS day, COUNT(*)::int AS n FROM payment_orders
+              AND DATE(reply_received_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM payment_orders
             WHERE status IN ('paid','completed')
-              AND DATE(created_at) BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+              AND DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
     ]);
 
     const map: Record<string, any> = {};
