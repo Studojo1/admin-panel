@@ -84,20 +84,29 @@ export default function UserJourneys() {
   const load = useCallback(async (d: number, e: string) => {
     setLoading(true); setError(""); setOpen(null);
     try {
-      const res = await phQuery(listHogql(d, e));
+      const [res, paidRes] = await Promise.all([
+        phQuery(listHogql(d, e)),
+        fetch(`/api/paid-emails`, { credentials: "include" }).then((r) => r.json()).catch(() => ({ emails: [] })),
+      ]);
+      const paidSet = new Set<string>((paidRes.emails ?? []).map((x: string) => (x || "").toLowerCase()));
       const cols = res.columns ?? [];
       const idx = (n: string) => cols.indexOf(n);
-      setRows((res.results ?? []).map((r: any[]) => ({
-        pid: String(r[idx("person_id")]),
-        email: r[idx("email")] || "",
-        first: r[idx("first_seen")],
-        last: r[idx("last_seen")],
-        events: +r[idx("events")] || 0,
-        qmax: +r[idx("quiz_qmax")] || 0,
-        device: r[idx("device")] || "",
-        country: r[idx("country")] || "",
-        flags: { reached: +r[idx("reached")], resume: +r[idx("resume")], quiz_started: +r[idx("quiz_started")], quiz_done: +r[idx("quiz_done")], leads: +r[idx("leads")], pay_click: +r[idx("pay_click")], checkout: +r[idx("checkout")], paid: +r[idx("paid")] },
-      })));
+      setRows((res.results ?? []).map((r: any[]) => {
+        const email = r[idx("email")] || "";
+        // Paid = authoritative DB record OR the payment_confirmed event.
+        const paid = (email && paidSet.has(email.toLowerCase())) || +r[idx("paid")] === 1 ? 1 : 0;
+        return {
+          pid: String(r[idx("person_id")]),
+          email,
+          first: r[idx("first_seen")],
+          last: r[idx("last_seen")],
+          events: +r[idx("events")] || 0,
+          qmax: +r[idx("quiz_qmax")] || 0,
+          device: r[idx("device")] || "",
+          country: r[idx("country")] || "",
+          flags: { reached: +r[idx("reached")], resume: +r[idx("resume")], quiz_started: +r[idx("quiz_started")], quiz_done: +r[idx("quiz_done")], leads: +r[idx("leads")], pay_click: +r[idx("pay_click")], checkout: +r[idx("checkout")], paid },
+        };
+      }));
     } catch (e: any) { setError(e?.message || "Failed"); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(days, env); }, [days, env, load]);
@@ -160,9 +169,14 @@ export default function UserJourneys() {
           <div className="flex justify-center py-24"><div className="h-8 w-8 animate-spin rounded-full border-[3px] border-violet-500 border-t-transparent" /></div>
         ) : (
           <div className={`overflow-hidden ${card}`}>
-            <div className="px-5 py-3 border-b-2 border-neutral-900 bg-neutral-50 flex items-baseline justify-between">
+            <div className="px-5 py-3 border-b-2 border-neutral-900 bg-neutral-50 flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-['Clash_Display'] text-lg font-bold">{filtered.length} people</h2>
-              <span className="text-xs text-neutral-500">click a row for the full timeline</span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-neutral-500">
+                {STEPS.map((s, i) => (
+                  <span key={s.key} className="inline-flex items-center gap-1"><span className={`h-2 w-2 rounded-full ${s.key === "paid" ? "bg-emerald-500" : "bg-violet-500"}`} />{i + 1} {s.label}</span>
+                ))}
+                <span className="text-neutral-400">· click a row for the full path</span>
+              </div>
             </div>
             <div className="divide-y divide-neutral-100">
               {filtered.map((r) => {
@@ -176,6 +190,16 @@ export default function UserJourneys() {
                         <p className="font-semibold text-sm text-neutral-900 truncate">{r.email || <span className="text-neutral-400 font-normal">anonymous · {r.pid.slice(0, 8)}</span>}</p>
                         <p className="text-[11px] text-neutral-500">{r.events} events · {r.device || "?"} · {r.country || "?"} · last {ago(r.last)}</p>
                       </div>
+                      {/* quiz progress */}
+                      <div className="w-28 text-center flex-shrink-0">
+                        {r.flags.quiz_done ? (
+                          <span className="inline-block rounded-full px-2 py-0.5 text-[11px] font-bold bg-violet-100 text-violet-700">Quiz done</span>
+                        ) : r.qmax > 0 || r.flags.quiz_started ? (
+                          <span className="inline-block rounded-full px-2 py-0.5 text-[11px] font-bold bg-amber-50 text-amber-700">Quiz: Q{r.qmax || 1}</span>
+                        ) : (
+                          <span className="text-[11px] text-neutral-300">no quiz</span>
+                        )}
+                      </div>
                       {/* step dots */}
                       <div className="flex items-center gap-1">
                         {STEPS.map((s, k) => (
@@ -184,7 +208,6 @@ export default function UserJourneys() {
                       </div>
                       <div className="w-48 text-right">
                         <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${paid ? "bg-emerald-100 text-emerald-700" : "bg-red-50 text-red-700"}`}>{dropLabel}</span>
-                        {r.qmax > 0 && <p className="text-[10px] text-neutral-400 mt-0.5">quiz: Q{r.qmax} reached</p>}
                       </div>
                     </button>
                     {open === r.pid && (
