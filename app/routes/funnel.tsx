@@ -24,6 +24,9 @@ const STEPS = [
   { key: "resume", label: "Uploaded resume" },
   { key: "quiz", label: "Completed profile quiz" },
   { key: "leads", label: "Saw their leads" },
+  { key: "paypage", label: "Reached payment page" },
+  { key: "paytap", label: "Tapped pay" },
+  { key: "abandoned", label: "Abandoned checkout" },
   { key: "paid", label: "Paid" },
 ] as const;
 
@@ -49,7 +52,9 @@ function macroHogql(tc: string, env: string) {
       uniqIf(person_id, event='resume_uploaded') AS resume,
       uniqIf(person_id, event='profile_quiz_completed') AS quiz,
       uniqIf(person_id, event='leads_loaded') AS leads,
-      uniqIf(person_id, event='payment_confirmed') AS paid
+      uniqIf(person_id, event='$pageview' AND properties.$pathname LIKE '/outreach/enrichment%') AS paypage,
+      uniqIf(person_id, event='pay_now_clicked') AS paytap,
+      uniqIf(person_id, event='checkout_abandoned') AS abandoned
     FROM events WHERE ${tc} ${envWhere(env)}
     GROUP BY day ORDER BY day DESC`;
 }
@@ -214,7 +219,7 @@ export default function FunnelPage() {
       // Day-by-day grid = per-day independent counts (trend).
       const macroRows: Row[] = (macro.results ?? []).map((r: any[]) => {
         const day = String(r[0]).slice(0, 10);
-        return { day, visits: +r[1] || 0, outreach: +r[2] || 0, resume: +r[3] || 0, quiz: +r[4] || 0, leads: +r[5] || 0, paid: paidMap[day] || 0, signups: signupMap[day] || 0 };
+        return { day, visits: +r[1] || 0, outreach: +r[2] || 0, resume: +r[3] || 0, quiz: +r[4] || 0, leads: +r[5] || 0, paypage: +r[6] || 0, paytap: +r[7] || 0, abandoned: +r[8] || 0, paid: paidMap[day] || 0, signups: signupMap[day] || 0 };
       });
       setRows(macroRows);
       setQuiz((quizRes.results ?? []).map((r: any[]) => ({ q: +r[0], people: +r[1] || 0 })));
