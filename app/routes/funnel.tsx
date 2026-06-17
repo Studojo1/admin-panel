@@ -156,14 +156,17 @@ export default function FunnelPage() {
         phQuery(checkoutHogql(d, e)),
         phQuery(detailHogql(d, e)),
         phQuery(timingHogql(d, e)),
-        fetch(`/api/analytics?start=${start}&end=${end}`, { credentials: "include" }).then((r) => r.json()).catch(() => ({ daily: [] })),
+        fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include" }).then((r) => r.json()).catch(() => ({ daily: [] })),
       ]);
+      // Signups AND paid come from Postgres (authoritative). PostHog's
+      // payment_confirmed was empty historically, which is why Paid showed 0.
       const signupMap: Record<string, number> = {};
-      for (const row of signupsRes?.daily ?? []) signupMap[row.day] = row.signups ?? 0;
+      const paidMap: Record<string, number> = {};
+      for (const row of signupsRes?.daily ?? []) { signupMap[row.day] = row.signups ?? 0; paidMap[row.day] = row.paid ?? 0; }
 
       const macroRows: Row[] = (macro.results ?? []).map((r: any[]) => {
         const day = String(r[0]).slice(0, 10);
-        return { day, visits: +r[1] || 0, outreach: +r[2] || 0, resume: +r[3] || 0, quiz: +r[4] || 0, leads: +r[5] || 0, paid: +r[6] || 0, signups: signupMap[day] || 0 };
+        return { day, visits: +r[1] || 0, outreach: +r[2] || 0, resume: +r[3] || 0, quiz: +r[4] || 0, leads: +r[5] || 0, paid: paidMap[day] || 0, signups: signupMap[day] || 0 };
       });
       setRows(macroRows);
       setQuiz((quizRes.results ?? []).map((r: any[]) => ({ q: +r[0], people: +r[1] || 0 })));
@@ -413,7 +416,7 @@ export default function FunnelPage() {
                 </table>
               </div>
             </div>
-            <p className="text-xs text-neutral-400 mt-4">Signups from Postgres (new accounts/day). Other steps = unique people in PostHog. "Reached outreach" = a /outreach pageview. Note: PostHog events span all environments; new quiz/checkout events appear once that build is live.</p>
+            <p className="text-xs text-neutral-400 mt-4">Signups and Paid from Postgres (authoritative). Other steps = unique people in PostHog. "Reached outreach" = a /outreach pageview. Note: PostHog events span all environments; new quiz/checkout events appear once that build is live.</p>
           </>
         )}
       </main>
