@@ -68,7 +68,7 @@ const ago = (t: string) => {
 };
 const PRESETS = [7, 14, 30] as const;
 const ENVS = [{ k: "all", l: "All" }, { k: "prod", l: "studojo.com" }, { k: "staging", l: "studojo.pro" }] as const;
-const MILESTONE_EVENTS = new Set(["resume_uploaded", "quiz_started", "profile_quiz_completed", "leads_loaded", "pay_now_clicked", "checkout_opened", "payment_confirmed", "resume_upload_failed", "checkout_abandoned", "payment_failed", "back_to_leads_clicked", "get_emails_clicked", "lead_contact_clicked"]);
+const MILESTONE_EVENTS = new Set(["resume_uploaded", "quiz_started", "profile_quiz_completed", "discovery_started", "discovery_completed", "discovery_failed", "leads_loaded", "pay_now_clicked", "checkout_opened", "payment_confirmed", "resume_upload_failed", "checkout_abandoned", "payment_failed", "back_to_leads_clicked", "get_emails_clicked", "lead_contact_clicked"]);
 
 export default function UserJourneys() {
   const [days, setDays] = useState(14);

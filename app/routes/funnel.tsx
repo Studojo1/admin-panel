@@ -84,6 +84,7 @@ function quizHogql(tc: string, env: string) {
 const DETAIL_EVENTS = [
   "resume_upload_started", "resume_uploaded", "resume_upload_failed",
   "quiz_started", "profile_quiz_completed",
+  "discovery_started", "discovery_completed", "discovery_failed",
   "lead_contact_clicked", "get_emails_clicked",
   "tier_selected", "pay_now_clicked", "coupon_applied",
   "checkout_opened", "checkout_abandoned", "payment_failed", "payment_confirmed",
