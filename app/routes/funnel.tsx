@@ -48,6 +48,27 @@ function macroHogql(days: number, env: string) {
     FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
     GROUP BY day ORDER BY day DESC`;
 }
+// True nested funnel: range-level unique people, each step requires ALL prior
+// steps, so counts are always monotonic (no more ">100% kept"). One row.
+function nestedHogql(days: number, env: string) {
+  return `
+    SELECT
+      countIf(v) AS visited,
+      countIf(v AND ro) AS reached,
+      countIf(v AND ro AND ru) AS resume,
+      countIf(v AND ro AND ru AND qz) AS quiz,
+      countIf(v AND ro AND ru AND qz AND ld) AS leads
+    FROM (
+      SELECT person_id,
+        max(event='$pageview') AS v,
+        max(event='$pageview' AND properties.$pathname LIKE '/outreach%') AS ro,
+        max(event='resume_uploaded') AS ru,
+        max(event='profile_quiz_completed') AS qz,
+        max(event='leads_loaded') AS ld
+      FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
+      GROUP BY person_id
+    )`;
+}
 function quizHogql(days: number, env: string) {
   return `
     SELECT toInt(properties.question_number) AS q, uniq(person_id) AS people
@@ -134,6 +155,8 @@ const ENVS: { key: "all" | "prod" | "staging"; label: string }[] = [
 export default function FunnelPage() {
   const [days, setDays] = useState(14);
   const [rows, setRows] = useState<Row[]>([]);
+  const [funnel, setFunnel] = useState<Record<string, number>>({ visited: 0, reached: 0, resume: 0, quiz: 0, leads: 0 });
+  const [dbTotals, setDbTotals] = useState<{ signups: number; paid: number }>({ signups: 0, paid: 0 });
   const [quiz, setQuiz] = useState<{ q: number; people: number }[]>([]);
   const [checkout, setCheckout] = useState<Record<string, number>>({});
   const [detail, setDetail] = useState<{ event: string; people: number; total: number }[]>([]);
@@ -150,8 +173,9 @@ export default function FunnelPage() {
     try {
       const end = isoDate(new Date());
       const start = isoDate(new Date(Date.now() - d * 86400000));
-      const [macro, quizRes, coRes, detailRes, timingRes, signupsRes] = await Promise.all([
+      const [macro, nestedRes, quizRes, coRes, detailRes, timingRes, signupsRes] = await Promise.all([
         phQuery(macroHogql(d, e)),
+        phQuery(nestedHogql(d, e)),
         phQuery(quizHogql(d, e)),
         phQuery(checkoutHogql(d, e)),
         phQuery(detailHogql(d, e)),
@@ -162,8 +186,18 @@ export default function FunnelPage() {
       // payment_confirmed was empty historically, which is why Paid showed 0.
       const signupMap: Record<string, number> = {};
       const paidMap: Record<string, number> = {};
-      for (const row of signupsRes?.daily ?? []) { signupMap[row.day] = row.signups ?? 0; paidMap[row.day] = row.paid ?? 0; }
+      let signupTot = 0; let paidTot = 0;
+      for (const row of signupsRes?.daily ?? []) {
+        signupMap[row.day] = row.signups ?? 0; paidMap[row.day] = row.paid ?? 0;
+        signupTot += row.signups ?? 0; paidTot += row.paid ?? 0;
+      }
+      setDbTotals({ signups: signupTot, paid: paidTot });
 
+      // Top funnel = nested range-level unique people (monotonic).
+      const nr = nestedRes.results?.[0] ?? [];
+      setFunnel({ visited: +nr[0] || 0, reached: +nr[1] || 0, resume: +nr[2] || 0, quiz: +nr[3] || 0, leads: +nr[4] || 0 });
+
+      // Day-by-day grid = per-day independent counts (trend).
       const macroRows: Row[] = (macro.results ?? []).map((r: any[]) => {
         const day = String(r[0]).slice(0, 10);
         return { day, visits: +r[1] || 0, outreach: +r[2] || 0, resume: +r[3] || 0, quiz: +r[4] || 0, leads: +r[5] || 0, paid: paidMap[day] || 0, signups: signupMap[day] || 0 };
@@ -196,8 +230,15 @@ export default function FunnelPage() {
     return () => { cancelled = true; };
   }, [dim, days, env]);
 
-  const totals = STEPS.reduce((a, s) => { a[s.key] = rows.reduce((sum, r) => sum + (r[s.key] || 0), 0); return a; }, {} as Record<string, number>);
-  const topTotal = totals["visits"] || 0;
+  // Strict outreach funnel (nested) + acquisition context. Paid from DB.
+  const visited = funnel.visited || 0;
+  const FUNNEL = [
+    { label: "Reached outreach", val: funnel.reached || 0, prev: visited },
+    { label: "Uploaded resume", val: funnel.resume || 0, prev: funnel.reached || 0 },
+    { label: "Completed profile quiz", val: funnel.quiz || 0, prev: funnel.resume || 0 },
+    { label: "Saw their leads", val: funnel.leads || 0, prev: funnel.quiz || 0 },
+    { label: "Paid", val: dbTotals.paid || 0, prev: funnel.leads || 0 },
+  ];
   const quizMax = Math.max(1, ...quiz.map((x) => x.people));
 
   const card = "rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]";
@@ -233,23 +274,37 @@ export default function FunnelPage() {
             <div className={`mb-8 p-5 md:p-6 ${card}`}>
               <div className="flex items-baseline justify-between mb-4">
                 <h2 className="font-['Clash_Display'] text-xl font-bold">Last {days} days</h2>
-                <span className="text-xs text-neutral-500">unique people per step · signups from DB, rest from PostHog</span>
+                <span className="text-xs text-neutral-500">nested funnel · unique people who completed every prior step</span>
               </div>
+
+              {/* Acquisition (top of funnel, not strictly sequential) */}
+              <div className="grid grid-cols-2 gap-4 mb-5">
+                <div className="rounded-xl border-2 border-neutral-900 bg-neutral-50 p-4">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">Website visits</p>
+                  <p className="font-['Clash_Display'] text-3xl font-bold text-neutral-900 mt-1">{fmt(visited)}</p>
+                </div>
+                <div className="rounded-xl border-2 border-neutral-900 bg-neutral-50 p-4">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">Signed up</p>
+                  <p className="font-['Clash_Display'] text-3xl font-bold text-neutral-900 mt-1">{fmt(dbTotals.signups)} <span className="text-base font-semibold text-neutral-400">· {pct(dbTotals.signups, visited)}% of visits</span></p>
+                </div>
+              </div>
+
+              {/* Strict outreach funnel */}
+              <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-500 mb-2">Outreach funnel</p>
               <div className="space-y-3">
-                {STEPS.map((s, i) => {
-                  const val = totals[s.key] || 0;
-                  const prev = i === 0 ? val : totals[STEPS[i - 1].key] || 0;
-                  const ofTop = pct(val, topTotal);
-                  const fromPrev = pct(val, prev);
-                  const drop = i === 0 ? 0 : 100 - fromPrev;
+                {FUNNEL.map((s, i) => {
+                  const ofVisits = pct(s.val, visited);
+                  const ofReached = pct(s.val, FUNNEL[0].val);
+                  const kept = Math.min(100, pct(s.val, s.prev));
+                  const drop = 100 - kept;
                   return (
-                    <div key={s.key} className="flex items-center gap-4">
+                    <div key={s.label} className="flex items-center gap-4">
                       <div className="w-44 flex-shrink-0 text-sm font-semibold">{i + 1}. {s.label}</div>
                       <div className="flex-1 h-8 rounded-lg bg-neutral-100 overflow-hidden border border-neutral-200">
-                        <div className="h-full bg-violet-500 flex items-center px-2" style={{ width: `${Math.max(ofTop, 3)}%` }}><span className="text-xs font-bold text-white whitespace-nowrap">{fmt(val)}</span></div>
+                        <div className={`h-full flex items-center px-2 ${s.label === "Paid" ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${Math.max(ofReached, 3)}%` }}><span className="text-xs font-bold text-white whitespace-nowrap">{fmt(s.val)}</span></div>
                       </div>
-                      <div className="w-14 text-right text-sm font-bold">{ofTop}%</div>
-                      <div className={`w-32 text-right text-xs font-semibold ${i === 0 ? "text-neutral-400" : drop > 60 ? "text-red-600" : drop > 30 ? "text-amber-600" : "text-emerald-600"}`}>{i === 0 ? "—" : `${fromPrev}% kept · ${drop}% drop`}</div>
+                      <div className="w-16 text-right text-sm font-bold">{ofVisits}%<span className="block text-[10px] font-normal text-neutral-400">of visits</span></div>
+                      <div className={`w-32 text-right text-xs font-semibold ${i === 0 ? "text-neutral-400" : drop > 60 ? "text-red-600" : drop > 30 ? "text-amber-600" : "text-emerald-600"}`}>{i === 0 ? "base" : `${kept}% kept · ${drop}% drop`}</div>
                     </div>
                   );
                 })}
