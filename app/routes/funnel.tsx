@@ -68,14 +68,18 @@ function nestedHogql(tc: string, env: string) {
       countIf(v AND ro) AS reached,
       countIf(v AND ro AND ru) AS resume,
       countIf(v AND ro AND ru AND qz) AS quiz,
-      countIf(v AND ro AND ru AND qz AND ld) AS leads
+      countIf(v AND ro AND ru AND qz AND ld) AS leads,
+      countIf(v AND ro AND ru AND qz AND ld AND pp) AS paypage,
+      countIf(v AND ro AND ru AND qz AND ld AND pp AND pt) AS paytap
     FROM (
       SELECT person_id,
         max(event='$pageview') AS v,
         max(event='$pageview' AND properties.$pathname LIKE '/outreach%') AS ro,
         max(event='resume_uploaded') AS ru,
         max(event='profile_quiz_completed') AS qz,
-        max(event='leads_loaded') AS ld
+        max(event='leads_loaded') AS ld,
+        max(event='$pageview' AND properties.$pathname LIKE '/outreach/enrichment%') AS pp,
+        max(event='pay_now_clicked') AS pt
       FROM events WHERE ${tc} ${envWhere(env)}
       GROUP BY person_id
     )`;
@@ -216,7 +220,7 @@ export default function FunnelPage() {
 
       // Top funnel = nested range-level unique people (monotonic).
       const nr = nestedRes.results?.[0] ?? [];
-      setFunnel({ visited: +nr[0] || 0, reached: +nr[1] || 0, resume: +nr[2] || 0, quiz: +nr[3] || 0, leads: +nr[4] || 0 });
+      setFunnel({ visited: +nr[0] || 0, reached: +nr[1] || 0, resume: +nr[2] || 0, quiz: +nr[3] || 0, leads: +nr[4] || 0, paypage: +nr[5] || 0, paytap: +nr[6] || 0 });
 
       // Day-by-day grid = per-day independent counts (trend).
       const macroRows: Row[] = (macro.results ?? []).map((r: any[]) => {
@@ -257,12 +261,19 @@ export default function FunnelPage() {
 
   // Strict outreach funnel (nested) + acquisition context. Paid from DB.
   const visited = funnel.visited || 0;
+  // Full journey, logically ordered & monotonic:
+  //   visits → reached /outreach page → signed up → resume → quiz → leads → payment page → tapped pay → paid
+  // "Reached outreach" is a /outreach pageview (anonymous incl.), so it sits ABOVE signup.
+  // Signups & Paid are authoritative from Postgres; the rest are unique people from PostHog.
   const FUNNEL = [
-    { label: "Reached outreach", val: funnel.reached || 0, prev: visited },
-    { label: "Uploaded resume", val: funnel.resume || 0, prev: funnel.reached || 0 },
+    { label: "Reached outreach page", val: funnel.reached || 0, prev: visited, note: "viewed /outreach" },
+    { label: "Signed up", val: dbTotals.signups || 0, prev: funnel.reached || 0, note: "DB" },
+    { label: "Uploaded resume", val: funnel.resume || 0, prev: dbTotals.signups || 0 },
     { label: "Completed profile quiz", val: funnel.quiz || 0, prev: funnel.resume || 0 },
     { label: "Saw their leads", val: funnel.leads || 0, prev: funnel.quiz || 0 },
-    { label: "Paid", val: dbTotals.paid || 0, prev: funnel.leads || 0 },
+    { label: "Reached payment page", val: funnel.paypage || 0, prev: funnel.leads || 0 },
+    { label: "Tapped pay", val: funnel.paytap || 0, prev: funnel.paypage || 0 },
+    { label: "Paid", val: dbTotals.paid || 0, prev: funnel.paytap || 0, note: "DB" },
   ];
   const quizMax = Math.max(1, ...quiz.map((x) => x.people));
 
@@ -324,7 +335,7 @@ export default function FunnelPage() {
                   const drop = 100 - kept;
                   return (
                     <div key={s.label} className="flex items-center gap-4">
-                      <div className="w-44 flex-shrink-0 text-sm font-semibold">{i + 1}. {s.label}</div>
+                      <div className="w-44 flex-shrink-0 text-sm font-semibold">{i + 1}. {s.label}{(s as any).note && <span className="block text-[10px] font-normal text-neutral-400">{(s as any).note}</span>}</div>
                       <div className="flex-1 h-8 rounded-lg bg-neutral-100 overflow-hidden border border-neutral-200">
                         <div className={`h-full flex items-center px-2 ${s.label === "Paid" ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${Math.max(ofReached, 3)}%` }}><span className="text-xs font-bold text-white whitespace-nowrap">{fmt(s.val)}</span></div>
                       </div>
