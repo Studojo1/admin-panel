@@ -7,6 +7,7 @@
  */
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import type { Route } from "./+types/api.overview";
 
 const DEFAULT_FX = 94; // 1 USD = ₹94 (matches MSL dashboard)
@@ -34,7 +35,13 @@ function b2bSum(start: string, end: string): number {
 const cents = (n: unknown) => Number(n ?? 0) / 100;
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const admin = await requireAdmin(request);
+  if (!admin) return Response.json({ error: "Unauthorized" }, { status: 401 });
   try {
+    const url = new URL(request.url);
+    const cStart = url.searchParams.get("start") ?? "";
+    const cEnd = url.searchParams.get("end") ?? "";
+    const hasCustom = /^\d{4}-\d{2}-\d{2}$/.test(cStart) && /^\d{4}-\d{2}-\d{2}$/.test(cEnd) && cStart <= cEnd;
     const today = istToday();
     const yesterday = shift(today, -1);
     const d7 = shift(today, -6);
@@ -99,7 +106,15 @@ export async function loader({ request }: Route.LoaderArgs) {
       last7:    { rev: triple(r7[0],   b2bSum(d7, today)),            signups: num(s7),    outreach: num(o7) },
       last30:   { rev: triple(r30[0],  b2bSum(d30, today)),           signups: num(s30),   outreach: num(o30) },
       allTime:  { rev: triple(rAll[0], Object.values(B2B_BY_DATE).reduce((s, v) => s + v, 0)), signups: num(sAll), outreach: num(oAll) },
-    };
+    } as Record<string, any>;
+
+    // Optional custom date range (IST)
+    if (hasCustom) {
+      const [cRev, cSig, cOut] = await Promise.all([
+        revRange(cStart, cEnd), sigRange(cStart, cEnd), outreachRange(cStart, cEnd),
+      ]);
+      periods.custom = { rev: triple(cRev[0], b2bSum(cStart, cEnd)), signups: num(cSig), outreach: num(cOut), start: cStart, end: cEnd };
+    }
 
     // 30-day daily series for the trend chart
     const dayStr = (d: any) => String(d).split("T")[0];

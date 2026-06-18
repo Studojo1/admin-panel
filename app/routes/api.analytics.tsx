@@ -9,8 +9,11 @@
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 import type { Route } from "./+types/api.analytics";
+import { requireAdmin } from "~/lib/auth-helper.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const admin = await requireAdmin(request);
+  if (!admin) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const url = new URL(request.url);
   const start = url.searchParams.get("start");
   const end = url.searchParams.get("end");

@@ -19,12 +19,14 @@ type Overview = {
   daily: { day: string; revenue: number; signups: number; orders: number }[];
 };
 
-const PERIODS: { key: keyof Overview["periods"]; label: string }[] = [
+type PeriodKey = keyof Overview["periods"] | "custom";
+const PERIODS: { key: PeriodKey; label: string }[] = [
+  { key: "allTime", label: "Lifetime" },
   { key: "today", label: "Today" },
   { key: "yesterday", label: "Yesterday" },
   { key: "last7", label: "7 days" },
   { key: "last30", label: "30 days" },
-  { key: "allTime", label: "All time" },
+  { key: "custom", label: "Custom" },
 ];
 
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
@@ -34,17 +36,29 @@ export default function Dashboard() {
   const { isAuthorized } = useAdminGuard();
   const [data, setData] = useState<Overview | null>(null);
   const [err, setErr] = useState("");
-  const [period, setPeriod] = useState<keyof Overview["periods"]>("yesterday");
+  const [period, setPeriod] = useState<PeriodKey>("allTime");
+  const todayIso = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const [cStart, setCStart] = useState(todayIso);
+  const [cEnd, setCEnd] = useState(todayIso);
+
+  const load = (start?: string, end?: string) => {
+    const qs = start && end ? `?start=${start}&end=${end}` : "";
+    fetch(`/api/overview${qs}`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => (d.error ? setErr(d.error) : (setData(d), setErr(""))))
+      .catch((e) => setErr(e.message));
+  };
 
   useEffect(() => {
     if (!isAuthorized) return;
-    fetch("/api/overview")
-      .then((r) => r.json())
-      .then((d) => (d.error ? setErr(d.error) : setData(d)))
-      .catch((e) => setErr(e.message));
+    load();
   }, [isAuthorized]);
 
-  const p = data?.periods[period];
+  const applyCustom = () => {
+    if (cStart && cEnd && cStart <= cEnd) load(cStart, cEnd);
+  };
+
+  const p = period === "custom" ? (data?.periods as any)?.custom : data?.periods[period as keyof Overview["periods"]];
 
   const trend = useMemo(() => {
     if (!data) return null;
@@ -93,10 +107,35 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {period === "custom" && (
+          <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border-2 border-neutral-900 bg-white p-4 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]">
+            <div>
+              <label className="block text-xs font-semibold text-neutral-500">From</label>
+              <input type="date" value={cStart} max={cEnd} onChange={(e) => setCStart(e.target.value)}
+                className="mt-1 rounded-lg border-2 border-neutral-300 px-3 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-neutral-500">To</label>
+              <input type="date" value={cEnd} min={cStart} max={todayIso} onChange={(e) => setCEnd(e.target.value)}
+                className="mt-1 rounded-lg border-2 border-neutral-300 px-3 py-1.5 text-sm" />
+            </div>
+            <button onClick={applyCustom}
+              className="rounded-lg border-2 border-neutral-900 bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]">
+              Apply
+            </button>
+            {p && (p as any).start && (
+              <span className="text-xs text-neutral-500">{(p as any).start} → {(p as any).end}</span>
+            )}
+          </div>
+        )}
+
         {err && (
           <div className="mt-6 rounded-xl border-2 border-red-500 bg-red-50 p-4 text-sm text-red-700">{err}</div>
         )}
         {!data && !err && <div className="mt-10 text-center text-neutral-400">Loading…</div>}
+        {period === "custom" && !p && !err && (
+          <div className="mt-6 text-sm text-neutral-500">Pick a date range and hit Apply.</div>
+        )}
 
         {p && (
           <>

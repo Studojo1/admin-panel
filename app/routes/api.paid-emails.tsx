@@ -8,8 +8,11 @@
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 import type { Route } from "./+types/api.paid-emails";
+import { requireAdmin } from "~/lib/auth-helper.server";
 
-export async function loader(_: Route.LoaderArgs) {
+export async function loader({ request }: Route.LoaderArgs) {
+  const admin = await requireAdmin(request);
+  if (!admin) return Response.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const res = await db.execute(sql`
       SELECT DISTINCT lower(u.email) AS email
