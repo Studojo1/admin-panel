@@ -8,8 +8,8 @@ import { Toaster, toast as toast$1 } from "sonner";
 import { useState, useRef, useEffect, createContext, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { FiX } from "react-icons/fi";
-import { Chart, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend, Filler } from "chart.js";
-import { Bar, Doughnut, Line } from "react-chartjs-2";
+import { Chart, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler, ArcElement } from "chart.js";
+import { Line, Bar, Doughnut } from "react-chartjs-2";
 import { lastLoginMethodClient, jwtClient, adminClient, phoneNumberClient, twoFactorClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -1199,785 +1199,242 @@ function useAdminGuard() {
   }, [session, isPending]);
   return { isAuthorized, isPending };
 }
-Chart.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend, Filler);
-const floatY = [0, -24, -12, -30, 0];
-const floatX = [0, 12, -18, 8, 0];
-const floatRotate = [0, 6, -8, 4, 0];
-const BACKGROUND_SHAPES = [{
-  className: "right-0 top-20 h-32 w-32 rounded-full md:h-40 md:w-40 bg-yellow-500",
-  shadow: "6px_6px",
-  duration: 18,
-  delay: 0
+Chart.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
+const PERIODS = [{
+  key: "allTime",
+  label: "Lifetime"
 }, {
-  className: "left-0 top-1/3 h-24 w-24 md:h-32 md:w-32 bg-emerald-300",
-  shadow: "4px_4px",
-  rotate: 12,
-  duration: 22,
-  delay: 1
+  key: "today",
+  label: "Today"
 }, {
-  className: "bottom-20 right-1/4 h-20 w-20 md:h-24 md:w-24 bg-violet-500",
-  shadow: "4px_4px",
-  duration: 20,
-  delay: 2
+  key: "yesterday",
+  label: "Yesterday"
 }, {
-  className: "bottom-1/4 left-0 h-16 w-16 md:h-28 md:w-28 bg-pink-300",
-  shadow: "4px_4px",
-  rotate: 45,
-  duration: 24,
-  delay: 0.5
+  key: "last7",
+  label: "7 days"
 }, {
-  className: "top-1/2 right-1/3 h-14 w-14 md:h-20 md:w-20 bg-amber-400",
-  shadow: "3px_3px",
-  rotate: -12,
-  duration: 19,
-  delay: 1.5
+  key: "last30",
+  label: "30 days"
 }, {
-  className: "top-12 left-1/4 h-16 w-16 md:h-20 md:w-20 rounded-full bg-teal-300",
-  shadow: "4px_4px",
-  duration: 21,
-  delay: 0.8
-}, {
-  className: "bottom-1/3 right-0 h-20 w-20 md:h-24 md:w-24 bg-rose-300",
-  shadow: "4px_4px",
-  rotate: -20,
-  duration: 23,
-  delay: 1.2
-}, {
-  className: "top-1/4 right-1/5 h-12 w-12 md:h-16 md:w-16 rounded-2xl bg-indigo-300",
-  shadow: "3px_3px",
-  rotate: 15,
-  duration: 17,
-  delay: 2.5
-}, {
-  className: "bottom-32 left-1/3 h-14 w-14 md:h-18 md:w-18 rounded-full bg-lime-300",
-  shadow: "3px_3px",
-  duration: 25,
-  delay: 0.3
-}, {
-  className: "top-2/3 left-1/5 h-20 w-20 md:h-28 md:w-28 bg-orange-200",
-  shadow: "4px_4px",
-  rotate: -15,
-  duration: 20,
-  delay: 1.8
-}, {
-  className: "top-16 right-1/4 h-10 w-10 md:h-14 md:w-14 rounded-2xl bg-cyan-300",
-  shadow: "3px_3px",
-  rotate: 25,
-  duration: 26,
-  delay: 0.6
-}, {
-  className: "bottom-12 left-1/2 h-12 w-12 md:h-16 md:w-16 bg-fuchsia-200",
-  shadow: "3px_3px",
-  rotate: -8,
-  duration: 22,
-  delay: 2.2
+  key: "custom",
+  label: "Custom"
 }];
-function FloatShape({
-  className,
-  shadow,
-  rotate = 0,
-  duration,
-  delay
-}) {
-  const shadowClass = shadow === "6px_6px" ? "shadow-[6px_6px_0px_0px_rgba(25,26,35,1)]" : shadow === "4px_4px" ? "shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]" : "shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]";
-  return /* @__PURE__ */ jsx(motion.div, {
-    className: `absolute rounded-2xl border-2 border-neutral-900 opacity-40 md:opacity-50 ${shadowClass} ${className}`,
-    "aria-hidden": true,
-    animate: {
-      y: floatY,
-      x: floatX,
-      rotate: rotate ? floatRotate.map((r) => rotate + r) : floatRotate
-    },
-    transition: {
-      repeat: Infinity,
-      repeatType: "reverse",
-      duration,
-      delay
-    }
-  });
-}
-function formatCurrency$2(paise) {
-  return `₹${(paise / 100).toLocaleString("en-IN")}`;
-}
-function formatMonth$1(monthStr) {
-  const [year, month] = monthStr.split("-");
-  const date = new Date(parseInt(year), parseInt(month) - 1);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    year: "numeric"
-  });
-}
-const chartOptions$1 = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: {
-    legend: {
-      display: false
-    },
-    tooltip: {
-      backgroundColor: "rgba(0, 0, 0, 0.8)",
-      padding: 12,
-      titleFont: {
-        family: "'Satoshi', sans-serif",
-        size: 14,
-        weight: "bold"
-      },
-      bodyFont: {
-        family: "'Satoshi', sans-serif",
-        size: 13
-      },
-      borderColor: "#171717",
-      borderWidth: 2,
-      cornerRadius: 8,
-      displayColors: true
-    }
-  },
-  scales: {
-    x: {
-      grid: {
-        display: false
-      },
-      ticks: {
-        font: {
-          family: "'Satoshi', sans-serif",
-          size: 11
-        },
-        color: "#6b7280"
-      },
-      border: {
-        color: "#e5e7eb",
-        width: 1
-      }
-    },
-    y: {
-      grid: {
-        color: "#e5e7eb",
-        lineWidth: 1
-      },
-      ticks: {
-        font: {
-          family: "'Satoshi', sans-serif",
-          size: 11
-        },
-        color: "#6b7280"
-      },
-      border: {
-        color: "#e5e7eb",
-        width: 1
-      }
-    }
-  }
-};
-function meta$l({}) {
-  return [{
-    title: "Admin Dashboard – Studojo"
-  }, {
-    name: "description",
-    content: "Admin dashboard for managing Studojo"
-  }];
-}
+const inr = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
+const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
 const dashboard = UNSAFE_withComponentProps(function Dashboard() {
   const {
-    isAuthorized,
-    isPending
+    isAuthorized
   } = useAdminGuard();
-  const [stats, setStats] = useState(null);
-  const [outreach2, setOutreach] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [period, setPeriod] = useState("allTime");
+  const todayIso = new Date(Date.now() + 5.5 * 3600 * 1e3).toISOString().slice(0, 10);
+  const [cStart, setCStart] = useState(todayIso);
+  const [cEnd, setCEnd] = useState(todayIso);
+  const load = async (start, end) => {
+    const qs = start && end ? `?start=${start}&end=${end}` : "";
+    const token = await getToken();
+    fetch(`/api/overview${qs}`, {
+      credentials: "include",
+      headers: token ? {
+        Authorization: `Bearer ${token}`
+      } : {}
+    }).then((r) => r.json()).then((d) => d.error ? setErr(d.error) : (setData(d), setErr(""))).catch((e) => setErr(e.message));
+  };
   useEffect(() => {
-    if (isAuthorized) {
-      loadStats();
-    }
+    if (!isAuthorized) return;
+    load();
   }, [isAuthorized]);
-  if (isPending || isAuthorized === null) {
-    return /* @__PURE__ */ jsx("div", {
-      className: "flex min-h-screen items-center justify-center bg-gray-50",
-      children: /* @__PURE__ */ jsxs("div", {
-        className: "text-center",
-        children: [/* @__PURE__ */ jsx("div", {
-          className: "mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent"
-        }), /* @__PURE__ */ jsx("p", {
-          className: "font-['Satoshi'] text-sm text-gray-600",
-          children: "Loading..."
-        })]
-      })
-    });
-  }
-  if (!isAuthorized) {
-    return null;
-  }
-  const loadStats = async () => {
-    try {
-      setLoading(true);
-      const [data, outreachData] = await Promise.all([getDashboardStats(), getOutreachOverview().catch(() => null)]);
-      setStats(data);
-      setOutreach(outreachData);
-    } catch (error) {
-      toast$1.error(error.message || "Failed to load dashboard stats");
-    } finally {
-      setLoading(false);
-    }
+  const applyCustom = () => {
+    if (cStart && cEnd && cStart <= cEnd) load(cStart, cEnd);
   };
-  const handleDownload = async (jobId) => {
-    try {
-      const baseUrl = getControlPlaneUrl();
-      const token = await getToken();
-      const response = await fetch(`${baseUrl}/v1/admin/jobs/${jobId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      if (!response.ok) throw new Error("Failed to fetch job");
-      const job = await response.json();
-      if (job.result) {
-        if (job.result.download_url) {
-          const a = document.createElement("a");
-          a.href = job.result.download_url;
-          a.download = `assignment-${jobId}.docx`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          toast$1.success("Download started");
-        } else {
-          const blob = new Blob([JSON.stringify(job.result, null, 2)], {
-            type: "application/json"
-          });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `assignment-${jobId}.json`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-          toast$1.success("Download started (JSON debug)");
-        }
-      } else {
-        toast$1.error("No result available for this assignment");
-      }
-    } catch (error) {
-      toast$1.error(error.message || "Failed to download assignment");
-    }
-  };
-  if (!stats) {
-    return null;
-  }
-  const monthlyLabels = stats.monthly_metrics.map((m) => formatMonth$1(m.month));
-  const usersData = stats.monthly_metrics.map((m) => m.users_count);
-  const ordersData = stats.monthly_metrics.map((m) => m.orders_count);
-  const revenueData = stats.monthly_metrics.map((m) => Math.round(m.revenue / 100));
-  const revenueBreakdownData = {
-    labels: ["Assignments", "Careers", "Outreach"],
-    datasets: [{
-      data: [Math.round(stats.revenue_breakdown.assignments / 100), Math.round(stats.revenue_breakdown.careers / 100), Math.round(stats.revenue_breakdown.outreach / 100 || 0)],
-      backgroundColor: ["#8b5cf6", "#f59e0b", "#10b981"],
-      borderColor: "#171717",
-      borderWidth: 2
-    }]
-  };
-  const revenueTrendData = {
-    labels: monthlyLabels,
-    datasets: [{
-      label: "Revenue (₹)",
-      data: revenueData,
-      borderColor: "#8b5cf6",
-      backgroundColor: "rgba(139, 92, 246, 0.1)",
-      borderWidth: 3,
-      fill: true,
-      tension: 0.4,
-      pointRadius: 4,
-      pointHoverRadius: 6,
-      pointBackgroundColor: "#8b5cf6",
-      pointBorderColor: "#171717",
-      pointBorderWidth: 2
-    }]
-  };
-  return /* @__PURE__ */ jsxs(Fragment, {
-    children: [/* @__PURE__ */ jsx(AdminHeader, {}), /* @__PURE__ */ jsxs("main", {
-      className: "relative min-h-screen overflow-hidden bg-purple-50",
-      children: [/* @__PURE__ */ jsx("div", {
-        className: "absolute inset-0 overflow-hidden pointer-events-none",
-        "aria-hidden": "true",
-        children: BACKGROUND_SHAPES.map((shape, i) => /* @__PURE__ */ jsx(FloatShape, {
-          ...shape
-        }, i))
-      }), /* @__PURE__ */ jsxs("div", {
-        className: "relative mx-auto max-w-[var(--section-max-width)] px-4 py-8 md:px-8 md:py-12",
-        children: [/* @__PURE__ */ jsxs(motion.div, {
-          initial: {
-            opacity: 0,
-            y: 20
-          },
-          animate: {
-            opacity: 1,
-            y: 0
-          },
-          transition: {
-            duration: 0.5
-          },
-          className: "relative z-10",
+  const p = period === "custom" ? data?.periods?.custom : data?.periods[period];
+  const trend = useMemo(() => {
+    if (!data) return null;
+    return {
+      labels: data.daily.map((d) => d.day.slice(5)),
+      datasets: [{
+        label: "Revenue (₹)",
+        data: data.daily.map((d) => d.revenue),
+        yAxisID: "y",
+        borderColor: "#7c3aed",
+        backgroundColor: "rgba(124,58,237,0.12)",
+        fill: true,
+        tension: 0.35,
+        pointRadius: 0
+      }, {
+        label: "Signups",
+        data: data.daily.map((d) => d.signups),
+        yAxisID: "y1",
+        borderColor: "#10b981",
+        backgroundColor: "transparent",
+        borderDash: [5, 4],
+        tension: 0.35,
+        pointRadius: 0
+      }]
+    };
+  }, [data]);
+  if (!isAuthorized) return null;
+  return /* @__PURE__ */ jsxs("div", {
+    className: "min-h-screen bg-neutral-50",
+    children: [/* @__PURE__ */ jsx(AdminHeader, {}), /* @__PURE__ */ jsxs("div", {
+      className: "mx-auto max-w-7xl px-4 py-8 md:px-8",
+      children: [/* @__PURE__ */ jsxs("div", {
+        className: "flex flex-col gap-4 md:flex-row md:items-end md:justify-between",
+        children: [/* @__PURE__ */ jsxs("div", {
           children: [/* @__PURE__ */ jsx("h1", {
-            className: "font-['Clash_Display'] text-3xl font-medium leading-tight tracking-tight text-neutral-950 md:text-4xl",
-            children: "Admin Dashboard"
-          }), /* @__PURE__ */ jsx("p", {
-            className: "mt-4 font-['Satoshi'] text-base font-normal leading-6 text-gray-600",
-            children: "Comprehensive analytics and management for Studojo"
+            className: "font-['Clash_Display'] text-3xl font-medium tracking-tight text-neutral-950 md:text-4xl",
+            children: "Overview"
+          }), /* @__PURE__ */ jsxs("p", {
+            className: "mt-1 text-sm text-neutral-500",
+            children: ["Revenue and signups, IST · matches the MSL dashboard", data ? ` · FX ₹${data.fxRate}/$` : ""]
           })]
-        }), loading ? /* @__PURE__ */ jsx("div", {
-          className: "relative z-10 mt-12 flex items-center justify-center py-20",
-          children: /* @__PURE__ */ jsxs("div", {
-            className: "text-center",
+        }), /* @__PURE__ */ jsx("div", {
+          className: "inline-flex flex-wrap gap-1 rounded-xl border-2 border-neutral-900 bg-white p-1 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]",
+          children: PERIODS.map((pp) => /* @__PURE__ */ jsx("button", {
+            onClick: () => setPeriod(pp.key),
+            className: `rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${period === pp.key ? "bg-purple-500 text-white" : "text-neutral-600 hover:bg-neutral-100"}`,
+            children: pp.label
+          }, pp.key))
+        })]
+      }), period === "custom" && /* @__PURE__ */ jsxs("div", {
+        className: "mt-4 flex flex-wrap items-end gap-3 rounded-xl border-2 border-neutral-900 bg-white p-4 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]",
+        children: [/* @__PURE__ */ jsxs("div", {
+          children: [/* @__PURE__ */ jsx("label", {
+            className: "block text-xs font-semibold text-neutral-500",
+            children: "From"
+          }), /* @__PURE__ */ jsx("input", {
+            type: "date",
+            value: cStart,
+            max: cEnd,
+            onChange: (e) => setCStart(e.target.value),
+            className: "mt-1 rounded-lg border-2 border-neutral-300 px-3 py-1.5 text-sm"
+          })]
+        }), /* @__PURE__ */ jsxs("div", {
+          children: [/* @__PURE__ */ jsx("label", {
+            className: "block text-xs font-semibold text-neutral-500",
+            children: "To"
+          }), /* @__PURE__ */ jsx("input", {
+            type: "date",
+            value: cEnd,
+            min: cStart,
+            max: todayIso,
+            onChange: (e) => setCEnd(e.target.value),
+            className: "mt-1 rounded-lg border-2 border-neutral-300 px-3 py-1.5 text-sm"
+          })]
+        }), /* @__PURE__ */ jsx("button", {
+          onClick: applyCustom,
+          className: "rounded-lg border-2 border-neutral-900 bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]",
+          children: "Apply"
+        }), p && p.start && /* @__PURE__ */ jsxs("span", {
+          className: "text-xs text-neutral-500",
+          children: [p.start, " → ", p.end]
+        })]
+      }), err && /* @__PURE__ */ jsx("div", {
+        className: "mt-6 rounded-xl border-2 border-red-500 bg-red-50 p-4 text-sm text-red-700",
+        children: err
+      }), !data && !err && /* @__PURE__ */ jsx("div", {
+        className: "mt-10 text-center text-neutral-400",
+        children: "Loading…"
+      }), period === "custom" && !p && !err && /* @__PURE__ */ jsx("div", {
+        className: "mt-6 text-sm text-neutral-500",
+        children: "Pick a date range and hit Apply."
+      }), p && /* @__PURE__ */ jsxs(Fragment, {
+        children: [/* @__PURE__ */ jsxs("div", {
+          className: "mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4",
+          children: [/* @__PURE__ */ jsxs("div", {
+            className: "rounded-2xl border-2 border-neutral-900 bg-purple-500 p-6 text-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]",
             children: [/* @__PURE__ */ jsx("div", {
-              className: "mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent"
-            }), /* @__PURE__ */ jsx("p", {
-              className: "font-['Satoshi'] text-sm text-gray-600",
-              children: "Loading stats..."
-            })]
-          })
-        }) : /* @__PURE__ */ jsxs("div", {
-          className: "relative z-10 space-y-12",
-          children: [/* @__PURE__ */ jsxs(motion.div, {
-            initial: {
-              opacity: 0,
-              y: 20
-            },
-            animate: {
-              opacity: 1,
-              y: 0
-            },
-            transition: {
-              duration: 0.5,
-              delay: 0.1
-            },
-            className: "mt-12 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4",
-            children: [/* @__PURE__ */ jsx(StatCard$2, {
-              value: stats.total_users,
-              label: "Total Users",
-              color: "purple",
-              delay: 0
-            }), /* @__PURE__ */ jsx(StatCard$2, {
-              value: outreach2?.paid_orders ?? 0,
-              label: "Paid Outreach Orders",
-              color: "green",
-              delay: 0.1
-            }), /* @__PURE__ */ jsx(StatCard$2, {
-              value: stats.total_careers,
-              label: "Career Applications",
-              color: "orange",
-              delay: 0.2
-            }), /* @__PURE__ */ jsx(StatCard$2, {
-              value: formatCurrency$2(stats.revenue_breakdown.total),
-              label: "Total Revenue",
-              color: "pink",
-              delay: 0.3
-            })]
-          }), stats.monthly_metrics && stats.monthly_metrics.length > 0 && /* @__PURE__ */ jsxs(motion.div, {
-            initial: {
-              opacity: 0,
-              y: 20
-            },
-            animate: {
-              opacity: 1,
-              y: 0
-            },
-            transition: {
-              duration: 0.5,
-              delay: 0.2
-            },
-            className: "rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] md:p-8",
-            children: [/* @__PURE__ */ jsx("h2", {
-              className: "mb-6 font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl",
-              children: "Monthly Metrics (Last 12 Months)"
-            }), /* @__PURE__ */ jsxs("div", {
-              className: "grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-4",
-              children: [/* @__PURE__ */ jsxs("div", {
-                children: [/* @__PURE__ */ jsx("div", {
-                  className: "mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600",
-                  children: "New Users"
-                }), /* @__PURE__ */ jsx("div", {
-                  className: "h-32",
-                  children: /* @__PURE__ */ jsx(Bar, {
-                    data: {
-                      labels: monthlyLabels,
-                      datasets: [{
-                        label: "Users",
-                        data: usersData,
-                        backgroundColor: "#8b5cf6",
-                        borderColor: "#171717",
-                        borderWidth: 2
-                      }]
-                    },
-                    options: {
-                      ...chartOptions$1,
-                      plugins: {
-                        ...chartOptions$1.plugins,
-                        tooltip: {
-                          ...chartOptions$1.plugins.tooltip,
-                          callbacks: {
-                            label: (context) => `${context.parsed.y} users`
-                          }
-                        }
-                      }
-                    }
-                  })
-                })]
-              }), /* @__PURE__ */ jsxs("div", {
-                children: [/* @__PURE__ */ jsx("div", {
-                  className: "mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600",
-                  children: "Assignment Orders"
-                }), /* @__PURE__ */ jsx("div", {
-                  className: "h-32",
-                  children: /* @__PURE__ */ jsx(Bar, {
-                    data: {
-                      labels: monthlyLabels,
-                      datasets: [{
-                        label: "Orders",
-                        data: ordersData,
-                        backgroundColor: "#10b981",
-                        borderColor: "#171717",
-                        borderWidth: 2
-                      }]
-                    },
-                    options: {
-                      ...chartOptions$1,
-                      plugins: {
-                        ...chartOptions$1.plugins,
-                        tooltip: {
-                          ...chartOptions$1.plugins.tooltip,
-                          callbacks: {
-                            label: (context) => `${context.parsed.y} orders`
-                          }
-                        }
-                      }
-                    }
-                  })
-                })]
-              }), /* @__PURE__ */ jsxs("div", {
-                children: [/* @__PURE__ */ jsx("div", {
-                  className: "mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600",
-                  children: "Outreach Orders"
-                }), /* @__PURE__ */ jsx("div", {
-                  className: "h-32",
-                  children: /* @__PURE__ */ jsx(Bar, {
-                    data: {
-                      labels: monthlyLabels,
-                      datasets: [{
-                        label: "Outreach",
-                        data: ordersData,
-                        backgroundColor: "#06b6d4",
-                        borderColor: "#171717",
-                        borderWidth: 2
-                      }]
-                    },
-                    options: {
-                      ...chartOptions$1,
-                      plugins: {
-                        ...chartOptions$1.plugins,
-                        tooltip: {
-                          ...chartOptions$1.plugins.tooltip,
-                          callbacks: {
-                            label: (context) => `${context.parsed.y} orders`
-                          }
-                        }
-                      }
-                    }
-                  })
-                })]
-              }), /* @__PURE__ */ jsxs("div", {
-                children: [/* @__PURE__ */ jsx("div", {
-                  className: "mb-4 font-['Satoshi'] text-sm font-medium text-neutral-600",
-                  children: "Revenue (₹)"
-                }), /* @__PURE__ */ jsx("div", {
-                  className: "h-32",
-                  children: /* @__PURE__ */ jsx(Bar, {
-                    data: {
-                      labels: monthlyLabels,
-                      datasets: [{
-                        label: "Revenue",
-                        data: revenueData,
-                        backgroundColor: "#f59e0b",
-                        borderColor: "#171717",
-                        borderWidth: 2
-                      }]
-                    },
-                    options: {
-                      ...chartOptions$1,
-                      plugins: {
-                        ...chartOptions$1.plugins,
-                        tooltip: {
-                          ...chartOptions$1.plugins.tooltip,
-                          callbacks: {
-                            label: (context) => `₹${context.parsed.y}`
-                          }
-                        }
-                      }
-                    }
-                  })
-                })]
-              })]
-            })]
-          }), /* @__PURE__ */ jsxs(motion.div, {
-            initial: {
-              opacity: 0,
-              y: 20
-            },
-            animate: {
-              opacity: 1,
-              y: 0
-            },
-            transition: {
-              duration: 0.5,
-              delay: 0.3
-            },
-            className: "grid grid-cols-1 gap-6 md:grid-cols-2",
-            children: [/* @__PURE__ */ jsxs("div", {
-              className: "rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] md:p-8",
-              children: [/* @__PURE__ */ jsx("h2", {
-                className: "mb-6 font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl",
-                children: "Revenue Breakdown"
-              }), /* @__PURE__ */ jsx("div", {
-                className: "h-64",
-                children: /* @__PURE__ */ jsx(Doughnut, {
-                  data: revenueBreakdownData,
-                  options: {
-                    ...chartOptions$1,
-                    plugins: {
-                      ...chartOptions$1.plugins,
-                      legend: {
-                        display: true,
-                        position: "bottom",
-                        labels: {
-                          font: {
-                            family: "'Satoshi', sans-serif",
-                            size: 12
-                          },
-                          padding: 15,
-                          usePointStyle: true
-                        }
-                      },
-                      tooltip: {
-                        ...chartOptions$1.plugins.tooltip,
-                        callbacks: {
-                          label: (context) => {
-                            const label = context.label || "";
-                            const value = context.parsed || 0;
-                            return `${label}: ₹${value}`;
-                          }
-                        }
-                      }
-                    }
-                  }
-                })
-              }), /* @__PURE__ */ jsxs("div", {
-                className: "mt-6 space-y-2",
-                children: [/* @__PURE__ */ jsxs("div", {
-                  className: "flex items-center justify-between",
-                  children: [/* @__PURE__ */ jsxs("div", {
-                    className: "flex items-center gap-2",
-                    children: [/* @__PURE__ */ jsx("div", {
-                      className: "h-4 w-4 rounded bg-purple-500"
-                    }), /* @__PURE__ */ jsx("span", {
-                      className: "font-['Satoshi'] text-sm text-neutral-700",
-                      children: "Assignments"
-                    })]
-                  }), /* @__PURE__ */ jsx("span", {
-                    className: "font-['Satoshi'] text-sm font-medium text-neutral-900",
-                    children: formatCurrency$2(stats.revenue_breakdown.assignments)
-                  })]
-                }), /* @__PURE__ */ jsxs("div", {
-                  className: "flex items-center justify-between",
-                  children: [/* @__PURE__ */ jsxs("div", {
-                    className: "flex items-center gap-2",
-                    children: [/* @__PURE__ */ jsx("div", {
-                      className: "h-4 w-4 rounded bg-emerald-500"
-                    }), /* @__PURE__ */ jsx("span", {
-                      className: "font-['Satoshi'] text-sm text-neutral-700",
-                      children: "Outreach"
-                    })]
-                  }), /* @__PURE__ */ jsx("span", {
-                    className: "font-['Satoshi'] text-sm font-medium text-neutral-900",
-                    children: formatCurrency$2(stats.revenue_breakdown.outreach || 0)
-                  })]
-                }), /* @__PURE__ */ jsxs("div", {
-                  className: "flex items-center justify-between",
-                  children: [/* @__PURE__ */ jsxs("div", {
-                    className: "flex items-center gap-2",
-                    children: [/* @__PURE__ */ jsx("div", {
-                      className: "h-4 w-4 rounded bg-amber-500"
-                    }), /* @__PURE__ */ jsx("span", {
-                      className: "font-['Satoshi'] text-sm text-neutral-700",
-                      children: "Careers"
-                    })]
-                  }), /* @__PURE__ */ jsx("span", {
-                    className: "font-['Satoshi'] text-sm font-medium text-neutral-900",
-                    children: formatCurrency$2(stats.revenue_breakdown.careers)
-                  })]
-                })]
-              })]
-            }), /* @__PURE__ */ jsxs("div", {
-              className: "rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] md:p-8",
-              children: [/* @__PURE__ */ jsx("h2", {
-                className: "mb-6 font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl",
-                children: "Revenue Trend"
-              }), /* @__PURE__ */ jsx("div", {
-                className: "h-64",
-                children: /* @__PURE__ */ jsx(Line, {
-                  data: revenueTrendData,
-                  options: {
-                    ...chartOptions$1,
-                    plugins: {
-                      ...chartOptions$1.plugins,
-                      tooltip: {
-                        ...chartOptions$1.plugins.tooltip,
-                        callbacks: {
-                          label: (context) => `₹${context.parsed.y}`
-                        }
-                      }
-                    }
-                  }
-                })
-              }), /* @__PURE__ */ jsx("div", {
-                className: "mt-4 text-center font-['Satoshi'] text-sm text-neutral-600",
-                children: "Monthly revenue over last 12 months"
-              })]
-            })]
-          }), stats.assignment_orders && stats.assignment_orders.length > 0 && /* @__PURE__ */ jsxs(motion.div, {
-            initial: {
-              opacity: 0,
-              y: 20
-            },
-            animate: {
-              opacity: 1,
-              y: 0
-            },
-            transition: {
-              duration: 0.5,
-              delay: 0.4
-            },
-            className: "rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] overflow-hidden",
-            children: [/* @__PURE__ */ jsx("div", {
-              className: "border-b-2 border-neutral-900 bg-neutral-50 px-6 py-4 md:px-8",
-              children: /* @__PURE__ */ jsx("h2", {
-                className: "font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl",
-                children: "Recent Assignment Orders"
-              })
+              className: "text-xs font-bold uppercase tracking-wide opacity-80",
+              children: "Revenue"
             }), /* @__PURE__ */ jsx("div", {
-              className: "overflow-x-auto",
-              children: /* @__PURE__ */ jsxs("table", {
-                className: "w-full border-collapse",
-                children: [/* @__PURE__ */ jsx("thead", {
-                  children: /* @__PURE__ */ jsxs("tr", {
-                    className: "border-b-2 border-neutral-900 bg-neutral-50",
-                    children: [/* @__PURE__ */ jsx("th", {
-                      className: "px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950",
-                      children: "User"
-                    }), /* @__PURE__ */ jsx("th", {
-                      className: "px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950",
-                      children: "Date"
-                    }), /* @__PURE__ */ jsx("th", {
-                      className: "px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950",
-                      children: "Status"
-                    }), /* @__PURE__ */ jsx("th", {
-                      className: "px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950",
-                      children: "Amount"
-                    }), /* @__PURE__ */ jsx("th", {
-                      className: "px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950",
-                      children: "Actions"
-                    })]
-                  })
-                }), /* @__PURE__ */ jsx("tbody", {
-                  children: stats.assignment_orders.map((order, index) => /* @__PURE__ */ jsxs(motion.tr, {
-                    initial: {
-                      opacity: 0,
-                      y: 10
-                    },
-                    animate: {
-                      opacity: 1,
-                      y: 0
-                    },
-                    transition: {
-                      duration: 0.2,
-                      delay: index * 0.02
-                    },
-                    className: "border-b border-neutral-200 transition-colors hover:bg-neutral-50",
-                    children: [/* @__PURE__ */ jsx("td", {
-                      className: "px-4 py-3 font-['Satoshi'] text-sm font-medium text-neutral-900",
-                      children: order.user_name
-                    }), /* @__PURE__ */ jsx("td", {
-                      className: "px-4 py-3 font-['Satoshi'] text-sm text-neutral-700",
-                      children: new Date(order.created_at).toLocaleDateString()
-                    }), /* @__PURE__ */ jsx("td", {
-                      className: "px-4 py-3",
-                      children: /* @__PURE__ */ jsx("span", {
-                        className: `inline-block rounded-lg px-3 py-1 font-['Satoshi'] text-xs font-medium ${order.status === "COMPLETED" ? "bg-green-100 text-green-700" : order.status === "FAILED" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`,
-                        children: order.status
-                      })
-                    }), /* @__PURE__ */ jsx("td", {
-                      className: "px-4 py-3 font-['Satoshi'] text-sm font-medium text-neutral-900",
-                      children: formatCurrency$2(order.amount)
-                    }), /* @__PURE__ */ jsx("td", {
-                      className: "px-4 py-3",
-                      children: order.status === "COMPLETED" && order.download_url && /* @__PURE__ */ jsx("button", {
-                        onClick: () => handleDownload(order.job_id),
-                        className: "rounded-lg border-2 border-neutral-900 bg-purple-500 px-3 py-1.5 font-['Satoshi'] text-xs font-medium text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none",
-                        children: "Download"
-                      })
-                    })]
-                  }, order.job_id))
-                })]
-              })
-            })]
-          }), /* @__PURE__ */ jsxs(motion.div, {
-            initial: {
-              opacity: 0,
-              y: 20
-            },
-            animate: {
-              opacity: 1,
-              y: 0
-            },
-            transition: {
-              duration: 0.5,
-              delay: 0.5
-            },
-            children: [/* @__PURE__ */ jsx("h2", {
-              className: "mb-6 font-['Clash_Display'] text-2xl font-medium leading-tight tracking-tight text-neutral-950 md:text-3xl",
-              children: "Quick Actions"
+              className: "mt-1 font-['Clash_Display'] text-3xl font-semibold md:text-4xl",
+              children: inr(p.rev.revenue)
             }), /* @__PURE__ */ jsxs("div", {
-              className: "grid grid-cols-1 gap-4 md:grid-cols-3",
-              children: [/* @__PURE__ */ jsxs(Link, {
-                to: "/users",
-                className: "group rounded-2xl border-2 border-neutral-900 bg-purple-50 p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]",
-                children: [/* @__PURE__ */ jsx("div", {
-                  className: "font-['Clash_Display'] text-xl font-medium text-neutral-900",
-                  children: "Manage Users"
-                }), /* @__PURE__ */ jsx("div", {
-                  className: "mt-2 font-['Satoshi'] text-sm text-neutral-600",
-                  children: "View and manage user accounts"
-                })]
-              }), /* @__PURE__ */ jsxs(Link, {
-                to: "/outreach-orders",
-                className: "group rounded-2xl border-2 border-neutral-900 bg-emerald-50 p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]",
-                children: [/* @__PURE__ */ jsx("div", {
-                  className: "font-['Clash_Display'] text-xl font-medium text-neutral-900",
-                  children: "Outreach Orders"
-                }), /* @__PURE__ */ jsx("div", {
-                  className: "mt-2 font-['Satoshi'] text-sm text-neutral-600",
-                  children: "Monitor paid outreach campaigns"
-                })]
-              }), /* @__PURE__ */ jsxs(Link, {
-                to: "/careers",
-                className: "group rounded-2xl border-2 border-neutral-900 bg-amber-50 p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]",
-                children: [/* @__PURE__ */ jsx("div", {
-                  className: "font-['Clash_Display'] text-xl font-medium text-neutral-900",
-                  children: "Career Applications"
-                }), /* @__PURE__ */ jsx("div", {
-                  className: "mt-2 font-['Satoshi'] text-sm text-neutral-600",
-                  children: "Manage career applications"
-                })]
+              className: "mt-2 space-y-0.5 text-[11px] leading-tight opacity-90",
+              children: [/* @__PURE__ */ jsxs("div", {
+                children: [inr(p.rev.inr), " INR · ", usd(p.rev.usd), " USD"]
+              }), p.rev.b2b > 0 && /* @__PURE__ */ jsxs("div", {
+                children: ["+ ", inr(p.rev.b2b), " B2B"]
               })]
             })]
+          }), /* @__PURE__ */ jsx(StatCard$2, {
+            value: p.rev.orders,
+            label: "Paid Orders",
+            color: "orange"
+          }), /* @__PURE__ */ jsx(StatCard$2, {
+            value: p.signups.toLocaleString("en-IN"),
+            label: "Signups",
+            color: "green"
+          }), /* @__PURE__ */ jsx(StatCard$2, {
+            value: p.outreach,
+            label: "Outreach Orders",
+            color: "pink"
           })]
+        }), /* @__PURE__ */ jsxs("div", {
+          className: "mt-6 rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]",
+          children: [/* @__PURE__ */ jsx("h2", {
+            className: "mb-4 font-['Clash_Display'] text-xl font-medium text-neutral-950",
+            children: "Last 30 days"
+          }), trend && /* @__PURE__ */ jsx("div", {
+            className: "h-72",
+            children: /* @__PURE__ */ jsx(Line, {
+              data: trend,
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: "index",
+                  intersect: false
+                },
+                plugins: {
+                  legend: {
+                    position: "top"
+                  }
+                },
+                scales: {
+                  y: {
+                    position: "left",
+                    title: {
+                      display: true,
+                      text: "Revenue (₹)"
+                    },
+                    beginAtZero: true
+                  },
+                  y1: {
+                    position: "right",
+                    title: {
+                      display: true,
+                      text: "Signups"
+                    },
+                    beginAtZero: true,
+                    grid: {
+                      drawOnChartArea: false
+                    }
+                  }
+                }
+              }
+            })
+          })]
+        }), /* @__PURE__ */ jsx("div", {
+          className: "mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4",
+          children: [{
+            to: "/funnel",
+            label: "Funnel"
+          }, {
+            to: "/analytics",
+            label: "Analytics"
+          }, {
+            to: "/outreach-orders",
+            label: "Outreach Orders"
+          }, {
+            to: "/paid-users",
+            label: "Paid Users"
+          }].map((l) => /* @__PURE__ */ jsxs(Link, {
+            to: l.to,
+            className: "rounded-xl border-2 border-neutral-900 bg-white px-4 py-3 text-center text-sm font-semibold text-neutral-900 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:-translate-y-0.5",
+            children: [l.label, " →"]
+          }, l.to))
         })]
       })]
     })]
@@ -1985,8 +1442,7 @@ const dashboard = UNSAFE_withComponentProps(function Dashboard() {
 });
 const route1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  default: dashboard,
-  meta: meta$l
+  default: dashboard
 }, Symbol.toStringTag, { value: "Module" }));
 function meta$k({}) {
   return [{
@@ -2557,7 +2013,7 @@ function macroHogql(tc, env) {
       uniqIf(person_id, event='$pageview') AS visits,
       uniqIf(person_id, event='$pageview' AND properties.$pathname LIKE '/outreach%') AS outreach,
       uniqIf(person_id, event='resume_uploaded') AS resume,
-      uniqIf(person_id, event='profile_quiz_completed') AS quiz,
+      uniqIf(person_id, event='quiz_question_answered' AND toInt(properties.question_number) >= 13) AS quiz,
       uniqIf(person_id, event='leads_loaded') AS leads,
       uniqIf(person_id, event='$pageview' AND properties.$pathname LIKE '/outreach/enrichment%') AS paypage,
       uniqIf(person_id, event='pay_now_clicked') AS paytap,
@@ -2572,17 +2028,45 @@ function nestedHogql(tc, env) {
       countIf(v AND ro) AS reached,
       countIf(v AND ro AND ru) AS resume,
       countIf(v AND ro AND ru AND qz) AS quiz,
-      countIf(v AND ro AND ru AND qz AND ld) AS leads
+      countIf(v AND ro AND ru AND qz AND ld) AS leads,
+      countIf(v AND ro AND ru AND qz AND ld AND pp) AS paypage,
+      countIf(v AND ro AND ru AND qz AND ld AND pp AND pt) AS paytap
     FROM (
       SELECT person_id,
         max(event='$pageview') AS v,
         max(event='$pageview' AND properties.$pathname LIKE '/outreach%') AS ro,
         max(event='resume_uploaded') AS ru,
-        max(event='profile_quiz_completed') AS qz,
-        max(event='leads_loaded') AS ld
+        max(event='quiz_question_answered' AND toInt(properties.question_number) >= 13) AS qz,
+        max(event='leads_loaded') AS ld,
+        max(event='$pageview' AND properties.$pathname LIKE '/outreach/enrichment%') AS pp,
+        max(event='pay_now_clicked') AS pt
       FROM events WHERE ${tc} ${envWhere$1(env)}
       GROUP BY person_id
     )`;
+}
+function forkHogql(tc, env) {
+  return `
+    SELECT
+      count() AS cohort,
+      countIf(careers OR coach OR assignment OR internships OR humanizer) AS any_other,
+      countIf(careers) AS careers,
+      countIf(coach) AS coach,
+      countIf(assignment) AS assignment,
+      countIf(internships) AS internships,
+      countIf(humanizer) AS humanizer
+    FROM (
+      SELECT person_id,
+        max(event='$pageview' AND properties.$pathname LIKE '/outreach%') AS ro,
+        max(event='resume_uploaded') AS ru,
+        max(event='$pageview' AND properties.$pathname LIKE '/careers%') AS careers,
+        max(event='$pageview' AND properties.$pathname LIKE '/cc%') AS coach,
+        max(event='$pageview' AND (properties.$pathname LIKE '/assignments%' OR properties.$pathname LIKE '/dojos/assignment%')) AS assignment,
+        max(event='$pageview' AND properties.$pathname LIKE '/dojos/internships%') AS internships,
+        max(event='$pageview' AND properties.$pathname LIKE '/dojos/humanizer%') AS humanizer
+      FROM events WHERE ${tc} ${envWhere$1(env)}
+      GROUP BY person_id
+    )
+    WHERE ro AND NOT ru`;
 }
 function quizHogql(tc, env) {
   return `
@@ -2732,9 +2216,11 @@ const funnel = UNSAFE_withComponentProps(function FunnelPage() {
   });
   const [dbTotals, setDbTotals] = useState({
     signups: 0,
-    paid: 0
+    paid: 0,
+    quiz: 0
   });
   const [quiz, setQuiz] = useState([]);
+  const [fork, setFork] = useState(null);
   const [checkout, setCheckout] = useState({});
   const [detail, setDetail] = useState([]);
   const [timing, setTiming] = useState({});
@@ -2753,24 +2239,43 @@ const funnel = UNSAFE_withComponentProps(function FunnelPage() {
         end
       } = (RANGES.find((r) => r.key === rk) ?? RANGES[2]).range();
       const tc = timeClause(start, end);
-      const [macro, nestedRes, quizRes, coRes, detailRes, timingRes, signupsRes] = await Promise.all([phQuery$4(macroHogql(tc, e)), phQuery$4(nestedHogql(tc, e)), phQuery$4(quizHogql(tc, e)), phQuery$4(checkoutHogql(tc, e)), phQuery$4(detailHogql(tc, e)), phQuery$4(timingHogql(tc, e)), fetch(`/api/dashboard?start=${start}&end=${end}`, {
-        credentials: "include"
+      const token = await getToken();
+      const [macro, nestedRes, quizRes, coRes, detailRes, timingRes, forkRes, signupsRes] = await Promise.all([phQuery$4(macroHogql(tc, e)), phQuery$4(nestedHogql(tc, e)), phQuery$4(quizHogql(tc, e)), phQuery$4(checkoutHogql(tc, e)), phQuery$4(detailHogql(tc, e)), phQuery$4(timingHogql(tc, e)), phQuery$4(forkHogql(tc, e)).catch(() => ({
+        results: []
+      })), fetch(`/api/dashboard?start=${start}&end=${end}`, {
+        credentials: "include",
+        headers: token ? {
+          Authorization: `Bearer ${token}`
+        } : {}
       }).then((r) => r.json()).catch(() => ({
         daily: []
       }))]);
+      const fk = forkRes.results?.[0] ?? [];
+      setFork(fk.length ? {
+        cohort: +fk[0] || 0,
+        any_other: +fk[1] || 0,
+        careers: +fk[2] || 0,
+        coach: +fk[3] || 0,
+        assignment: +fk[4] || 0,
+        internships: +fk[5] || 0,
+        humanizer: +fk[6] || 0
+      } : null);
       const signupMap = {};
       const paidMap = {};
       let signupTot = 0;
       let paidTot = 0;
+      let quizTot = 0;
       for (const row of signupsRes?.daily ?? []) {
         signupMap[row.day] = row.signups ?? 0;
         paidMap[row.day] = row.paid ?? 0;
         signupTot += row.signups ?? 0;
         paidTot += row.paid ?? 0;
+        quizTot += row.quizzes ?? 0;
       }
       setDbTotals({
         signups: signupTot,
-        paid: paidTot
+        paid: paidTot,
+        quiz: quizTot
       });
       const nr = nestedRes.results?.[0] ?? [];
       setFunnel({
@@ -2778,7 +2283,9 @@ const funnel = UNSAFE_withComponentProps(function FunnelPage() {
         reached: +nr[1] || 0,
         resume: +nr[2] || 0,
         quiz: +nr[3] || 0,
-        leads: +nr[4] || 0
+        leads: +nr[4] || 0,
+        paypage: +nr[5] || 0,
+        paytap: +nr[6] || 0
       });
       const macroRows = (macro.results ?? []).map((r) => {
         const day = String(r[0]).slice(0, 10);
@@ -2855,25 +2362,41 @@ const funnel = UNSAFE_withComponentProps(function FunnelPage() {
   const rangeTitle = rangeKey === "today" ? "Today" : rangeKey === "yesterday" ? "Yesterday" : `Last ${rangeLabel}`;
   const visited = funnel2.visited || 0;
   const FUNNEL = [{
-    label: "Reached outreach",
+    label: "Reached outreach page",
     val: funnel2.reached || 0,
-    prev: visited
+    prev: visited,
+    note: "viewed /outreach"
+  }, {
+    label: "Signed up",
+    val: dbTotals.signups || 0,
+    prev: funnel2.reached || 0,
+    note: "DB"
   }, {
     label: "Uploaded resume",
     val: funnel2.resume || 0,
-    prev: funnel2.reached || 0
+    prev: dbTotals.signups || 0
   }, {
     label: "Completed profile quiz",
-    val: funnel2.quiz || 0,
-    prev: funnel2.resume || 0
+    val: dbTotals.quiz || 0,
+    prev: funnel2.resume || 0,
+    note: "DB"
   }, {
     label: "Saw their leads",
     val: funnel2.leads || 0,
-    prev: funnel2.quiz || 0
+    prev: dbTotals.quiz || 0
+  }, {
+    label: "Reached payment page",
+    val: funnel2.paypage || 0,
+    prev: funnel2.leads || 0
+  }, {
+    label: "Tapped pay",
+    val: funnel2.paytap || 0,
+    prev: funnel2.paypage || 0
   }, {
     label: "Paid",
     val: dbTotals.paid || 0,
-    prev: funnel2.leads || 0
+    prev: funnel2.paytap || 0,
+    note: "DB"
   }];
   const quizMax = Math.max(1, ...quiz.map((x) => x.people));
   const card = "rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]";
@@ -2964,7 +2487,10 @@ const funnel = UNSAFE_withComponentProps(function FunnelPage() {
                 className: "flex items-center gap-4",
                 children: [/* @__PURE__ */ jsxs("div", {
                   className: "w-44 flex-shrink-0 text-sm font-semibold",
-                  children: [i + 1, ". ", s.label]
+                  children: [i + 1, ". ", s.label, s.note && /* @__PURE__ */ jsx("span", {
+                    className: "block text-[10px] font-normal text-neutral-400",
+                    children: s.note
+                  })]
                 }), /* @__PURE__ */ jsx("div", {
                   className: "flex-1 h-8 rounded-lg bg-neutral-100 overflow-hidden border border-neutral-200",
                   children: /* @__PURE__ */ jsx("div", {
@@ -2989,6 +2515,64 @@ const funnel = UNSAFE_withComponentProps(function FunnelPage() {
                 })]
               }, s.label);
             })
+          })]
+        }), fork && fork.cohort > 0 && /* @__PURE__ */ jsxs("div", {
+          className: `p-5 md:p-6 mb-8 ${card}`,
+          children: [/* @__PURE__ */ jsx("h2", {
+            className: "font-['Clash_Display'] text-xl font-bold mb-1",
+            children: "Where the drop-offs went"
+          }), /* @__PURE__ */ jsxs("p", {
+            className: "text-xs text-neutral-500 mb-4",
+            children: ["Of the ", /* @__PURE__ */ jsx("b", {
+              children: fmt$3(fork.cohort)
+            }), " people who reached outreach but never uploaded a resume,", " ", /* @__PURE__ */ jsx("b", {
+              children: fmt$3(fork.any_other)
+            }), " (", pct(fork.any_other, fork.cohort), "%) used another Studojo tool instead."]
+          }), /* @__PURE__ */ jsx("div", {
+            className: "space-y-2",
+            children: [{
+              label: "Career Coach (chat)",
+              v: fork.coach
+            }, {
+              label: "Resume / Careers",
+              v: fork.careers
+            }, {
+              label: "Assignment Dojo",
+              v: fork.assignment
+            }, {
+              label: "Internships Dojo",
+              v: fork.internships
+            }, {
+              label: "Humanizer",
+              v: fork.humanizer
+            }, {
+              label: "Used no other tool (pure drop)",
+              v: Math.max(0, fork.cohort - fork.any_other)
+            }].map((t) => /* @__PURE__ */ jsxs("div", {
+              className: "flex items-center gap-3",
+              children: [/* @__PURE__ */ jsx("div", {
+                className: "w-48 flex-shrink-0 text-sm font-medium",
+                children: t.label
+              }), /* @__PURE__ */ jsx("div", {
+                className: "flex-1 h-7 rounded-lg bg-neutral-100 overflow-hidden border border-neutral-200",
+                children: /* @__PURE__ */ jsx("div", {
+                  className: "h-full bg-violet-400 flex items-center px-2",
+                  style: {
+                    width: `${Math.max(pct(t.v, fork.cohort), t.v > 0 ? 4 : 0)}%`
+                  },
+                  children: t.v > 0 && /* @__PURE__ */ jsx("span", {
+                    className: "text-xs font-bold text-white",
+                    children: fmt$3(t.v)
+                  })
+                })
+              }), /* @__PURE__ */ jsxs("div", {
+                className: "w-14 text-right text-sm font-bold",
+                children: [pct(t.v, fork.cohort), "%"]
+              })]
+            }, t.label))
+          }), /* @__PURE__ */ jsx("p", {
+            className: "text-[11px] text-neutral-400 mt-3",
+            children: "A person can appear under more than one tool. Cohort = reached /outreach, no resume upload (PostHog person-level)."
           })]
         }), /* @__PURE__ */ jsxs("div", {
           className: "grid gap-6 lg:grid-cols-2 mb-8",
@@ -3276,7 +2860,7 @@ const funnel = UNSAFE_withComponentProps(function FunnelPage() {
           })]
         }), /* @__PURE__ */ jsx("p", {
           className: "text-xs text-neutral-400 mt-4",
-          children: 'Signups and Paid from Postgres (authoritative). Other steps = unique people in PostHog. "Reached outreach" = a /outreach pageview. Note: PostHog events span all environments; new quiz/checkout events appear once that build is live.'
+          children: `Signups and Paid from Postgres (authoritative). Other steps = unique people in PostHog. "Reached outreach" = a /outreach pageview. "Completed profile quiz" = answered the final question (Q13) via quiz_question_answered — the reliable signal; the old profile_quiz_completed event over-fired so it's no longer used here. Note: per-question quiz/checkout events started 17 Jun, so ranges before that show 0 for those steps.`
         })]
       })]
     })]
@@ -3402,8 +2986,12 @@ const userJourneys = UNSAFE_withComponentProps(function UserJourneys() {
     setError("");
     setOpen(null);
     try {
+      const token = await getToken();
       const [res, paidRes] = await Promise.all([phQuery$3(listHogql(d, e)), fetch(`/api/paid-emails`, {
-        credentials: "include"
+        credentials: "include",
+        headers: token ? {
+          Authorization: `Bearer ${token}`
+        } : {}
       }).then((r) => r.json()).catch(() => ({
         emails: []
       }))]);
@@ -3654,6 +3242,7 @@ const route5 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   __proto__: null,
   default: userJourneys
 }, Symbol.toStringTag, { value: "Module" }));
+Chart.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 async function phQuery$2(query) {
   const res = await fetch("/api/posthog?type=query", {
     method: "POST",
@@ -3712,12 +3301,26 @@ const GROUPS$1 = [{
   g: 7,
   label: "Weekly"
 }];
-function changeClass(cur, prev) {
-  if (prev === null || prev === void 0) return "";
-  if (cur === prev) return "bg-neutral-100 text-neutral-500";
-  const ch = prev === 0 ? 1 : (cur - prev) / Math.abs(prev);
-  if (cur > prev) return ch > 0.2 ? "bg-emerald-200 text-emerald-900" : "bg-emerald-50 text-emerald-800";
-  return ch < -0.2 ? "bg-red-200 text-red-900" : "bg-red-50 text-red-800";
+const REDS = ["bg-red-50 text-red-700", "bg-red-100 text-red-800", "bg-red-200 text-red-900", "bg-red-300 text-red-900", "bg-red-400 text-white", "bg-red-500 text-white"];
+function colorSeries(vals) {
+  const out = [];
+  let streak = 0;
+  for (let i = 0; i < vals.length; i++) {
+    if (i === 0) {
+      out.push("");
+      continue;
+    }
+    const cur = vals[i], prev = vals[i - 1];
+    if (cur > prev) {
+      streak = 0;
+      const ch = prev === 0 ? 1 : (cur - prev) / Math.abs(prev);
+      out.push(ch > 0.2 ? "bg-emerald-200 text-emerald-900" : "bg-emerald-100 text-emerald-800");
+    } else {
+      out.push(REDS[Math.min(streak, REDS.length - 1)]);
+      streak++;
+    }
+  }
+  return out;
 }
 const dailyDashboard = UNSAFE_withComponentProps(function DailyDashboard() {
   const [days, setDays] = useState(30);
@@ -3731,8 +3334,12 @@ const dailyDashboard = UNSAFE_withComponentProps(function DailyDashboard() {
     try {
       const end = isoDate$1(/* @__PURE__ */ new Date());
       const start = isoDate$1(new Date(Date.now() - (d - 1) * 864e5));
+      const token = await getToken();
       const [dbRes, visRes] = await Promise.all([fetch(`/api/dashboard?start=${start}&end=${end}`, {
-        credentials: "include"
+        credentials: "include",
+        headers: token ? {
+          Authorization: `Bearer ${token}`
+        } : {}
       }).then((r) => r.json()), phQuery$2(`SELECT toDate(timestamp) AS day, uniq(person_id) AS v FROM events WHERE event='$pageview' AND timestamp >= toDateTime('${start} 00:00:00') AND timestamp <= toDateTime('${end} 23:59:59') GROUP BY day`)]);
       if (dbRes.error) throw new Error(dbRes.error);
       const visMap = {};
@@ -3770,6 +3377,9 @@ const dailyDashboard = UNSAFE_withComponentProps(function DailyDashboard() {
       }
     });
   }
+  const colorByMetric = {};
+  for (const m of METRICS) colorByMetric[m.key] = colorSeries(buckets.map((b) => b.data[m.key] || 0));
+  const order = buckets.map((_, i) => i).reverse();
   const T = (k) => daily.reduce((a, r) => a + (r[k] || 0), 0);
   const totEmails = T("emails");
   const totReplies = T("replies");
@@ -3795,6 +3405,82 @@ const dailyDashboard = UNSAFE_withComponentProps(function DailyDashboard() {
     label: "Paid Conversions",
     v: fmt$2(T("paid"))
   }];
+  const cl = daily.map((d) => niceDay(d.day));
+  const r1 = (n, d) => d ? Math.round(n / d * 1e3) / 10 : 0;
+  const chartData = {
+    volume: {
+      labels: cl,
+      datasets: [{
+        label: "Visitors",
+        data: daily.map((d) => d.visitors || 0),
+        yAxisID: "y",
+        borderColor: "#7c3aed",
+        backgroundColor: "rgba(124,58,237,0.12)",
+        fill: true,
+        tension: 0.35,
+        pointRadius: 0
+      }, {
+        label: "Signups",
+        data: daily.map((d) => d.signups || 0),
+        yAxisID: "y1",
+        borderColor: "#10b981",
+        tension: 0.35,
+        pointRadius: 0
+      }]
+    },
+    conv: {
+      labels: cl,
+      datasets: [{
+        label: "Visitor → Signup %",
+        data: daily.map((d) => r1(d.signups, d.visitors)),
+        borderColor: "#10b981",
+        tension: 0.35,
+        pointRadius: 0
+      }, {
+        label: "Signup → Outreach order %",
+        data: daily.map((d) => r1(d.orders, d.signups)),
+        borderColor: "#f59e0b",
+        tension: 0.35,
+        pointRadius: 0
+      }, {
+        label: "Order → Paid %",
+        data: daily.map((d) => r1(d.paid, d.orders)),
+        borderColor: "#ec4899",
+        tension: 0.35,
+        pointRadius: 0
+      }]
+    },
+    engage: {
+      labels: cl,
+      datasets: [{
+        label: "Emails sent",
+        data: daily.map((d) => d.emails || 0),
+        backgroundColor: "#c4b5fd",
+        yAxisID: "y"
+      }, {
+        label: "Reply rate %",
+        type: "line",
+        data: daily.map((d) => r1(d.replies, d.emails)),
+        borderColor: "#7c3aed",
+        yAxisID: "y1",
+        tension: 0.35,
+        pointRadius: 0
+      }]
+    }
+  };
+  const baseOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: {
+      mode: "index",
+      intersect: false
+    },
+    plugins: {
+      legend: {
+        position: "top"
+      }
+    }
+  };
   const card = "rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]";
   return /* @__PURE__ */ jsxs("div", {
     className: "min-h-screen bg-neutral-50",
@@ -3808,7 +3494,7 @@ const dailyDashboard = UNSAFE_withComponentProps(function DailyDashboard() {
             children: "Daily Dashboard"
           }), /* @__PURE__ */ jsx("p", {
             className: "text-sm text-neutral-600 mt-1",
-            children: "Visitors, signups, orders, emails, replies and paid users. Green = up vs previous, red = down (darker = >20%)."
+            children: "Newest date first. Green = grew vs the previous day; red = flat or down, getting darker the longer it stays without an uptick."
           })]
         }), /* @__PURE__ */ jsxs("div", {
           className: "flex flex-wrap items-center gap-2",
@@ -3867,31 +3553,129 @@ const dailyDashboard = UNSAFE_withComponentProps(function DailyDashboard() {
                   children: [/* @__PURE__ */ jsx("th", {
                     className: "sticky left-0 z-10 bg-neutral-50 text-left px-4 py-3 font-semibold text-neutral-700 border-b border-neutral-200 min-w-[150px]",
                     children: "Metric"
-                  }), buckets.map((b, i) => /* @__PURE__ */ jsx("th", {
+                  }), order.map((ci) => /* @__PURE__ */ jsx("th", {
                     className: "px-3 py-3 text-right font-semibold text-neutral-700 border-b border-l border-neutral-200 whitespace-nowrap",
-                    children: b.label
-                  }, i))]
+                    children: buckets[ci].label
+                  }, ci))]
                 })
               }), /* @__PURE__ */ jsx("tbody", {
                 children: METRICS.map((m) => /* @__PURE__ */ jsxs("tr", {
                   children: [/* @__PURE__ */ jsx("td", {
                     className: "sticky left-0 z-10 bg-white px-4 py-2.5 font-medium text-neutral-900 border-b border-neutral-100 whitespace-nowrap",
                     children: m.label
-                  }), buckets.map((b, i) => {
-                    const cur = b.data[m.key] || 0;
-                    const prev = i === 0 ? null : buckets[i - 1].data[m.key] || 0;
+                  }), order.map((ci) => {
+                    const cur = buckets[ci].data[m.key] || 0;
                     return /* @__PURE__ */ jsx("td", {
-                      className: `px-3 py-2.5 text-right border-b border-l border-neutral-100 tabular-nums font-semibold ${changeClass(cur, prev)}`,
+                      className: `px-3 py-2.5 text-right border-b border-l border-neutral-100 tabular-nums font-semibold ${colorByMetric[m.key][ci]}`,
                       children: m.rate ? `${cur}%` : fmt$2(cur)
-                    }, i);
+                    }, ci);
                   })]
                 }, m.key))
               })]
             })
           })]
+        }), /* @__PURE__ */ jsxs("div", {
+          className: "grid gap-6 lg:grid-cols-2 mt-8",
+          children: [/* @__PURE__ */ jsxs("div", {
+            className: `p-5 ${card}`,
+            children: [/* @__PURE__ */ jsx("h2", {
+              className: "font-['Clash_Display'] text-lg font-bold mb-3",
+              children: "Visitors & Signups"
+            }), /* @__PURE__ */ jsx("div", {
+              className: "h-64",
+              children: /* @__PURE__ */ jsx(Line, {
+                data: chartData.volume,
+                options: {
+                  ...baseOpts,
+                  scales: {
+                    y: {
+                      position: "left",
+                      title: {
+                        display: true,
+                        text: "Visitors"
+                      },
+                      beginAtZero: true
+                    },
+                    y1: {
+                      position: "right",
+                      title: {
+                        display: true,
+                        text: "Signups"
+                      },
+                      beginAtZero: true,
+                      grid: {
+                        drawOnChartArea: false
+                      }
+                    }
+                  }
+                }
+              })
+            })]
+          }), /* @__PURE__ */ jsxs("div", {
+            className: `p-5 ${card}`,
+            children: [/* @__PURE__ */ jsx("h2", {
+              className: "font-['Clash_Display'] text-lg font-bold mb-1",
+              children: "Conversion rates"
+            }), /* @__PURE__ */ jsx("p", {
+              className: "text-xs text-neutral-500 mb-3",
+              children: "Where people convert (or leak) step to step."
+            }), /* @__PURE__ */ jsx("div", {
+              className: "h-64",
+              children: /* @__PURE__ */ jsx(Line, {
+                data: chartData.conv,
+                options: {
+                  ...baseOpts,
+                  scales: {
+                    y: {
+                      beginAtZero: true,
+                      title: {
+                        display: true,
+                        text: "%"
+                      }
+                    }
+                  }
+                }
+              })
+            })]
+          }), /* @__PURE__ */ jsxs("div", {
+            className: `p-5 lg:col-span-2 ${card}`,
+            children: [/* @__PURE__ */ jsx("h2", {
+              className: "font-['Clash_Display'] text-lg font-bold mb-3",
+              children: "Outreach: emails sent vs reply rate"
+            }), /* @__PURE__ */ jsx("div", {
+              className: "h-64",
+              children: /* @__PURE__ */ jsx(Bar, {
+                data: chartData.engage,
+                options: {
+                  ...baseOpts,
+                  scales: {
+                    y: {
+                      position: "left",
+                      title: {
+                        display: true,
+                        text: "Emails"
+                      },
+                      beginAtZero: true
+                    },
+                    y1: {
+                      position: "right",
+                      title: {
+                        display: true,
+                        text: "Reply %"
+                      },
+                      beginAtZero: true,
+                      grid: {
+                        drawOnChartArea: false
+                      }
+                    }
+                  }
+                }
+              })
+            })]
+          })]
         }), /* @__PURE__ */ jsx("p", {
           className: "text-xs text-neutral-400 mt-4",
-          children: "Visitors from PostHog (unique people/day). Signups, orders, emails, replies, paid from Postgres. Instagram followers aren't in any system — add an IG integration or a manual entry if you want that row."
+          children: "Newest date first. Green = grew vs the day before; red = flat or down, deepening the longer it stays without growth. Visitors from PostHog (unique people/day); signups, orders, emails, replies, paid from Postgres. Instagram followers aren't in any system — add an IG integration or a manual entry if you want that row."
         })]
       })]
     })]
@@ -3909,9 +3693,108 @@ const pool = new Pool({
   connectionString
 });
 const db = drizzle(pool);
-async function loader$e({
+async function verifyToken(token) {
+  try {
+    const jwksResult = await db.execute(
+      sql`SELECT public_key, private_key FROM jwks WHERE expires_at IS NULL OR expires_at > NOW() ORDER BY created_at DESC LIMIT 1`
+    );
+    if (jwksResult.rows.length === 0) {
+      return null;
+    }
+    const jwks = jwksResult.rows[0];
+    const publicKey = jwks.public_key;
+    const jwk = JSON.parse(publicKey);
+    const alg = jwk.alg || (jwk.kty === "OKP" && jwk.crv === "Ed25519" ? "EdDSA" : "RS256");
+    const key = await importJWK(jwk, alg);
+    const { payload } = await jwtVerify(token, key);
+    return payload.sub || payload.userId || payload.id;
+  } catch (error) {
+    console.error("Token verification failed:", error);
+    return null;
+  }
+}
+async function getUserIdFromToken(token) {
+  return verifyToken(token);
+}
+async function getUserInfo(userId) {
+  try {
+    const result = await db.execute(
+      sql`SELECT id, name, email FROM "user" WHERE id = ${userId} LIMIT 1`
+    );
+    if (result.rows.length === 0) {
+      return null;
+    }
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      name: row.name,
+      email: row.email
+    };
+  } catch (error) {
+    console.error("Error getting user info:", error);
+    return null;
+  }
+}
+async function getUserFromRequest(request) {
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.substring(7);
+    const userId = await getUserIdFromToken(token);
+    if (userId) {
+      return getUserInfo(userId);
+    }
+  }
+  const frontendUrl = process.env.VITE_AUTH_URL || "http://localhost:3000";
+  const cookies = request.headers.get("Cookie");
+  if (cookies) {
+    try {
+      const origin = request.headers.get("Origin") || `https://${new URL(frontendUrl).hostname}`;
+      const response = await fetch(`${frontendUrl}/api/auth/share-token`, {
+        method: "GET",
+        headers: {
+          "Cookie": cookies,
+          "Content-Type": "application/json",
+          "User-Agent": request.headers.get("User-Agent") || "Admin-Panel/1.0",
+          "Origin": origin,
+          "Referer": request.headers.get("Referer") || `${origin}/`
+        },
+        redirect: "manual"
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.token) {
+          const userId = await getUserIdFromToken(data.token);
+          if (userId) {
+            return getUserInfo(userId);
+          }
+        }
+      }
+    } catch (error) {
+      console.debug(`[auth-helper] Failed to get token from frontend:`, error);
+    }
+  }
+  return null;
+}
+async function requireAdmin$1(request) {
+  const user = await getUserFromRequest(request);
+  if (!user) return null;
+  try {
+    const r = await db.execute(sql`SELECT role FROM "user" WHERE id = ${user.id} LIMIT 1`);
+    const role = r.rows[0]?.role;
+    return role === "admin" || role === "ops" ? user : null;
+  } catch {
+    return null;
+  }
+}
+async function loader$f({
   request
 }) {
+  const admin = await requireAdmin$1(request);
+  if (!admin) return Response.json({
+    error: "Unauthorized"
+  }, {
+    status: 401
+  });
   const url = new URL(request.url);
   const start = url.searchParams.get("start");
   const end = url.searchParams.get("end");
@@ -3922,27 +3805,44 @@ async function loader$e({
   });
   try {
     const q = async (query) => (await db.execute(query)).rows;
-    const [signups, orders, emails, replies, paid] = await Promise.all([q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM "user"
-            WHERE DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`), q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM outreach_orders
-            WHERE DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`), q(sql`SELECT DATE(sent_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM emails_sent
+    const [signups, orders, emails, replies, paid, quizzes] = await Promise.all([
+      q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM "user"
+            WHERE DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM outreach_orders
+            WHERE DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      q(sql`SELECT DATE(sent_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM emails_sent
             WHERE sent_at IS NOT NULL AND is_test = false
-              AND DATE(sent_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`), q(sql`SELECT DATE(reply_received_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM emails_sent
+              AND DATE(sent_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      q(sql`SELECT DATE(reply_received_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM emails_sent
             WHERE reply_received_at IS NOT NULL AND is_test = false
-              AND DATE(reply_received_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`), q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM payment_orders
+              AND DATE(reply_received_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM payment_orders
             WHERE status IN ('paid','completed')
-              AND DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`)]);
+              AND DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      // Authoritative quiz-completion: flex_notes is written from the final quiz
+      // questions (Q12/Q13), so it's the true "finished the quiz" signal for ALL
+      // history — unaffected by the over-firing profile_quiz_completed PostHog event.
+      q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM candidates
+            WHERE flex_notes IS NOT NULL
+              AND DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`)
+    ]);
     const map = {};
     const dayStr = (d) => String(d).split("T")[0];
+    const blank = () => ({
+      day: "",
+      signups: 0,
+      orders: 0,
+      emails: 0,
+      replies: 0,
+      paid: 0,
+      quizzes: 0
+    });
     const add = (rows, key) => {
       for (const r of rows) {
         const d = dayStr(r.day);
         (map[d] ??= {
-          day: d,
-          signups: 0,
-          orders: 0,
-          emails: 0,
-          replies: 0,
-          paid: 0
+          ...blank(),
+          day: d
         })[key] = r.n ?? 0;
       }
     };
@@ -3951,16 +3851,13 @@ async function loader$e({
     add(emails, "emails");
     add(replies, "replies");
     add(paid, "paid");
+    add(quizzes, "quizzes");
     const out = [];
     for (let d = /* @__PURE__ */ new Date(start + "T00:00:00Z"); dayStr(d.toISOString()) <= end; d.setUTCDate(d.getUTCDate() + 1)) {
       const ds = dayStr(d.toISOString());
       out.push(map[ds] ?? {
-        day: ds,
-        signups: 0,
-        orders: 0,
-        emails: 0,
-        replies: 0,
-        paid: 0
+        ...blank(),
+        day: ds
       });
     }
     return Response.json({
@@ -3976,9 +3873,165 @@ async function loader$e({
 }
 const route7 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
+  loader: loader$f
+}, Symbol.toStringTag, { value: "Module" }));
+const DEFAULT_FX = 94;
+const B2B_BY_DATE = {
+  "2026-06-02": 15e3,
+  "2026-06-03": 2550,
+  "2026-06-13": 9650
+};
+function istToday() {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1e3).toISOString().slice(0, 10);
+}
+function shift(iso, days) {
+  const d = /* @__PURE__ */ new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function b2bSum(start, end) {
+  return Object.entries(B2B_BY_DATE).filter(([d]) => d >= start && d <= end).reduce((s, [, v]) => s + v, 0);
+}
+const cents = (n) => Number(n ?? 0) / 100;
+async function loader$e({
+  request
+}) {
+  const admin = await requireAdmin$1(request);
+  if (!admin) return Response.json({
+    error: "Unauthorized"
+  }, {
+    status: 401
+  });
+  try {
+    const url = new URL(request.url);
+    const cStart = url.searchParams.get("start") ?? "";
+    const cEnd = url.searchParams.get("end") ?? "";
+    const hasCustom = /^\d{4}-\d{2}-\d{2}$/.test(cStart) && /^\d{4}-\d{2}-\d{2}$/.test(cEnd) && cStart <= cEnd;
+    const today = istToday();
+    const yesterday = shift(today, -1);
+    const d7 = shift(today, -6);
+    const d30 = shift(today, -29);
+    const calStart = shift(today, -29);
+    const q = async (query) => (await db.execute(query)).rows;
+    const revRange = (start, end) => q(sql`SELECT
+              COALESCE(SUM(CASE WHEN currency='INR' THEN amount_cents END),0)::bigint AS inr,
+              COALESCE(SUM(CASE WHEN currency<>'INR' THEN amount_cents END),0)::bigint AS usd,
+              COUNT(*)::int AS orders
+            FROM payment_orders
+            WHERE status='paid'
+              AND DATE(created_at + INTERVAL '5.5 hours') BETWEEN ${start}::date AND ${end}::date`);
+    const revAll = () => q(sql`SELECT
+              COALESCE(SUM(CASE WHEN currency='INR' THEN amount_cents END),0)::bigint AS inr,
+              COALESCE(SUM(CASE WHEN currency<>'INR' THEN amount_cents END),0)::bigint AS usd,
+              COUNT(*)::int AS orders
+            FROM payment_orders WHERE status='paid'`);
+    const sigRange = (start, end) => q(sql`SELECT COUNT(*)::int AS c FROM "user"
+            WHERE DATE(created_at + INTERVAL '5.5 hours') BETWEEN ${start}::date AND ${end}::date`);
+    const sigAll = () => q(sql`SELECT COUNT(*)::int AS c FROM "user"`);
+    const outreachRange = (start, end) => q(sql`SELECT COUNT(*)::int AS c FROM outreach_orders
+            WHERE DATE(created_at + INTERVAL '5.5 hours') BETWEEN ${start}::date AND ${end}::date`);
+    const outreachAll = () => q(sql`SELECT COUNT(*)::int AS c FROM outreach_orders`);
+    const [rToday, rYest, r7, r30, rAll, sToday, sYest, s7, s30, sAll, oToday, oYest, o7, o30, oAll, dailyRev, dailySig] = await Promise.all([revRange(today, today), revRange(yesterday, yesterday), revRange(d7, today), revRange(d30, today), revAll(), sigRange(today, today), sigRange(yesterday, yesterday), sigRange(d7, today), sigRange(d30, today), sigAll(), outreachRange(today, today), outreachRange(yesterday, yesterday), outreachRange(d7, today), outreachRange(d30, today), outreachAll(), q(sql`SELECT DATE(created_at + INTERVAL '5.5 hours') AS day,
+              COALESCE(SUM(CASE WHEN currency='INR' THEN amount_cents END),0)::bigint AS inr,
+              COALESCE(SUM(CASE WHEN currency<>'INR' THEN amount_cents END),0)::bigint AS usd,
+              COUNT(*)::int AS orders
+            FROM payment_orders WHERE status='paid'
+              AND DATE(created_at + INTERVAL '5.5 hours') >= ${calStart}::date GROUP BY day`), q(sql`SELECT DATE(created_at + INTERVAL '5.5 hours') AS day, COUNT(*)::int AS c FROM "user"
+            WHERE DATE(created_at + INTERVAL '5.5 hours') >= ${calStart}::date GROUP BY day`)]);
+    const triple = (row, b2b) => {
+      const inr2 = cents(row?.inr), usd2 = cents(row?.usd);
+      const db_ = inr2 + usd2 * DEFAULT_FX;
+      return {
+        inr: inr2,
+        usd: usd2,
+        b2b,
+        revenue: db_ + b2b,
+        orders: Number(row?.orders ?? 0)
+      };
+    };
+    const num = (rows) => Number(rows[0]?.c ?? 0);
+    const periods = {
+      today: {
+        rev: triple(rToday[0], b2bSum(today, today)),
+        signups: num(sToday),
+        outreach: num(oToday)
+      },
+      yesterday: {
+        rev: triple(rYest[0], b2bSum(yesterday, yesterday)),
+        signups: num(sYest),
+        outreach: num(oYest)
+      },
+      last7: {
+        rev: triple(r7[0], b2bSum(d7, today)),
+        signups: num(s7),
+        outreach: num(o7)
+      },
+      last30: {
+        rev: triple(r30[0], b2bSum(d30, today)),
+        signups: num(s30),
+        outreach: num(o30)
+      },
+      allTime: {
+        rev: triple(rAll[0], Object.values(B2B_BY_DATE).reduce((s, v) => s + v, 0)),
+        signups: num(sAll),
+        outreach: num(oAll)
+      }
+    };
+    if (hasCustom) {
+      const [cRev, cSig, cOut] = await Promise.all([revRange(cStart, cEnd), sigRange(cStart, cEnd), outreachRange(cStart, cEnd)]);
+      periods.custom = {
+        rev: triple(cRev[0], b2bSum(cStart, cEnd)),
+        signups: num(cSig),
+        outreach: num(cOut),
+        start: cStart,
+        end: cEnd
+      };
+    }
+    const dayStr = (d) => String(d).split("T")[0];
+    const revMap = {};
+    for (const r of dailyRev) revMap[dayStr(r.day)] = r;
+    const sigMap = {};
+    for (const r of dailySig) sigMap[dayStr(r.day)] = r.c;
+    const daily = [];
+    for (let i = 0; i < 30; i++) {
+      const ds = shift(calStart, i);
+      const r = revMap[ds];
+      const inr2 = cents(r?.inr), usd2 = cents(r?.usd);
+      daily.push({
+        day: ds,
+        revenue: Math.round(inr2 + usd2 * DEFAULT_FX + (B2B_BY_DATE[ds] ?? 0)),
+        signups: sigMap[ds] ?? 0,
+        orders: Number(r?.orders ?? 0)
+      });
+    }
+    return Response.json({
+      fxRate: DEFAULT_FX,
+      today,
+      periods,
+      daily,
+      generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  } catch (err) {
+    return Response.json({
+      error: err.message
+    }, {
+      status: 500
+    });
+  }
+}
+const route8 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
   loader: loader$e
 }, Symbol.toStringTag, { value: "Module" }));
-async function loader$d(_) {
+async function loader$d({
+  request
+}) {
+  const admin = await requireAdmin$1(request);
+  if (!admin) return Response.json({
+    error: "Unauthorized"
+  }, {
+    status: 401
+  });
   try {
     const res = await db.execute(sql`
       SELECT DISTINCT lower(u.email) AS email
@@ -3999,7 +4052,7 @@ async function loader$d(_) {
     });
   }
 }
-const route8 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route9 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   loader: loader$d
 }, Symbol.toStringTag, { value: "Module" }));
@@ -4259,7 +4312,7 @@ const assignments = UNSAFE_withComponentProps(function Assignments() {
     })]
   });
 });
-const route9 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route10 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: assignments,
   meta: meta$i
@@ -4414,7 +4467,7 @@ const dissertations = UNSAFE_withComponentProps(function Dissertations() {
     })]
   });
 });
-const route10 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route11 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: dissertations,
   meta: meta$h
@@ -4451,8 +4504,8 @@ function fmtDate$2(d) {
   if (!d) return "—";
   return new Date(d).toLocaleString();
 }
-function fmtCurrency(cents) {
-  return `₹${(cents / 100).toLocaleString("en-IN")}`;
+function fmtCurrency(cents2) {
+  return `₹${(cents2 / 100).toLocaleString("en-IN")}`;
 }
 const STYLE_COLORS = {
   warm_intro: "#8b5cf6",
@@ -4840,8 +4893,8 @@ const STAGE_BADGE_COLORS = {
 function formatStatus(s) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
-function formatCurrency(cents) {
-  return `₹${(cents / 100).toLocaleString("en-IN")}`;
+function formatCurrency(cents2) {
+  return `₹${(cents2 / 100).toLocaleString("en-IN")}`;
 }
 function formatMonth(monthStr) {
   const [year, month] = monthStr.split("-");
@@ -5463,7 +5516,7 @@ const outreachOrders = UNSAFE_withComponentProps(function OutreachOrders() {
     })]
   });
 });
-const route11 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route12 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: outreachOrders,
   meta: meta$g
@@ -5507,9 +5560,9 @@ function ago(iso) {
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
 }
-function fmtMoney(cents, currency) {
-  if (currency === "INR") return `₹${(cents / 100).toLocaleString("en-IN")}`;
-  return `$${(cents / 100).toFixed(0)}`;
+function fmtMoney(cents2, currency) {
+  if (currency === "INR") return `₹${(cents2 / 100).toLocaleString("en-IN")}`;
+  return `$${(cents2 / 100).toFixed(0)}`;
 }
 function daysSince(iso) {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
@@ -6826,7 +6879,7 @@ const campaignHealth = UNSAFE_withComponentProps(function CampaignHealth() {
     })]
   });
 });
-const route12 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route13 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: campaignHealth,
   headers,
@@ -6845,11 +6898,11 @@ function countryFlag(code) {
   if (!code || code.length !== 2) return "🌐";
   return code.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
 }
-function formatAmount(cents, currency) {
+function formatAmount(cents2, currency) {
   if (currency === "INR") {
-    return `₹${(cents / 100).toLocaleString("en-IN")}`;
+    return `₹${(cents2 / 100).toLocaleString("en-IN")}`;
   }
-  return `$${(cents / 100).toFixed(2)}`;
+  return `$${(cents2 / 100).toFixed(2)}`;
 }
 function tierLabel(tier) {
   if (tier === 50) return "Starter (50)";
@@ -7393,7 +7446,7 @@ const paidUsers = UNSAFE_withComponentProps(function PaidUsers() {
     })]
   });
 });
-const route13 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route14 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: paidUsers,
   meta: meta$e
@@ -7771,7 +7824,7 @@ const outreachCampaign = UNSAFE_withComponentProps(function OutreachCampaignPage
     })]
   });
 });
-const route14 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route15 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: outreachCampaign
 }, Symbol.toStringTag, { value: "Module" }));
@@ -7905,9 +7958,9 @@ const outreach = UNSAFE_withComponentProps(function Outreach() {
       }
     }
   };
-  const fmtCents = (cents) => {
-    const inr = cents / 100;
-    return inr >= 1e5 ? `₹${(inr / 1e5).toFixed(1)}L` : inr >= 1e3 ? `₹${(inr / 1e3).toFixed(1)}k` : `₹${inr.toFixed(0)}`;
+  const fmtCents = (cents2) => {
+    const inr2 = cents2 / 100;
+    return inr2 >= 1e5 ? `₹${(inr2 / 1e5).toFixed(1)}L` : inr2 >= 1e3 ? `₹${(inr2 / 1e3).toFixed(1)}k` : `₹${inr2.toFixed(0)}`;
   };
   return /* @__PURE__ */ jsxs("div", {
     className: "min-h-screen bg-neutral-50",
@@ -8195,7 +8248,7 @@ const outreach = UNSAFE_withComponentProps(function Outreach() {
     })]
   });
 });
-const route15 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route16 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: outreach,
   meta: meta$d
@@ -8356,7 +8409,7 @@ const careers = UNSAFE_withComponentProps(function Careers() {
     })]
   });
 });
-const route16 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route17 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: careers,
   meta: meta$c
@@ -8625,93 +8678,11 @@ const settings = UNSAFE_withComponentProps(function Settings() {
     })]
   });
 });
-const route17 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route18 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: settings,
   meta: meta$b
 }, Symbol.toStringTag, { value: "Module" }));
-async function verifyToken(token) {
-  try {
-    const jwksResult = await db.execute(
-      sql`SELECT public_key, private_key FROM jwks WHERE expires_at IS NULL OR expires_at > NOW() ORDER BY created_at DESC LIMIT 1`
-    );
-    if (jwksResult.rows.length === 0) {
-      return null;
-    }
-    const jwks = jwksResult.rows[0];
-    const publicKey = jwks.public_key;
-    const jwk = JSON.parse(publicKey);
-    const alg = jwk.alg || (jwk.kty === "OKP" && jwk.crv === "Ed25519" ? "EdDSA" : "RS256");
-    const key = await importJWK(jwk, alg);
-    const { payload } = await jwtVerify(token, key);
-    return payload.sub || payload.userId || payload.id;
-  } catch (error) {
-    console.error("Token verification failed:", error);
-    return null;
-  }
-}
-async function getUserIdFromToken(token) {
-  return verifyToken(token);
-}
-async function getUserInfo(userId) {
-  try {
-    const result = await db.execute(
-      sql`SELECT id, name, email FROM "user" WHERE id = ${userId} LIMIT 1`
-    );
-    if (result.rows.length === 0) {
-      return null;
-    }
-    const row = result.rows[0];
-    return {
-      id: row.id,
-      name: row.name,
-      email: row.email
-    };
-  } catch (error) {
-    console.error("Error getting user info:", error);
-    return null;
-  }
-}
-async function getUserFromRequest(request) {
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.substring(7);
-    const userId = await getUserIdFromToken(token);
-    if (userId) {
-      return getUserInfo(userId);
-    }
-  }
-  const frontendUrl = process.env.VITE_AUTH_URL || "http://localhost:3000";
-  const cookies = request.headers.get("Cookie");
-  if (cookies) {
-    try {
-      const origin = request.headers.get("Origin") || `https://${new URL(frontendUrl).hostname}`;
-      const response = await fetch(`${frontendUrl}/api/auth/share-token`, {
-        method: "GET",
-        headers: {
-          "Cookie": cookies,
-          "Content-Type": "application/json",
-          "User-Agent": request.headers.get("User-Agent") || "Admin-Panel/1.0",
-          "Origin": origin,
-          "Referer": request.headers.get("Referer") || `${origin}/`
-        },
-        redirect: "manual"
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.token) {
-          const userId = await getUserIdFromToken(data.token);
-          if (userId) {
-            return getUserInfo(userId);
-          }
-        }
-      }
-    } catch (error) {
-      console.debug(`[auth-helper] Failed to get token from frontend:`, error);
-    }
-  }
-  return null;
-}
 async function ensureTable$2() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS platform_settings (
@@ -8797,7 +8768,7 @@ async function action$7({
     success: true
   });
 }
-const route18 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route19 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   action: action$7,
   loader: loader$b
@@ -9693,7 +9664,7 @@ const emailSequences = UNSAFE_withComponentProps(function EmailSequences() {
     })]
   });
 });
-const route19 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route20 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: emailSequences,
   meta: meta$a
@@ -9970,7 +9941,7 @@ const chatLogs = UNSAFE_withComponentProps(function ChatLogs() {
     })]
   });
 });
-const route20 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route21 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: chatLogs,
   meta: meta$9
@@ -10026,7 +9997,7 @@ async function loader$a({
     offset
   });
 }
-const route21 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route22 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   loader: loader$a
 }, Symbol.toStringTag, { value: "Module" }));
@@ -10297,7 +10268,7 @@ function StatTile$1({
     })]
   });
 }
-const route22 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route23 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: opsAlerts,
   meta: meta$8
@@ -10447,7 +10418,7 @@ async function loader$9({
     stats: statsResult.rows[0]
   });
 }
-const route23 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route24 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   action: action$6,
   loader: loader$9
@@ -10498,7 +10469,7 @@ async function action$5({
     acknowledged: result.rows.length > 0
   });
 }
-const route24 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route25 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   action: action$5
 }, Symbol.toStringTag, { value: "Module" }));
@@ -10805,7 +10776,7 @@ function StatTile({
     })]
   });
 }
-const route25 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route26 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: tickets,
   meta: meta$7
@@ -11145,7 +11116,7 @@ const tickets_$id = UNSAFE_withComponentProps(function TicketDetailPage({
     })]
   });
 });
-const route26 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route27 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: tickets_$id,
   meta: meta$6
@@ -11230,7 +11201,7 @@ async function loader$8({
     stats: stats.rows[0]
   });
 }
-const route27 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route28 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   loader: loader$8
 }, Symbol.toStringTag, { value: "Module" }));
@@ -11363,7 +11334,7 @@ async function action$4({
     ticket: result.rows[0]
   });
 }
-const route28 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route29 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   action: action$4,
   loader: loader$7
@@ -11492,7 +11463,7 @@ async function action$3({
     message: mRes.rows[0]
   });
 }
-const route29 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route30 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   action: action$3
 }, Symbol.toStringTag, { value: "Module" }));
@@ -11637,7 +11608,7 @@ const consultationSignups = UNSAFE_withComponentProps(function ConsultationSignu
     })]
   });
 });
-const route30 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route31 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: consultationSignups,
   meta: meta$5
@@ -11684,7 +11655,7 @@ async function loader$6({
     offset
   });
 }
-const route31 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route32 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   loader: loader$6
 }, Symbol.toStringTag, { value: "Module" }));
@@ -11873,6 +11844,7 @@ const analytics = UNSAFE_withComponentProps(function Analytics() {
       }
     }
     try {
+      const token = await getToken();
       const [statsRes, signupsRes, dailyEventsRes, , topRes] = await Promise.all([
         // Visitors, payments, campaigns from events
         safeQuery({
@@ -11881,7 +11853,10 @@ const analytics = UNSAFE_withComponentProps(function Analytics() {
         }),
         // Total new signups + daily breakdown — via server-side proxy (avoids CORS)
         fetch(`/api/analytics?start=${startDate}&end=${endDate}`, {
-          credentials: "include"
+          credentials: "include",
+          headers: token ? {
+            Authorization: `Bearer ${token}`
+          } : {}
         }).then((r) => r.ok ? r.json() : {
           count: 0,
           daily: []
@@ -12976,7 +12951,7 @@ function Spinner({
     })
   });
 }
-const route32 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route33 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: analytics,
   meta: meta$4
@@ -13504,7 +13479,7 @@ function MiniStat({
     })]
   });
 }
-const route33 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route34 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: utmBuilder,
   meta: meta$3
@@ -13596,7 +13571,7 @@ async function action$2({
     success: true
   });
 }
-const route34 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route35 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   action: action$2,
   loader: loader$5
@@ -13968,7 +13943,7 @@ function Pill({
     children: label
   });
 }
-const route35 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route36 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: coupons,
   meta: meta$2
@@ -14064,7 +14039,7 @@ async function action$1({
     status: 405
   });
 }
-const route36 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route37 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   action: action$1,
   loader: loader$4
@@ -14253,7 +14228,7 @@ async function action({
     });
   }
 }
-const route37 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route38 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   action,
   loader: loader$3
@@ -14261,6 +14236,12 @@ const route37 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.definePrope
 async function loader$2({
   request
 }) {
+  const admin = await requireAdmin$1(request);
+  if (!admin) return Response.json({
+    error: "Unauthorized"
+  }, {
+    status: 401
+  });
   const url = new URL(request.url);
   const start = url.searchParams.get("start");
   const end = url.searchParams.get("end");
@@ -14275,14 +14256,14 @@ async function loader$2({
     const countResult = await db.execute(sql`
       SELECT COUNT(*)::int AS count
       FROM "user"
-      WHERE DATE(created_at) >= ${start}::date
-        AND DATE(created_at) <= ${end}::date
+      WHERE DATE(created_at + INTERVAL '5.5 hours') >= ${start}::date
+        AND DATE(created_at + INTERVAL '5.5 hours') <= ${end}::date
     `);
     const dailyResult = await db.execute(sql`
-      SELECT DATE(created_at) AS day, COUNT(*)::int AS signups
+      SELECT DATE(created_at + INTERVAL '5.5 hours') AS day, COUNT(*)::int AS signups
       FROM "user"
-      WHERE DATE(created_at) >= ${start}::date
-        AND DATE(created_at) <= ${end}::date
+      WHERE DATE(created_at + INTERVAL '5.5 hours') >= ${start}::date
+        AND DATE(created_at + INTERVAL '5.5 hours') <= ${end}::date
       GROUP BY day
       ORDER BY day ASC
     `);
@@ -14303,7 +14284,7 @@ async function loader$2({
     });
   }
 }
-const route38 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route39 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   loader: loader$2
 }, Symbol.toStringTag, { value: "Module" }));
@@ -14419,7 +14400,7 @@ async function loader$1({
     });
   }
 }
-const route39 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route40 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   loader: loader$1
 }, Symbol.toStringTag, { value: "Module" }));
@@ -16457,7 +16438,7 @@ function ActivitySection({
     })]
   });
 }
-const route40 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route41 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: careerCoach,
   meta: meta$1
@@ -16714,7 +16695,7 @@ function BreakdownCard({
     })]
   });
 }
-const route41 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route42 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: webinarRegistrations,
   meta
@@ -16776,11 +16757,11 @@ async function loader({
     offset
   });
 }
-const route42 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route43 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   loader
 }, Symbol.toStringTag, { value: "Module" }));
-const serverManifest = { "entry": { "module": "/assets/entry.client-uDiRgCXU.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-BqfPLHtT.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": true, "module": "/assets/root-DPhz5JBU.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-BqfPLHtT.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js"], "css": ["/assets/root-_8cX0dqv.css"], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/dashboard": { "id": "routes/dashboard", "parentId": "root", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/dashboard-13JO-9k7.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-D-YnK9j2.js", "/assets/admin-header-BhNb2lpk.js", "/assets/stat-card-Chyn4610.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/login": { "id": "routes/login", "parentId": "root", "path": "login", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/login-B34vjsgq.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/api-DjiIOaUj.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/users": { "id": "routes/users", "parentId": "root", "path": "users", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/users-BrzTkfAN.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/search-input-jQh-Z9eJ.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/funnel": { "id": "routes/funnel", "parentId": "root", "path": "funnel", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/funnel-NOirrkMd.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/user-journeys": { "id": "routes/user-journeys", "parentId": "root", "path": "journeys", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/user-journeys-sDdCh8T7.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/daily-dashboard": { "id": "routes/daily-dashboard", "parentId": "root", "path": "daily", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/daily-dashboard-CwkE8n6K.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.dashboard": { "id": "routes/api.dashboard", "parentId": "root", "path": "api/dashboard", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.dashboard-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.paid-emails": { "id": "routes/api.paid-emails", "parentId": "root", "path": "api/paid-emails", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.paid-emails-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/assignments": { "id": "routes/assignments", "parentId": "root", "path": "assignments", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/assignments-Cs1pdoIH.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/search-input-jQh-Z9eJ.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/dissertations": { "id": "routes/dissertations", "parentId": "root", "path": "dissertations", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/dissertations-BCPRij23.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/outreach-orders": { "id": "routes/outreach-orders", "parentId": "root", "path": "outreach-orders", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/outreach-orders-CoTTvJbv.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-D-YnK9j2.js", "/assets/admin-header-BhNb2lpk.js", "/assets/stat-card-Chyn4610.js", "/assets/search-input-jQh-Z9eJ.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/campaign-health": { "id": "routes/campaign-health", "parentId": "root", "path": "campaign-health", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/campaign-health-DR4loPL6.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/paid-users": { "id": "routes/paid-users", "parentId": "root", "path": "paid-users", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/paid-users-DbXYeG0j.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/stat-card-Chyn4610.js", "/assets/search-input-jQh-Z9eJ.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/outreach-campaign": { "id": "routes/outreach-campaign", "parentId": "root", "path": "outreach-campaign", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/outreach-campaign-BJ7TAVuE.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/outreach": { "id": "routes/outreach", "parentId": "root", "path": "outreach", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/outreach-BXf1Wscm.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-D-YnK9j2.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/careers": { "id": "routes/careers", "parentId": "root", "path": "careers", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/careers-yOv8KTwA.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/settings": { "id": "routes/settings", "parentId": "root", "path": "settings", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/settings-CeIgWLzr.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.settings": { "id": "routes/api.settings", "parentId": "root", "path": "api/settings", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.settings-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/email-sequences": { "id": "routes/email-sequences", "parentId": "root", "path": "email-sequences", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/email-sequences-C94BO5Wu.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/chat-logs": { "id": "routes/chat-logs", "parentId": "root", "path": "chat-logs", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/chat-logs-CtCsyb3p.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.chat-logs": { "id": "routes/api.chat-logs", "parentId": "root", "path": "api/chat-logs", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.chat-logs-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/ops-alerts": { "id": "routes/ops-alerts", "parentId": "root", "path": "ops-alerts", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/ops-alerts-DLJznYyr.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.ops-alerts": { "id": "routes/api.ops-alerts", "parentId": "root", "path": "api/ops-alerts", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.ops-alerts-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.ops-alerts.$id": { "id": "routes/api.ops-alerts.$id", "parentId": "root", "path": "api/ops-alerts/:id", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.ops-alerts._id-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/tickets": { "id": "routes/tickets", "parentId": "root", "path": "tickets", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/tickets-B-LX4Gay.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/tickets.$id": { "id": "routes/tickets.$id", "parentId": "root", "path": "tickets/:id", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/tickets._id-BlxMjk5i.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.tickets": { "id": "routes/api.tickets", "parentId": "root", "path": "api/tickets", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.tickets-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.tickets.$id": { "id": "routes/api.tickets.$id", "parentId": "root", "path": "api/tickets/:id", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.tickets._id-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.tickets.$id.messages": { "id": "routes/api.tickets.$id.messages", "parentId": "root", "path": "api/tickets/:id/messages", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.tickets._id.messages-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/consultation-signups": { "id": "routes/consultation-signups", "parentId": "root", "path": "consultation-signups", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/consultation-signups-CnHqG9FF.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.consultation-signups": { "id": "routes/api.consultation-signups", "parentId": "root", "path": "api/consultation-signups", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.consultation-signups-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/analytics": { "id": "routes/analytics", "parentId": "root", "path": "analytics", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/analytics-B8xkXGv7.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-D-YnK9j2.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/api-DjiIOaUj.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/utm-builder": { "id": "routes/utm-builder", "parentId": "root", "path": "utm-builder", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/utm-builder-BuGYabhn.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.utm-campaigns": { "id": "routes/api.utm-campaigns", "parentId": "root", "path": "api/utm-campaigns", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.utm-campaigns-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/coupons": { "id": "routes/coupons", "parentId": "root", "path": "coupons", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/coupons-Cx3ximtP.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/index-BjR75gdh.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.coupons": { "id": "routes/api.coupons", "parentId": "root", "path": "api/coupons", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.coupons-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.posthog": { "id": "routes/api.posthog", "parentId": "root", "path": "api/posthog", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.posthog-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.analytics": { "id": "routes/api.analytics", "parentId": "root", "path": "api/analytics", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.analytics-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.outreach": { "id": "routes/api.outreach", "parentId": "root", "path": "api/outreach", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.outreach-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/career-coach": { "id": "routes/career-coach", "parentId": "root", "path": "career-coach", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/career-coach-DX2yJ-Jq.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/api-DjiIOaUj.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webinar-registrations": { "id": "routes/webinar-registrations", "parentId": "root", "path": "webinar-registrations", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/webinar-registrations-Bfb1trdi.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BhNb2lpk.js", "/assets/auth-guard-DnvJn-86.js", "/assets/api-DjiIOaUj.js", "/assets/auth-client-Bl7UQPEw.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.webinar-registrations": { "id": "routes/api.webinar-registrations", "parentId": "root", "path": "api/webinar-registrations", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.webinar-registrations-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 } }, "url": "/assets/manifest-39efdca4.js", "version": "39efdca4", "sri": void 0 };
+const serverManifest = { "entry": { "module": "/assets/entry.client-uDiRgCXU.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-BqfPLHtT.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": true, "module": "/assets/root-CMoPCdv5.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-BqfPLHtT.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js"], "css": ["/assets/root-CQNtGqeo.css"], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/dashboard": { "id": "routes/dashboard", "parentId": "root", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/dashboard-BqR7eGtJ.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-CYFn8AAm.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/stat-card-Chyn4610.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/login": { "id": "routes/login", "parentId": "root", "path": "login", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/login-D0-RW_aH.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/api-BaVKNcht.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/users": { "id": "routes/users", "parentId": "root", "path": "users", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/users-Ch-BwK2L.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/search-input-jQh-Z9eJ.js", "/assets/proxy-B6pKBcas.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/funnel": { "id": "routes/funnel", "parentId": "root", "path": "funnel", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/funnel-BBpd_o-9.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/api-BaVKNcht.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/user-journeys": { "id": "routes/user-journeys", "parentId": "root", "path": "journeys", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/user-journeys-C2GOenRi.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/api-BaVKNcht.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/daily-dashboard": { "id": "routes/daily-dashboard", "parentId": "root", "path": "daily", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/daily-dashboard-Bqbh2oII.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/api-BaVKNcht.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/index-CYFn8AAm.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.dashboard": { "id": "routes/api.dashboard", "parentId": "root", "path": "api/dashboard", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.dashboard-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.overview": { "id": "routes/api.overview", "parentId": "root", "path": "api/overview", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.overview-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.paid-emails": { "id": "routes/api.paid-emails", "parentId": "root", "path": "api/paid-emails", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.paid-emails-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/assignments": { "id": "routes/assignments", "parentId": "root", "path": "assignments", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/assignments-B5KzSG7V.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/search-input-jQh-Z9eJ.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/dissertations": { "id": "routes/dissertations", "parentId": "root", "path": "dissertations", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/dissertations-CM77nsW_.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/outreach-orders": { "id": "routes/outreach-orders", "parentId": "root", "path": "outreach-orders", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/outreach-orders-CE47c7DZ.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-CYFn8AAm.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/stat-card-Chyn4610.js", "/assets/search-input-jQh-Z9eJ.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/campaign-health": { "id": "routes/campaign-health", "parentId": "root", "path": "campaign-health", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/campaign-health-C-spNLlu.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/paid-users": { "id": "routes/paid-users", "parentId": "root", "path": "paid-users", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/paid-users-C_y7Rytb.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/stat-card-Chyn4610.js", "/assets/search-input-jQh-Z9eJ.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/outreach-campaign": { "id": "routes/outreach-campaign", "parentId": "root", "path": "outreach-campaign", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/outreach-campaign-DiWjFcRN.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/outreach": { "id": "routes/outreach", "parentId": "root", "path": "outreach", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/outreach-BU43k-fP.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/index-CYFn8AAm.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/careers": { "id": "routes/careers", "parentId": "root", "path": "careers", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/careers-CS6QB3Wl.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/settings": { "id": "routes/settings", "parentId": "root", "path": "settings", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/settings-CtWGSgiU.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.settings": { "id": "routes/api.settings", "parentId": "root", "path": "api/settings", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.settings-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/email-sequences": { "id": "routes/email-sequences", "parentId": "root", "path": "email-sequences", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/email-sequences-CdZYabZe.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/chat-logs": { "id": "routes/chat-logs", "parentId": "root", "path": "chat-logs", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/chat-logs-BFCRJvBj.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.chat-logs": { "id": "routes/api.chat-logs", "parentId": "root", "path": "api/chat-logs", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.chat-logs-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/ops-alerts": { "id": "routes/ops-alerts", "parentId": "root", "path": "ops-alerts", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/ops-alerts-vprnyVOo.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.ops-alerts": { "id": "routes/api.ops-alerts", "parentId": "root", "path": "api/ops-alerts", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.ops-alerts-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.ops-alerts.$id": { "id": "routes/api.ops-alerts.$id", "parentId": "root", "path": "api/ops-alerts/:id", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.ops-alerts._id-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/tickets": { "id": "routes/tickets", "parentId": "root", "path": "tickets", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/tickets-CxbVOAvP.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/tickets.$id": { "id": "routes/tickets.$id", "parentId": "root", "path": "tickets/:id", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/tickets._id-rzKmEF3h.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.tickets": { "id": "routes/api.tickets", "parentId": "root", "path": "api/tickets", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.tickets-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.tickets.$id": { "id": "routes/api.tickets.$id", "parentId": "root", "path": "api/tickets/:id", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.tickets._id-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.tickets.$id.messages": { "id": "routes/api.tickets.$id.messages", "parentId": "root", "path": "api/tickets/:id/messages", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.tickets._id.messages-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/consultation-signups": { "id": "routes/consultation-signups", "parentId": "root", "path": "consultation-signups", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/consultation-signups-uLC89J2A.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.consultation-signups": { "id": "routes/api.consultation-signups", "parentId": "root", "path": "api/consultation-signups", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.consultation-signups-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/analytics": { "id": "routes/analytics", "parentId": "root", "path": "analytics", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/analytics-B8Pz64JJ.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/api-BaVKNcht.js", "/assets/index-CYFn8AAm.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/utm-builder": { "id": "routes/utm-builder", "parentId": "root", "path": "utm-builder", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/utm-builder-DLAIWrda.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.utm-campaigns": { "id": "routes/api.utm-campaigns", "parentId": "root", "path": "api/utm-campaigns", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.utm-campaigns-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/coupons": { "id": "routes/coupons", "parentId": "root", "path": "coupons", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/coupons-7NILhlAl.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.coupons": { "id": "routes/api.coupons", "parentId": "root", "path": "api/coupons", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.coupons-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.posthog": { "id": "routes/api.posthog", "parentId": "root", "path": "api/posthog", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.posthog-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.analytics": { "id": "routes/api.analytics", "parentId": "root", "path": "api/analytics", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.analytics-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.outreach": { "id": "routes/api.outreach", "parentId": "root", "path": "api/outreach", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.outreach-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/career-coach": { "id": "routes/career-coach", "parentId": "root", "path": "career-coach", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/career-coach-BGSPDKQV.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/index-BjR75gdh.js", "/assets/proxy-B6pKBcas.js", "/assets/api-BaVKNcht.js", "/assets/index-BqfPLHtT.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/webinar-registrations": { "id": "routes/webinar-registrations", "parentId": "root", "path": "webinar-registrations", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/webinar-registrations-CfGkIY-H.js", "imports": ["/assets/chunk-EPOLDU6W-CmigDcej.js", "/assets/admin-header-BOxp9_Bh.js", "/assets/auth-guard-_urwsxLO.js", "/assets/api-BaVKNcht.js", "/assets/proxy-B6pKBcas.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/api.webinar-registrations": { "id": "routes/api.webinar-registrations", "parentId": "root", "path": "api/webinar-registrations", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/api.webinar-registrations-l0sNRNKZ.js", "imports": [], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 } }, "url": "/assets/manifest-a66ddb27.js", "version": "a66ddb27", "sri": void 0 };
 const assetsBuildDirectory = "build/client";
 const basename = "/";
 const future = { "unstable_optimizeDeps": false, "unstable_subResourceIntegrity": false, "unstable_trailingSlashAwareDataRequests": false, "v8_middleware": false, "v8_splitRouteModules": false, "v8_viteEnvironmentApi": false };
@@ -16855,13 +16836,21 @@ const routes = {
     caseSensitive: void 0,
     module: route7
   },
+  "routes/api.overview": {
+    id: "routes/api.overview",
+    parentId: "root",
+    path: "api/overview",
+    index: void 0,
+    caseSensitive: void 0,
+    module: route8
+  },
   "routes/api.paid-emails": {
     id: "routes/api.paid-emails",
     parentId: "root",
     path: "api/paid-emails",
     index: void 0,
     caseSensitive: void 0,
-    module: route8
+    module: route9
   },
   "routes/assignments": {
     id: "routes/assignments",
@@ -16869,7 +16858,7 @@ const routes = {
     path: "assignments",
     index: void 0,
     caseSensitive: void 0,
-    module: route9
+    module: route10
   },
   "routes/dissertations": {
     id: "routes/dissertations",
@@ -16877,7 +16866,7 @@ const routes = {
     path: "dissertations",
     index: void 0,
     caseSensitive: void 0,
-    module: route10
+    module: route11
   },
   "routes/outreach-orders": {
     id: "routes/outreach-orders",
@@ -16885,7 +16874,7 @@ const routes = {
     path: "outreach-orders",
     index: void 0,
     caseSensitive: void 0,
-    module: route11
+    module: route12
   },
   "routes/campaign-health": {
     id: "routes/campaign-health",
@@ -16893,7 +16882,7 @@ const routes = {
     path: "campaign-health",
     index: void 0,
     caseSensitive: void 0,
-    module: route12
+    module: route13
   },
   "routes/paid-users": {
     id: "routes/paid-users",
@@ -16901,7 +16890,7 @@ const routes = {
     path: "paid-users",
     index: void 0,
     caseSensitive: void 0,
-    module: route13
+    module: route14
   },
   "routes/outreach-campaign": {
     id: "routes/outreach-campaign",
@@ -16909,7 +16898,7 @@ const routes = {
     path: "outreach-campaign",
     index: void 0,
     caseSensitive: void 0,
-    module: route14
+    module: route15
   },
   "routes/outreach": {
     id: "routes/outreach",
@@ -16917,7 +16906,7 @@ const routes = {
     path: "outreach",
     index: void 0,
     caseSensitive: void 0,
-    module: route15
+    module: route16
   },
   "routes/careers": {
     id: "routes/careers",
@@ -16925,7 +16914,7 @@ const routes = {
     path: "careers",
     index: void 0,
     caseSensitive: void 0,
-    module: route16
+    module: route17
   },
   "routes/settings": {
     id: "routes/settings",
@@ -16933,7 +16922,7 @@ const routes = {
     path: "settings",
     index: void 0,
     caseSensitive: void 0,
-    module: route17
+    module: route18
   },
   "routes/api.settings": {
     id: "routes/api.settings",
@@ -16941,7 +16930,7 @@ const routes = {
     path: "api/settings",
     index: void 0,
     caseSensitive: void 0,
-    module: route18
+    module: route19
   },
   "routes/email-sequences": {
     id: "routes/email-sequences",
@@ -16949,7 +16938,7 @@ const routes = {
     path: "email-sequences",
     index: void 0,
     caseSensitive: void 0,
-    module: route19
+    module: route20
   },
   "routes/chat-logs": {
     id: "routes/chat-logs",
@@ -16957,7 +16946,7 @@ const routes = {
     path: "chat-logs",
     index: void 0,
     caseSensitive: void 0,
-    module: route20
+    module: route21
   },
   "routes/api.chat-logs": {
     id: "routes/api.chat-logs",
@@ -16965,7 +16954,7 @@ const routes = {
     path: "api/chat-logs",
     index: void 0,
     caseSensitive: void 0,
-    module: route21
+    module: route22
   },
   "routes/ops-alerts": {
     id: "routes/ops-alerts",
@@ -16973,7 +16962,7 @@ const routes = {
     path: "ops-alerts",
     index: void 0,
     caseSensitive: void 0,
-    module: route22
+    module: route23
   },
   "routes/api.ops-alerts": {
     id: "routes/api.ops-alerts",
@@ -16981,7 +16970,7 @@ const routes = {
     path: "api/ops-alerts",
     index: void 0,
     caseSensitive: void 0,
-    module: route23
+    module: route24
   },
   "routes/api.ops-alerts.$id": {
     id: "routes/api.ops-alerts.$id",
@@ -16989,7 +16978,7 @@ const routes = {
     path: "api/ops-alerts/:id",
     index: void 0,
     caseSensitive: void 0,
-    module: route24
+    module: route25
   },
   "routes/tickets": {
     id: "routes/tickets",
@@ -16997,7 +16986,7 @@ const routes = {
     path: "tickets",
     index: void 0,
     caseSensitive: void 0,
-    module: route25
+    module: route26
   },
   "routes/tickets.$id": {
     id: "routes/tickets.$id",
@@ -17005,7 +16994,7 @@ const routes = {
     path: "tickets/:id",
     index: void 0,
     caseSensitive: void 0,
-    module: route26
+    module: route27
   },
   "routes/api.tickets": {
     id: "routes/api.tickets",
@@ -17013,7 +17002,7 @@ const routes = {
     path: "api/tickets",
     index: void 0,
     caseSensitive: void 0,
-    module: route27
+    module: route28
   },
   "routes/api.tickets.$id": {
     id: "routes/api.tickets.$id",
@@ -17021,7 +17010,7 @@ const routes = {
     path: "api/tickets/:id",
     index: void 0,
     caseSensitive: void 0,
-    module: route28
+    module: route29
   },
   "routes/api.tickets.$id.messages": {
     id: "routes/api.tickets.$id.messages",
@@ -17029,7 +17018,7 @@ const routes = {
     path: "api/tickets/:id/messages",
     index: void 0,
     caseSensitive: void 0,
-    module: route29
+    module: route30
   },
   "routes/consultation-signups": {
     id: "routes/consultation-signups",
@@ -17037,7 +17026,7 @@ const routes = {
     path: "consultation-signups",
     index: void 0,
     caseSensitive: void 0,
-    module: route30
+    module: route31
   },
   "routes/api.consultation-signups": {
     id: "routes/api.consultation-signups",
@@ -17045,7 +17034,7 @@ const routes = {
     path: "api/consultation-signups",
     index: void 0,
     caseSensitive: void 0,
-    module: route31
+    module: route32
   },
   "routes/analytics": {
     id: "routes/analytics",
@@ -17053,7 +17042,7 @@ const routes = {
     path: "analytics",
     index: void 0,
     caseSensitive: void 0,
-    module: route32
+    module: route33
   },
   "routes/utm-builder": {
     id: "routes/utm-builder",
@@ -17061,7 +17050,7 @@ const routes = {
     path: "utm-builder",
     index: void 0,
     caseSensitive: void 0,
-    module: route33
+    module: route34
   },
   "routes/api.utm-campaigns": {
     id: "routes/api.utm-campaigns",
@@ -17069,7 +17058,7 @@ const routes = {
     path: "api/utm-campaigns",
     index: void 0,
     caseSensitive: void 0,
-    module: route34
+    module: route35
   },
   "routes/coupons": {
     id: "routes/coupons",
@@ -17077,7 +17066,7 @@ const routes = {
     path: "coupons",
     index: void 0,
     caseSensitive: void 0,
-    module: route35
+    module: route36
   },
   "routes/api.coupons": {
     id: "routes/api.coupons",
@@ -17085,7 +17074,7 @@ const routes = {
     path: "api/coupons",
     index: void 0,
     caseSensitive: void 0,
-    module: route36
+    module: route37
   },
   "routes/api.posthog": {
     id: "routes/api.posthog",
@@ -17093,7 +17082,7 @@ const routes = {
     path: "api/posthog",
     index: void 0,
     caseSensitive: void 0,
-    module: route37
+    module: route38
   },
   "routes/api.analytics": {
     id: "routes/api.analytics",
@@ -17101,7 +17090,7 @@ const routes = {
     path: "api/analytics",
     index: void 0,
     caseSensitive: void 0,
-    module: route38
+    module: route39
   },
   "routes/api.outreach": {
     id: "routes/api.outreach",
@@ -17109,7 +17098,7 @@ const routes = {
     path: "api/outreach",
     index: void 0,
     caseSensitive: void 0,
-    module: route39
+    module: route40
   },
   "routes/career-coach": {
     id: "routes/career-coach",
@@ -17117,7 +17106,7 @@ const routes = {
     path: "career-coach",
     index: void 0,
     caseSensitive: void 0,
-    module: route40
+    module: route41
   },
   "routes/webinar-registrations": {
     id: "routes/webinar-registrations",
@@ -17125,7 +17114,7 @@ const routes = {
     path: "webinar-registrations",
     index: void 0,
     caseSensitive: void 0,
-    module: route41
+    module: route42
   },
   "routes/api.webinar-registrations": {
     id: "routes/api.webinar-registrations",
@@ -17133,7 +17122,7 @@ const routes = {
     path: "api/webinar-registrations",
     index: void 0,
     caseSensitive: void 0,
-    module: route42
+    module: route43
   }
 };
 const allowedActionOrigins = false;

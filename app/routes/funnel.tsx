@@ -206,7 +206,7 @@ export default function FunnelPage() {
   const [rangeKey, setRangeKey] = useState("7d");
   const [rows, setRows] = useState<Row[]>([]);
   const [funnel, setFunnel] = useState<Record<string, number>>({ visited: 0, reached: 0, resume: 0, quiz: 0, leads: 0 });
-  const [dbTotals, setDbTotals] = useState<{ signups: number; paid: number }>({ signups: 0, paid: 0 });
+  const [dbTotals, setDbTotals] = useState<{ signups: number; paid: number; quiz: number }>({ signups: 0, paid: 0, quiz: 0 });
   const [quiz, setQuiz] = useState<{ q: number; people: number }[]>([]);
   const [fork, setFork] = useState<Record<string, number> | null>(null);
   const [checkout, setCheckout] = useState<Record<string, number>>({});
@@ -244,12 +244,12 @@ export default function FunnelPage() {
       // payment_confirmed was empty historically, which is why Paid showed 0.
       const signupMap: Record<string, number> = {};
       const paidMap: Record<string, number> = {};
-      let signupTot = 0; let paidTot = 0;
+      let signupTot = 0; let paidTot = 0; let quizTot = 0;
       for (const row of signupsRes?.daily ?? []) {
         signupMap[row.day] = row.signups ?? 0; paidMap[row.day] = row.paid ?? 0;
-        signupTot += row.signups ?? 0; paidTot += row.paid ?? 0;
+        signupTot += row.signups ?? 0; paidTot += row.paid ?? 0; quizTot += row.quizzes ?? 0;
       }
-      setDbTotals({ signups: signupTot, paid: paidTot });
+      setDbTotals({ signups: signupTot, paid: paidTot, quiz: quizTot });
 
       // Top funnel = nested range-level unique people (monotonic).
       const nr = nestedRes.results?.[0] ?? [];
@@ -302,8 +302,8 @@ export default function FunnelPage() {
     { label: "Reached outreach page", val: funnel.reached || 0, prev: visited, note: "viewed /outreach" },
     { label: "Signed up", val: dbTotals.signups || 0, prev: funnel.reached || 0, note: "DB" },
     { label: "Uploaded resume", val: funnel.resume || 0, prev: dbTotals.signups || 0 },
-    { label: "Completed profile quiz", val: funnel.quiz || 0, prev: funnel.resume || 0 },
-    { label: "Saw their leads", val: funnel.leads || 0, prev: funnel.quiz || 0 },
+    { label: "Completed profile quiz", val: dbTotals.quiz || 0, prev: funnel.resume || 0, note: "DB" },
+    { label: "Saw their leads", val: funnel.leads || 0, prev: dbTotals.quiz || 0 },
     { label: "Reached payment page", val: funnel.paypage || 0, prev: funnel.leads || 0 },
     { label: "Tapped pay", val: funnel.paytap || 0, prev: funnel.paypage || 0 },
     { label: "Paid", val: dbTotals.paid || 0, prev: funnel.paytap || 0, note: "DB" },

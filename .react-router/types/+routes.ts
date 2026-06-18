@@ -32,6 +32,9 @@ type Pages = {
   "/api/dashboard": {
     params: {};
   };
+  "/api/overview": {
+    params: {};
+  };
   "/api/paid-emails": {
     params: {};
   };
@@ -150,7 +153,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/login" | "/users" | "/funnel" | "/journeys" | "/daily" | "/api/dashboard" | "/api/paid-emails" | "/assignments" | "/dissertations" | "/outreach-orders" | "/campaign-health" | "/paid-users" | "/outreach-campaign" | "/outreach" | "/careers" | "/settings" | "/api/settings" | "/email-sequences" | "/chat-logs" | "/api/chat-logs" | "/ops-alerts" | "/api/ops-alerts" | "/api/ops-alerts/:id" | "/tickets" | "/tickets/:id" | "/api/tickets" | "/api/tickets/:id" | "/api/tickets/:id/messages" | "/consultation-signups" | "/api/consultation-signups" | "/analytics" | "/utm-builder" | "/api/utm-campaigns" | "/coupons" | "/api/coupons" | "/api/posthog" | "/api/analytics" | "/api/outreach" | "/career-coach" | "/webinar-registrations" | "/api/webinar-registrations";
+    page: "/" | "/login" | "/users" | "/funnel" | "/journeys" | "/daily" | "/api/dashboard" | "/api/overview" | "/api/paid-emails" | "/assignments" | "/dissertations" | "/outreach-orders" | "/campaign-health" | "/paid-users" | "/outreach-campaign" | "/outreach" | "/careers" | "/settings" | "/api/settings" | "/email-sequences" | "/chat-logs" | "/api/chat-logs" | "/ops-alerts" | "/api/ops-alerts" | "/api/ops-alerts/:id" | "/tickets" | "/tickets/:id" | "/api/tickets" | "/api/tickets/:id" | "/api/tickets/:id/messages" | "/consultation-signups" | "/api/consultation-signups" | "/analytics" | "/utm-builder" | "/api/utm-campaigns" | "/coupons" | "/api/coupons" | "/api/posthog" | "/api/analytics" | "/api/outreach" | "/career-coach" | "/webinar-registrations" | "/api/webinar-registrations";
   };
   "routes/dashboard.tsx": {
     id: "routes/dashboard";
@@ -179,6 +182,10 @@ type RouteFiles = {
   "routes/api.dashboard.tsx": {
     id: "routes/api.dashboard";
     page: "/api/dashboard";
+  };
+  "routes/api.overview.tsx": {
+    id: "routes/api.overview";
+    page: "/api/overview";
   };
   "routes/api.paid-emails.tsx": {
     id: "routes/api.paid-emails";
@@ -331,6 +338,7 @@ type RouteModules = {
   "routes/user-journeys": typeof import("./app/routes/user-journeys.tsx");
   "routes/daily-dashboard": typeof import("./app/routes/daily-dashboard.tsx");
   "routes/api.dashboard": typeof import("./app/routes/api.dashboard.tsx");
+  "routes/api.overview": typeof import("./app/routes/api.overview.tsx");
   "routes/api.paid-emails": typeof import("./app/routes/api.paid-emails.tsx");
   "routes/assignments": typeof import("./app/routes/assignments.tsx");
   "routes/dissertations": typeof import("./app/routes/dissertations.tsx");
