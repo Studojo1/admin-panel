@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
+import { SourceBreakdown } from "~/components/source-breakdown";
 import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement,
   BarElement, Title, Tooltip, Legend, Filler,
@@ -229,6 +230,8 @@ export default function DailyDashboard() {
             </div>
 
             <p className="text-xs text-neutral-400 mt-4">Newest date first. Green = grew vs the day before; red = flat or down, deepening the longer it stays without growth. Visitors from PostHog (unique people/day); signups, orders, emails, replies, paid from Postgres. Instagram followers aren't in any system — add an IG integration or a manual entry if you want that row.</p>
+
+            <div className="mt-8"><SourceBreakdown start={isoDate(new Date(Date.now() - (days - 1) * 86400000))} end={isoDate(new Date())} /></div>
           </>
         )}
       </main>

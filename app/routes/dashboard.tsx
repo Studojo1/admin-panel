@@ -6,6 +6,7 @@ import {
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 import { AdminHeader, StatCard } from "~/components";
+import { SourceBreakdown } from "~/components/source-breakdown";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
 
@@ -176,6 +177,8 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
+
+            <div className="mt-6"><SourceBreakdown start={(p as any).start} end={(p as any).end} /></div>
 
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {[

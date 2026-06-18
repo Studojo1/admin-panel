@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
+import { SourceBreakdown } from "~/components/source-breakdown";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 async function phQuery(query: string) {
@@ -291,6 +292,7 @@ export default function FunnelPage() {
 
   const rangeLabel = RANGES.find((r) => r.key === rangeKey)?.label ?? rangeKey;
   const rangeTitle = rangeKey === "today" ? "Today" : rangeKey === "yesterday" ? "Yesterday" : `Last ${rangeLabel}`;
+  const srcRange = (RANGES.find((r) => r.key === rangeKey) ?? RANGES[2]).range();
 
   // Strict outreach funnel (nested) + acquisition context. Paid from DB.
   const visited = funnel.visited || 0;
@@ -382,6 +384,9 @@ export default function FunnelPage() {
                 })}
               </div>
             </div>
+
+            {/* Where users come from */}
+            <SourceBreakdown start={srcRange.start} end={srcRange.end} env={env} className="mb-8" />
 
             {/* Where the outreach drop-offs went */}
             {fork && fork.cohort > 0 && (
