@@ -299,14 +299,14 @@ export default function FunnelPage() {
   // "Reached outreach" is a /outreach pageview (anonymous incl.), so it sits ABOVE signup.
   // Signups & Paid are authoritative from Postgres; the rest are unique people from PostHog.
   const FUNNEL = [
-    { label: "Reached outreach page", val: funnel.reached || 0, prev: visited, note: "viewed /outreach" },
-    { label: "Signed up", val: dbTotals.signups || 0, prev: funnel.reached || 0, note: "DB" },
-    { label: "Uploaded resume", val: funnel.resume || 0, prev: dbTotals.signups || 0 },
-    { label: "Completed profile quiz", val: funnel.quiz || 0, prev: funnel.resume || 0 },
-    { label: "Saw their leads", val: funnel.leads || 0, prev: funnel.quiz || 0 },
-    { label: "Reached payment page", val: funnel.paypage || 0, prev: funnel.leads || 0 },
-    { label: "Tapped pay", val: funnel.paytap || 0, prev: funnel.paypage || 0 },
-    { label: "Paid", val: dbTotals.paid || 0, prev: funnel.paytap || 0, note: "DB" },
+    { label: "Reached outreach page", short: "visits", val: funnel.reached || 0, prev: visited, prevShort: "visits", note: "viewed /outreach" },
+    { label: "Signed up", short: "outreach", val: dbTotals.signups || 0, prev: funnel.reached || 0, prevShort: "outreach", note: "DB" },
+    { label: "Uploaded resume", short: "signups", val: funnel.resume || 0, prev: dbTotals.signups || 0, prevShort: "signups" },
+    { label: "Completed profile quiz", short: "resume", val: funnel.quiz || 0, prev: funnel.resume || 0, prevShort: "resume" },
+    { label: "Saw their leads", short: "quiz", val: funnel.leads || 0, prev: funnel.quiz || 0, prevShort: "quiz" },
+    { label: "Reached payment page", short: "leads", val: funnel.paypage || 0, prev: funnel.leads || 0, prevShort: "leads" },
+    { label: "Tapped pay", short: "pay page", val: funnel.paytap || 0, prev: funnel.paypage || 0, prevShort: "pay page" },
+    { label: "Paid", short: "tapped pay", val: dbTotals.paid || 0, prev: funnel.paytap || 0, prevShort: "tapped pay", note: "DB" },
   ];
   const quizMax = Math.max(1, ...quiz.map((x) => x.people));
 
@@ -373,7 +373,10 @@ export default function FunnelPage() {
                         <div className={`h-full flex items-center px-2 ${s.label === "Paid" ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${Math.max(ofReached, 3)}%` }}><span className="text-xs font-bold text-white whitespace-nowrap">{fmt(s.val)}</span></div>
                       </div>
                       <div className="w-16 text-right text-sm font-bold">{ofVisits}%<span className="block text-[10px] font-normal text-neutral-400">of visits</span></div>
-                      <div className={`w-32 text-right text-xs font-semibold ${i === 0 ? "text-neutral-400" : drop > 60 ? "text-red-600" : drop > 30 ? "text-amber-600" : "text-emerald-600"}`}>{i === 0 ? "base" : `${kept}% kept · ${drop}% drop`}</div>
+                      <div className="w-36 text-right">
+                        <div className={`text-sm font-bold ${i === 0 ? "text-neutral-400" : drop > 60 ? "text-red-600" : drop > 30 ? "text-amber-600" : "text-emerald-600"}`}>{i === 0 ? "base" : `${kept}%`}</div>
+                        {i > 0 && <div className="text-[10px] font-normal text-neutral-400">of {(s as any).prevShort} · -{drop}% drop</div>}
+                      </div>
                     </div>
                   );
                 })}
