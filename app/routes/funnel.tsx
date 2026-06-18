@@ -84,6 +84,32 @@ function nestedHogql(tc: string, env: string) {
       GROUP BY person_id
     )`;
 }
+// Where the outreach drop-offs went: of people who reached the outreach page but
+// never uploaded a resume, how many forked to another Studojo tool instead.
+function forkHogql(tc: string, env: string) {
+  return `
+    SELECT
+      count() AS cohort,
+      countIf(careers OR coach OR assignment OR internships OR humanizer) AS any_other,
+      countIf(careers) AS careers,
+      countIf(coach) AS coach,
+      countIf(assignment) AS assignment,
+      countIf(internships) AS internships,
+      countIf(humanizer) AS humanizer
+    FROM (
+      SELECT person_id,
+        max(event='$pageview' AND properties.$pathname LIKE '/outreach%') AS ro,
+        max(event='resume_uploaded') AS ru,
+        max(event='$pageview' AND properties.$pathname LIKE '/careers%') AS careers,
+        max(event='$pageview' AND properties.$pathname LIKE '/cc%') AS coach,
+        max(event='$pageview' AND (properties.$pathname LIKE '/assignments%' OR properties.$pathname LIKE '/dojos/assignment%')) AS assignment,
+        max(event='$pageview' AND properties.$pathname LIKE '/dojos/internships%') AS internships,
+        max(event='$pageview' AND properties.$pathname LIKE '/dojos/humanizer%') AS humanizer
+      FROM events WHERE ${tc} ${envWhere(env)}
+      GROUP BY person_id
+    )
+    WHERE ro AND NOT ru`;
+}
 function quizHogql(tc: string, env: string) {
   return `
     SELECT toInt(properties.question_number) AS q, uniq(person_id) AS people
@@ -182,6 +208,7 @@ export default function FunnelPage() {
   const [funnel, setFunnel] = useState<Record<string, number>>({ visited: 0, reached: 0, resume: 0, quiz: 0, leads: 0 });
   const [dbTotals, setDbTotals] = useState<{ signups: number; paid: number }>({ signups: 0, paid: 0 });
   const [quiz, setQuiz] = useState<{ q: number; people: number }[]>([]);
+  const [fork, setFork] = useState<Record<string, number> | null>(null);
   const [checkout, setCheckout] = useState<Record<string, number>>({});
   const [detail, setDetail] = useState<{ event: string; people: number; total: number }[]>([]);
   const [timing, setTiming] = useState<Record<string, number>>({});
@@ -198,15 +225,21 @@ export default function FunnelPage() {
       const { start, end } = (RANGES.find((r) => r.key === rk) ?? RANGES[2]).range();
       const tc = timeClause(start, end);
       const token = await getToken();
-      const [macro, nestedRes, quizRes, coRes, detailRes, timingRes, signupsRes] = await Promise.all([
+      const [macro, nestedRes, quizRes, coRes, detailRes, timingRes, forkRes, signupsRes] = await Promise.all([
         phQuery(macroHogql(tc, e)),
         phQuery(nestedHogql(tc, e)),
         phQuery(quizHogql(tc, e)),
         phQuery(checkoutHogql(tc, e)),
         phQuery(detailHogql(tc, e)),
         phQuery(timingHogql(tc, e)),
+        phQuery(forkHogql(tc, e)).catch(() => ({ results: [] })),
         fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()).catch(() => ({ daily: [] })),
       ]);
+      const fk = forkRes.results?.[0] ?? [];
+      setFork(fk.length ? {
+        cohort: +fk[0] || 0, any_other: +fk[1] || 0, careers: +fk[2] || 0,
+        coach: +fk[3] || 0, assignment: +fk[4] || 0, internships: +fk[5] || 0, humanizer: +fk[6] || 0,
+      } : null);
       // Signups AND paid come from Postgres (authoritative). PostHog's
       // payment_confirmed was empty historically, which is why Paid showed 0.
       const signupMap: Record<string, number> = {};
@@ -346,6 +379,38 @@ export default function FunnelPage() {
                 })}
               </div>
             </div>
+
+            {/* Where the outreach drop-offs went */}
+            {fork && fork.cohort > 0 && (
+              <div className={`p-5 md:p-6 mb-8 ${card}`}>
+                <h2 className="font-['Clash_Display'] text-xl font-bold mb-1">Where the drop-offs went</h2>
+                <p className="text-xs text-neutral-500 mb-4">
+                  Of the <b>{fmt(fork.cohort)}</b> people who reached outreach but never uploaded a resume,
+                  {" "}<b>{fmt(fork.any_other)}</b> ({pct(fork.any_other, fork.cohort)}%) used another Studojo tool instead.
+                </p>
+                <div className="space-y-2">
+                  {[
+                    { label: "Career Coach (chat)", v: fork.coach },
+                    { label: "Resume / Careers", v: fork.careers },
+                    { label: "Assignment Dojo", v: fork.assignment },
+                    { label: "Internships Dojo", v: fork.internships },
+                    { label: "Humanizer", v: fork.humanizer },
+                    { label: "Used no other tool (pure drop)", v: Math.max(0, fork.cohort - fork.any_other) },
+                  ].map((t) => (
+                    <div key={t.label} className="flex items-center gap-3">
+                      <div className="w-48 flex-shrink-0 text-sm font-medium">{t.label}</div>
+                      <div className="flex-1 h-7 rounded-lg bg-neutral-100 overflow-hidden border border-neutral-200">
+                        <div className="h-full bg-violet-400 flex items-center px-2" style={{ width: `${Math.max(pct(t.v, fork.cohort), t.v > 0 ? 4 : 0)}%` }}>
+                          {t.v > 0 && <span className="text-xs font-bold text-white">{fmt(t.v)}</span>}
+                        </div>
+                      </div>
+                      <div className="w-14 text-right text-sm font-bold">{pct(t.v, fork.cohort)}%</div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-neutral-400 mt-3">A person can appear under more than one tool. Cohort = reached /outreach, no resume upload (PostHog person-level).</p>
+              </div>
+            )}
 
             {/* Quiz + Checkout drop-off */}
             <div className="grid gap-6 lg:grid-cols-2 mb-8">
