@@ -22,7 +22,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     const q = async (query: any) => (await db.execute(query)).rows as any[];
 
     // Dates bucketed in IST (+5:30) so "today"/"yesterday" match the founder's day.
-    const [signups, orders, emails, replies, paid, quizzes] = await Promise.all([
+    const [signups, orders, emails, replies, paid] = await Promise.all([
       q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM "user"
             WHERE DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
       q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM outreach_orders
@@ -36,24 +36,18 @@ export async function loader({ request }: Route.LoaderArgs) {
       q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM payment_orders
             WHERE status IN ('paid','completed')
               AND DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
-      // Authoritative quiz-completion: flex_notes is written from the final quiz
-      // questions (Q12/Q13), so it's the true "finished the quiz" signal for ALL
-      // history — unaffected by the over-firing profile_quiz_completed PostHog event.
-      q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM candidates
-            WHERE flex_notes IS NOT NULL
-              AND DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
     ]);
 
     const map: Record<string, any> = {};
     const dayStr = (d: any) => String(d).split("T")[0];
-    const blank = () => ({ day: "", signups: 0, orders: 0, emails: 0, replies: 0, paid: 0, quizzes: 0 });
+    const blank = () => ({ day: "", signups: 0, orders: 0, emails: 0, replies: 0, paid: 0 });
     const add = (rows: any[], key: string) => {
       for (const r of rows) {
         const d = dayStr(r.day);
         (map[d] ??= { ...blank(), day: d })[key] = r.n ?? 0;
       }
     };
-    add(signups, "signups"); add(orders, "orders"); add(emails, "emails"); add(replies, "replies"); add(paid, "paid"); add(quizzes, "quizzes");
+    add(signups, "signups"); add(orders, "orders"); add(emails, "emails"); add(replies, "replies"); add(paid, "paid");
 
     // fill every day in range so the dashboard has no gaps
     const out: any[] = [];
