@@ -52,6 +52,19 @@ export default function Dashboard() {
   const [cStart, setCStart] = useState(todayIso);
   const [cEnd, setCEnd] = useState(todayIso);
   const [visits, setVisits] = useState<number | null>(null);
+  const [tickets, setTickets] = useState<{ open: number; high: number } | null>(null);
+
+  // Open support tickets — drives the red alert bar.
+  useEffect(() => {
+    if (!isAuthorized) return;
+    (async () => {
+      const token = await getToken();
+      fetch(`/api/tickets?status=open`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} })
+        .then((r) => r.json())
+        .then((d) => setTickets({ open: Number(d?.stats?.open) || 0, high: Number(d?.stats?.high_open) || 0 }))
+        .catch(() => setTickets(null));
+    })();
+  }, [isAuthorized]);
 
   // IST date N days ago (matches the API's day bucketing).
   const istShift = (days: number) => new Date(Date.now() + 5.5 * 3600 * 1000 - days * 86400000).toISOString().slice(0, 10);
@@ -125,6 +138,21 @@ export default function Dashboard() {
     <div className="min-h-screen bg-neutral-50">
       <AdminHeader />
       <div className="mx-auto max-w-7xl px-4 py-8 md:px-8">
+        {tickets && tickets.open > 0 && (
+          <Link
+            to="/tickets"
+            className="mb-6 flex items-center justify-between gap-3 rounded-2xl border-2 border-red-700 bg-red-600 px-5 py-4 text-white shadow-[4px_4px_0px_0px_rgba(127,29,29,1)] transition-transform hover:-translate-y-0.5"
+          >
+            <span className="flex items-center gap-3">
+              <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white/20 text-sm font-bold">!</span>
+              <span className="font-['Clash_Display'] text-lg font-bold">
+                {tickets.open} open support ticket{tickets.open === 1 ? "" : "s"}
+                {tickets.high > 0 && <span className="ml-2 rounded-full bg-white/25 px-2 py-0.5 text-xs font-bold align-middle">{tickets.high} high priority</span>}
+              </span>
+            </span>
+            <span className="text-sm font-semibold whitespace-nowrap">View tickets →</span>
+          </Link>
+        )}
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h1 className="font-['Clash_Display'] text-3xl font-medium tracking-tight text-neutral-950 md:text-4xl">
