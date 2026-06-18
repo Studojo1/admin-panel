@@ -7,6 +7,7 @@ import {
 import { Line } from "react-chartjs-2";
 import { AdminHeader, StatCard } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
+import { getToken } from "~/lib/api";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
@@ -41,9 +42,13 @@ export default function Dashboard() {
   const [cStart, setCStart] = useState(todayIso);
   const [cEnd, setCEnd] = useState(todayIso);
 
-  const load = (start?: string, end?: string) => {
+  const load = async (start?: string, end?: string) => {
     const qs = start && end ? `?start=${start}&end=${end}` : "";
-    fetch(`/api/overview${qs}`, { credentials: "include" })
+    const token = await getToken();
+    fetch(`/api/overview${qs}`, {
+      credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
       .then((r) => r.json())
       .then((d) => (d.error ? setErr(d.error) : (setData(d), setErr(""))))
       .catch((e) => setErr(e.message));
