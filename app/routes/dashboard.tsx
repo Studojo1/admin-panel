@@ -34,6 +34,15 @@ const PERIODS: { key: PeriodKey; label: string }[] = [
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 const usd = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
 
+async function phQuery(query: string) {
+  const res = await fetch("/api/posthog?type=query", {
+    method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+    body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
+  });
+  if (!res.ok) throw new Error(`PostHog ${res.status}`);
+  return res.json();
+}
+
 export default function Dashboard() {
   const { isAuthorized } = useAdminGuard();
   const [data, setData] = useState<Overview | null>(null);
@@ -42,6 +51,33 @@ export default function Dashboard() {
   const todayIso = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const [cStart, setCStart] = useState(todayIso);
   const [cEnd, setCEnd] = useState(todayIso);
+  const [visits, setVisits] = useState<number | null>(null);
+
+  // IST date N days ago (matches the API's day bucketing).
+  const istShift = (days: number) => new Date(Date.now() + 5.5 * 3600 * 1000 - days * 86400000).toISOString().slice(0, 10);
+  // Date range for the selected period. Undefined = lifetime (no time filter).
+  const rangeFor = (pk: PeriodKey): { start?: string; end?: string } => {
+    switch (pk) {
+      case "today": return { start: todayIso, end: todayIso };
+      case "yesterday": { const y = istShift(1); return { start: y, end: y }; }
+      case "last7": return { start: istShift(6), end: todayIso };
+      case "last30": return { start: istShift(29), end: todayIso };
+      case "custom": return cStart && cEnd ? { start: cStart, end: cEnd } : {};
+      default: return {}; // allTime
+    }
+  };
+  const { start: srcStart, end: srcEnd } = rangeFor(period);
+
+  // Visits (unique people with a pageview) for the selected period — from PostHog.
+  useEffect(() => {
+    if (!isAuthorized) return;
+    const IST = "toDate(timestamp + INTERVAL 330 MINUTE)";
+    const tw = srcStart && srcEnd ? `AND ${IST} >= toDate('${srcStart}') AND ${IST} <= toDate('${srcEnd}')` : "";
+    setVisits(null);
+    phQuery(`SELECT uniq(person_id) FROM events WHERE event='$pageview' ${tw}`)
+      .then((res) => setVisits(+(res.results?.[0]?.[0]) || 0))
+      .catch(() => setVisits(null));
+  }, [isAuthorized, period, srcStart, srcEnd]);
 
   const load = async (start?: string, end?: string) => {
     const qs = start && end ? `?start=${start}&end=${end}` : "";
@@ -145,7 +181,7 @@ export default function Dashboard() {
 
         {p && (
           <>
-            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <div className="rounded-2xl border-2 border-neutral-900 bg-purple-500 p-6 text-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
                 <div className="text-xs font-bold uppercase tracking-wide opacity-80">Revenue</div>
                 <div className="mt-1 font-['Clash_Display'] text-3xl font-semibold md:text-4xl">{inr(p.rev.revenue)}</div>
@@ -157,6 +193,7 @@ export default function Dashboard() {
               <StatCard value={p.rev.orders} label="Paid Orders" color="orange" />
               <StatCard value={p.signups.toLocaleString("en-IN")} label="Signups" color="green" />
               <StatCard value={p.outreach} label="Outreach Orders" color="pink" />
+              <StatCard value={visits === null ? "…" : visits.toLocaleString("en-IN")} label={period === "allTime" ? "Lifetime Visits" : "Visits"} color="yellow" />
             </div>
 
             <div className="mt-6 rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
@@ -178,7 +215,7 @@ export default function Dashboard() {
               )}
             </div>
 
-            <div className="mt-6"><SourceBreakdown start={(p as any).start} end={(p as any).end} /></div>
+            <div className="mt-6"><SourceBreakdown start={srcStart} end={srcEnd} /></div>
 
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {[

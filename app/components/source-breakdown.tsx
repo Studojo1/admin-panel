@@ -99,7 +99,7 @@ export function SourceBreakdown({ start, end, env = "all", className = "" }: { s
                   {r.users > 0 && <span className="text-xs font-bold text-white">{r.users.toLocaleString()}</span>}
                 </div>
               </div>
-              <div className="w-24 text-right text-xs font-semibold text-neutral-500">{totalUsers > 0 ? Math.round((r.users / totalUsers) * 100) : 0}% · {r.visitors.toLocaleString()} visits</div>
+              <div className="w-16 text-right text-xs font-semibold text-neutral-500">{totalUsers > 0 ? Math.round((r.users / totalUsers) * 100) : 0}%</div>
             </div>
           ))}
         </div>
