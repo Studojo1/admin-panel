@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -192,6 +193,7 @@ export default function FunnelPage() {
     try {
       const { start, end } = (RANGES.find((r) => r.key === rk) ?? RANGES[2]).range();
       const tc = timeClause(start, end);
+      const token = await getToken();
       const [macro, nestedRes, quizRes, coRes, detailRes, timingRes, signupsRes] = await Promise.all([
         phQuery(macroHogql(tc, e)),
         phQuery(nestedHogql(tc, e)),
@@ -199,7 +201,7 @@ export default function FunnelPage() {
         phQuery(checkoutHogql(tc, e)),
         phQuery(detailHogql(tc, e)),
         phQuery(timingHogql(tc, e)),
-        fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include" }).then((r) => r.json()).catch(() => ({ daily: [] })),
+        fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()).catch(() => ({ daily: [] })),
       ]);
       // Signups AND paid come from Postgres (authoritative). PostHog's
       // payment_confirmed was empty historically, which is why Paid showed 0.

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
 
 async function phQuery(query: string) {
@@ -84,9 +85,10 @@ export default function UserJourneys() {
   const load = useCallback(async (d: number, e: string) => {
     setLoading(true); setError(""); setOpen(null);
     try {
+      const token = await getToken();
       const [res, paidRes] = await Promise.all([
         phQuery(listHogql(d, e)),
-        fetch(`/api/paid-emails`, { credentials: "include" }).then((r) => r.json()).catch(() => ({ emails: [] })),
+        fetch(`/api/paid-emails`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()).catch(() => ({ emails: [] })),
       ]);
       const paidSet = new Set<string>((paidRes.emails ?? []).map((x: string) => (x || "").toLowerCase()));
       const cols = res.columns ?? [];

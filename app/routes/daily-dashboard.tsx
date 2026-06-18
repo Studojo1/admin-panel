@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
 
 async function phQuery(query: string) {
@@ -47,8 +48,9 @@ export default function DailyDashboard() {
     try {
       const end = isoDate(new Date());
       const start = isoDate(new Date(Date.now() - (d - 1) * 86400000));
+      const token = await getToken();
       const [dbRes, visRes] = await Promise.all([
-        fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include" }).then((r) => r.json()),
+        fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()),
         phQuery(`SELECT toDate(timestamp) AS day, uniq(person_id) AS v FROM events WHERE event='$pageview' AND timestamp >= toDateTime('${start} 00:00:00') AND timestamp <= toDateTime('${end} 23:59:59') GROUP BY day`),
       ]);
       if (dbRes.error) throw new Error(dbRes.error);
