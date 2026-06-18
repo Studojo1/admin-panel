@@ -51,7 +51,7 @@ function macroHogql(tc: string, env: string) {
       uniqIf(person_id, event='$pageview') AS visits,
       uniqIf(person_id, event='$pageview' AND properties.$pathname LIKE '/outreach%') AS outreach,
       uniqIf(person_id, event='resume_uploaded') AS resume,
-      uniqIf(person_id, event='profile_quiz_completed') AS quiz,
+      uniqIf(person_id, event='quiz_question_answered' AND toInt(properties.question_number) >= 13) AS quiz,
       uniqIf(person_id, event='leads_loaded') AS leads,
       uniqIf(person_id, event='$pageview' AND properties.$pathname LIKE '/outreach/enrichment%') AS paypage,
       uniqIf(person_id, event='pay_now_clicked') AS paytap,
@@ -76,7 +76,7 @@ function nestedHogql(tc: string, env: string) {
         max(event='$pageview') AS v,
         max(event='$pageview' AND properties.$pathname LIKE '/outreach%') AS ro,
         max(event='resume_uploaded') AS ru,
-        max(event='profile_quiz_completed') AS qz,
+        max(event='quiz_question_answered' AND toInt(properties.question_number) >= 13) AS qz,
         max(event='leads_loaded') AS ld,
         max(event='$pageview' AND properties.$pathname LIKE '/outreach/enrichment%') AS pp,
         max(event='pay_now_clicked') AS pt
@@ -572,7 +572,7 @@ export default function FunnelPage() {
                 </table>
               </div>
             </div>
-            <p className="text-xs text-neutral-400 mt-4">Signups and Paid from Postgres (authoritative). Other steps = unique people in PostHog. "Reached outreach" = a /outreach pageview. Note: PostHog events span all environments; new quiz/checkout events appear once that build is live.</p>
+            <p className="text-xs text-neutral-400 mt-4">Signups and Paid from Postgres (authoritative). Other steps = unique people in PostHog. "Reached outreach" = a /outreach pageview. "Completed profile quiz" = answered the final question (Q13) via quiz_question_answered — the reliable signal; the old profile_quiz_completed event over-fired so it's no longer used here. Note: per-question quiz/checkout events started 17 Jun, so ranges before that show 0 for those steps.</p>
           </>
         )}
       </main>
