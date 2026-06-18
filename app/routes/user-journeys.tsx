@@ -120,16 +120,43 @@ export default function UserJourneys() {
     setLoading(true); setError(""); setOpen(null);
     try {
       const token = await getToken();
-      const [res, paidRes] = await Promise.all([
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+      const [res, paidRes, stageRes] = await Promise.all([
         phQuery(listHogql(d, e)),
-        fetch(`/api/paid-emails`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()).catch(() => ({ emails: [] })),
+        fetch(`/api/paid-emails`, { credentials: "include", headers: authHeaders }).then((r) => r.json()).catch(() => ({ emails: [] })),
+        fetch(`/api/journeys`, { credentials: "include", headers: authHeaders }).then((r) => r.json()).catch(() => ({ stages: {} })),
       ]);
       const paidSet = new Set<string>((paidRes.emails ?? []).map((x: string) => (x || "").toLowerCase()));
+      // Authoritative server-side funnel stages (immune to client event loss).
+      const dbStages: Record<string, any> = stageRes.stages ?? {};
       const cols = res.columns ?? [];
       const idx = (n: string) => cols.indexOf(n);
       setRows((res.results ?? []).map((r: any[]) => {
         const email = r[idx("email")] || "";
-        const paid = (email && paidSet.has(email.toLowerCase())) || +r[idx("paid")] === 1 ? 1 : 0;
+        const lc = email.toLowerCase();
+        const ph = { reached: +r[idx("reached")], resume: +r[idx("resume")], quiz_started: +r[idx("quiz_started")], quiz_done: +r[idx("quiz_done")], leads: +r[idx("leads")], pay_click: +r[idx("pay_click")], checkout: +r[idx("checkout")], paid: +r[idx("paid")] };
+        // DB stage timestamps win over PostHog. payment_page_reached (order
+        // created) authoritatively implies both "tapped pay" and "reached checkout".
+        const db = dbStages[lc] || {};
+        const dbf = (v: any) => (v ? 1 : 0);
+        const flags: Record<string, number> = {
+          reached: ph.reached,
+          resume: dbf(db.resume) || ph.resume,
+          quiz_started: dbf(db.quiz_started) || ph.quiz_started,
+          quiz_done: dbf(db.quiz_done) || ph.quiz_done,
+          leads: dbf(db.leads) || ph.leads,
+          pay_click: dbf(db.payment_page) || ph.pay_click,
+          checkout: dbf(db.payment_page) || ph.checkout,
+          paid: dbf(db.paid) || (lc && paidSet.has(lc) ? 1 : 0) || ph.paid,
+        };
+        // Monotonic backfill: the funnel is strictly ordered, so reaching a
+        // later step proves every earlier step happened. Fill them in so a
+        // genuinely-passed step is never shown as a gap (purple, not grey).
+        let seenLater = 0;
+        for (let k = STEPS.length - 1; k >= 0; k--) {
+          if (flags[STEPS[k].key]) seenLater = 1;
+          else if (seenLater) flags[STEPS[k].key] = 1;
+        }
         return {
           pid: String(r[idx("person_id")]),
           email,
@@ -143,7 +170,7 @@ export default function UserJourneys() {
           utmMedium: r[idx("utm_medium")] || "",
           utmCampaign: r[idx("utm_campaign")] || "",
           refDomain: r[idx("ref_domain")] || "",
-          flags: { reached: +r[idx("reached")], resume: +r[idx("resume")], quiz_started: +r[idx("quiz_started")], quiz_done: +r[idx("quiz_done")], leads: +r[idx("leads")], pay_click: +r[idx("pay_click")], checkout: +r[idx("checkout")], paid },
+          flags,
           products: { p_resume: +r[idx("p_resume")], p_intern: +r[idx("p_intern")], p_coach: +r[idx("p_coach")], p_assign: +r[idx("p_assign")], p_human: +r[idx("p_human")] },
         };
       }));
@@ -212,11 +239,10 @@ export default function UserJourneys() {
             <div className="px-5 py-3 border-b-2 border-neutral-900 bg-neutral-50 flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-['Clash_Display'] text-lg font-bold">{filtered.length} signed-up users</h2>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-neutral-500">
-                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-violet-500" />did step</span>
-                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-white border-2 border-violet-300" />passed (no event)</span>
+                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-violet-500" />reached step</span>
                 <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-400 ring-2 ring-red-200" />dropped here</span>
                 <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-neutral-200" />never reached</span>
-                <span className="text-neutral-400">· click a row for the full path</span>
+                <span className="text-neutral-400">· funnel from server-side DB stages · click a row for the path</span>
               </div>
             </div>
             <div className="divide-y divide-neutral-100">
@@ -261,7 +287,6 @@ export default function UserJourneys() {
                           const done = r.flags[s.key];
                           let cls: string, title: string;
                           if (done) { cls = s.key === "paid" ? "bg-emerald-500" : "bg-violet-500"; title = `${s.label} ✓`; }
-                          else if (k < fi) { cls = "bg-white border-2 border-violet-300"; title = `${s.label} — passed through, but no event recorded`; }
                           else if (k === fi + 1 && !paid) { cls = "bg-red-400 ring-2 ring-red-200"; title = `${s.label} — dropped here`; }
                           else { cls = "bg-neutral-200"; title = `${s.label} — never reached`; }
                           return <span key={s.key} title={title} className={`h-2.5 w-2.5 rounded-full ${cls}`} />;
