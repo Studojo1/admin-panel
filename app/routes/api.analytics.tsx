@@ -20,18 +20,21 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   try {
+    // Bucket signups by IST day (created_at + 5.5h) to match the Funnel page and
+    // the MSL dashboard, which are the authoritative IST-based counts. Previously
+    // this used UTC DATE(created_at), which under/mis-counted "yesterday" by 5.5h.
     const countResult = await db.execute(sql`
       SELECT COUNT(*)::int AS count
       FROM "user"
-      WHERE DATE(created_at) >= ${start}::date
-        AND DATE(created_at) <= ${end}::date
+      WHERE DATE(created_at + INTERVAL '5.5 hours') >= ${start}::date
+        AND DATE(created_at + INTERVAL '5.5 hours') <= ${end}::date
     `);
 
     const dailyResult = await db.execute(sql`
-      SELECT DATE(created_at) AS day, COUNT(*)::int AS signups
+      SELECT DATE(created_at + INTERVAL '5.5 hours') AS day, COUNT(*)::int AS signups
       FROM "user"
-      WHERE DATE(created_at) >= ${start}::date
-        AND DATE(created_at) <= ${end}::date
+      WHERE DATE(created_at + INTERVAL '5.5 hours') >= ${start}::date
+        AND DATE(created_at + INTERVAL '5.5 hours') <= ${end}::date
       GROUP BY day
       ORDER BY day ASC
     `);
