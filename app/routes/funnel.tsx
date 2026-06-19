@@ -111,12 +111,19 @@ function forkHogql(tc: string, env: string) {
     )
     WHERE ro AND NOT ru`;
 }
+// The quiz is an adaptive LLM agent, so question_number is NOT a clean 1→13
+// sequence per person (the backend counts unevenly across turns). Counting
+// "answered exactly question N" therefore goes non-monotonic (more people at
+// Q9 than Q8). Instead we take each person's FURTHEST question and the chart
+// renders "reached at least question N" — monotonic by construction.
 function quizHogql(tc: string, env: string) {
   return `
-    SELECT toInt(properties.question_number) AS q, uniq(person_id) AS people
-    FROM events WHERE event='quiz_question_answered' AND ${tc} ${envWhere(env)}
-      AND isNotNull(properties.question_number)
-    GROUP BY q ORDER BY q ASC LIMIT 20`;
+    SELECT max_q, count() AS people FROM (
+      SELECT person_id, max(toInt(properties.question_number)) AS max_q
+      FROM events WHERE event='quiz_question_answered' AND ${tc} ${envWhere(env)}
+        AND isNotNull(properties.question_number)
+      GROUP BY person_id
+    ) GROUP BY max_q ORDER BY max_q ASC LIMIT 50`;
 }
 const DETAIL_EVENTS = [
   "resume_upload_started", "resume_uploaded", "resume_upload_failed",
@@ -262,7 +269,18 @@ export default function FunnelPage() {
         return { day, visits: +r[1] || 0, outreach: +r[2] || 0, resume: +r[3] || 0, quiz: +r[4] || 0, leads: +r[5] || 0, paypage: +r[6] || 0, paytap: +r[7] || 0, abandoned: +r[8] || 0, paid: paidMap[day] || 0, signups: signupMap[day] || 0 };
       });
       setRows(macroRows);
-      setQuiz((quizRes.results ?? []).map((r: any[]) => ({ q: +r[0], people: +r[1] || 0 })));
+      // Convert the per-person "furthest question" distribution into a
+      // cumulative "reached at least question N" funnel (always monotonic).
+      const maxDist = (quizRes.results ?? [])
+        .map((r: any[]) => ({ maxq: +r[0] || 0, people: +r[1] || 0 }))
+        .filter((d: { maxq: number }) => d.maxq >= 1);
+      const topQ = maxDist.length ? Math.max(...maxDist.map((d: { maxq: number }) => d.maxq)) : 0;
+      const reached: { q: number; people: number }[] = [];
+      for (let q = 1; q <= topQ; q++) {
+        const people = maxDist.reduce((a: number, d: { maxq: number; people: number }) => a + (d.maxq >= q ? d.people : 0), 0);
+        reached.push({ q, people });
+      }
+      setQuiz(reached);
       const co = coRes.results?.[0] ?? [];
       setCheckout({ clicked: +co[0] || 0, opened: +co[1] || 0, paid: +co[2] || 0, abandoned: +co[3] || 0, failed: +co[4] || 0 });
       setDetail((detailRes.results ?? []).map((r: any[]) => ({ event: String(r[0]), people: +r[1] || 0, total: +r[2] || 0 })));
@@ -424,7 +442,7 @@ export default function FunnelPage() {
             <div className="grid gap-6 lg:grid-cols-2 mb-8">
               <div className={`p-5 md:p-6 ${card}`}>
                 <h2 className="font-['Clash_Display'] text-xl font-bold mb-1">Quiz drop-off</h2>
-                <p className="text-xs text-neutral-500 mb-4">How many people answered each question. Where the bar shrinks is where they quit.</p>
+                <p className="text-xs text-neutral-500 mb-4">How many people got at least this far (the quiz is adaptive, so this counts each person's furthest question). Where the bar shrinks is where they dropped.</p>
                 {quiz.length === 0 ? <p className="text-sm text-neutral-400 py-6 text-center">No quiz data yet (events start after the latest deploy).</p> : (
                   <div className="space-y-2">
                     {quiz.map((x, i) => {
