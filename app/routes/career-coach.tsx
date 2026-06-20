@@ -214,7 +214,6 @@ interface StudentActivity {
     first_seen?: string;
     last_seen?: string;
     session_count?: number;
-    session_count?: number;
     events?: { type: string; data?: Record<string, unknown>; at?: string }[];
     states_reached?: { state: string; first_at?: string }[];
     milestones?: {
