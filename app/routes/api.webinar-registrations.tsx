@@ -31,8 +31,13 @@ export async function loader({ request }: Route.LoaderArgs) {
       year_of_study TEXT NOT NULL,
       graduation_year TEXT,
       life_stage TEXT,
+      referral_source TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+  // Migrate older tables that predate the referral_source column.
+  await db.execute(sql`
+    ALTER TABLE webinar_registrations ADD COLUMN IF NOT EXISTS referral_source TEXT
   `);
 
   const url = new URL(request.url);
@@ -42,7 +47,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const [rows, statsResult] = await Promise.all([
     db.execute(sql`
       SELECT id, full_name, whatsapp, email, college, course,
-             specialisation, year_of_study, graduation_year, life_stage, created_at
+             specialisation, year_of_study, graduation_year, life_stage,
+             referral_source, created_at
       FROM webinar_registrations
       ORDER BY created_at DESC
       LIMIT ${limit} OFFSET ${offset}
