@@ -29,6 +29,11 @@ export function meta(_: Route.MetaArgs) {
 // Read the career-coach backend that matches this admin panel's environment.
 // Always point at the production coach backend — that is where real students are.
 const CC_API = "https://studojo.com/api/v1/cc";
+const CC_ADMIN_KEY = import.meta.env.VITE_CC_ADMIN_KEY || "";
+const ccAdminHeaders = () => ({
+  "Content-Type": "application/json",
+  ...(CC_ADMIN_KEY ? { "x-admin-key": CC_ADMIN_KEY } : {}),
+});
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -521,7 +526,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     setPathDrilldown({ label, type, students: [], loading: true });
     const param = type === "role" ? `role=${encodeURIComponent(label)}` : `industry=${encodeURIComponent(label)}`;
     try {
-      const r = await fetch(`${CC_API}/admin/career-paths/students?${param}`, { headers: { "Content-Type": "application/json" } });
+      const r = await fetch(`${CC_API}/admin/career-paths/students?${param}`, { headers: ccAdminHeaders() });
       const d = r.ok ? await r.json() : [];
       setPathDrilldown({ label, type, students: Array.isArray(d) ? d : [], loading: false });
     } catch {
@@ -543,26 +548,22 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     }
   }, [isAuthorized]);
 
+  const ccHeaders = useCallback(() => ccAdminHeaders(), []);
+
   // Lazy-load the dropout analysis the first time the Dropouts tab is opened
   // (it scans all messages, so we don't run it on every dashboard load).
+  // Use a ref to prevent re-firing after a failed fetch (avoids infinite loop).
+  const dropoutFetchedRef = React.useRef(false);
   useEffect(() => {
-    if (tab !== "dropouts" || dropouts || loadingDropouts) return;
+    if (tab !== "dropouts" || dropouts || dropoutFetchedRef.current) return;
+    dropoutFetchedRef.current = true;
     setLoadingDropouts(true);
-    fetch(`${CC_API}/admin/dropouts`, { headers: { "Content-Type": "application/json" } })
+    fetch(`${CC_API}/admin/dropouts`, { headers: ccAdminHeaders() })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (d) setDropouts(d); })
       .catch(() => {})
       .finally(() => setLoadingDropouts(false));
-  }, [tab, dropouts, loadingDropouts, authenticated]);
-
-  const CC_ADMIN_KEY = import.meta.env.VITE_CC_ADMIN_KEY || "";
-  const ccHeaders = useCallback(
-    () => ({
-      "Content-Type": "application/json",
-      ...(CC_ADMIN_KEY ? { "x-admin-key": CC_ADMIN_KEY } : {}),
-    }),
-    [CC_ADMIN_KEY],
-  );
+  }, [tab, dropouts]);
 
   async function loadAll(_key?: string) {
     setLoading(true);
