@@ -3,7 +3,21 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { toast } from "sonner";
+import { useRouteError } from "react-router";
 import type { Route } from "./+types/career-coach";
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const msg = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : undefined;
+  return (
+    <main style={{ padding: 40, fontFamily: "monospace" }}>
+      <h2 style={{ color: "#dc2626" }}>Career Coach — render error</h2>
+      <pre style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: 16, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 12 }}>{msg}</pre>
+      {stack && <pre style={{ background: "#f5f5f5", borderRadius: 8, padding: 16, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 11, marginTop: 12 }}>{stack}</pre>}
+    </main>
+  );
+}
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Career Coach — Studojo Admin" }];
