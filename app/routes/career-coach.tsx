@@ -3,8 +3,24 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { toast } from "sonner";
+import { useRouteError } from "react-router";
 import type { Route } from "./+types/career-coach";
 
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-neutral-50 p-8">
+      <div className="w-full max-w-lg rounded-3xl border-2 border-red-300 bg-white p-10 text-center shadow-[6px_6px_0px_0px_rgba(220,38,38,0.15)]">
+        <div className="mb-3 font-['Clash_Display'] text-xl font-black text-red-600">Career Coach — error</div>
+        <p className="font-['Satoshi'] text-sm text-neutral-600">{msg}</p>
+        <button onClick={() => window.location.reload()} className="mt-6 rounded-full border-2 border-neutral-900 bg-white px-6 py-2 font-['Satoshi'] text-sm font-semibold shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] hover:bg-neutral-50">
+          Reload
+        </button>
+      </div>
+    </main>
+  );
+}
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Career Coach — Studojo Admin" }];
 }
@@ -538,24 +554,30 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       .finally(() => setLoadingDropouts(false));
   }, [tab, dropouts, loadingDropouts, authenticated]);
 
+  const CC_ADMIN_KEY = import.meta.env.VITE_CC_ADMIN_KEY || "";
   const ccHeaders = useCallback(
-    () => ({ "Content-Type": "application/json" }),
-    [],
+    () => ({
+      "Content-Type": "application/json",
+      ...(CC_ADMIN_KEY ? { "x-admin-key": CC_ADMIN_KEY } : {}),
+    }),
+    [CC_ADMIN_KEY],
   );
 
   async function loadAll(_key?: string) {
     setLoading(true);
     try {
-      const headers = { "Content-Type": "application/json" };
+      const headers = ccHeaders();
+      const safeJson = (r: Response) => r.ok ? r.json() : Promise.resolve(null);
       const [ov, fu, dr, st, sc, pa, qu] = await Promise.all([
-        fetch(`${CC_API}/admin/overview`, { headers }).then((r) => r.json()),
-        fetch(`${CC_API}/admin/funnel`, { headers }).then((r) => r.json()),
-        fetch(`${CC_API}/admin/dropoffs`, { headers }).then((r) => r.json()),
-        fetch(`${CC_API}/admin/students`, { headers }).then((r) => r.json()),
-        fetch(`${CC_API}/admin/scores`, { headers }).then((r) => r.json()),
-        fetch(`${CC_API}/admin/career-paths`, { headers }).then((r) => r.json()),
-        fetch(`${CC_API}/admin/questions`, { headers }).then((r) => r.json()),
+        fetch(`${CC_API}/admin/overview`, { headers }).then(safeJson),
+        fetch(`${CC_API}/admin/funnel`, { headers }).then(safeJson),
+        fetch(`${CC_API}/admin/dropoffs`, { headers }).then(safeJson),
+        fetch(`${CC_API}/admin/students`, { headers }).then(safeJson),
+        fetch(`${CC_API}/admin/scores`, { headers }).then(safeJson),
+        fetch(`${CC_API}/admin/career-paths`, { headers }).then(safeJson),
+        fetch(`${CC_API}/admin/questions`, { headers }).then(safeJson),
       ]);
+      if (!ov?.students) { setKeyError(true); setLoading(false); return; }
       setOverview(ov);
       // Locations does live (rate-limited) geo lookups on first run — fetch it
       // separately so it never blocks the dashboard load.
