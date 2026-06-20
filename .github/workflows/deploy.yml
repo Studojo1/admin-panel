@@ -44,6 +44,8 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.APP_NAME }}:${{ env.IMAGE_TAG }}
             ${{ env.REGISTRY }}/${{ env.APP_NAME }}:latest
+          build-args: |
+            VITE_CC_ADMIN_KEY=${{ secrets.CC_ADMIN_SECRET_KEY }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.APP_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.APP_NAME }}:buildcache,mode=max
 

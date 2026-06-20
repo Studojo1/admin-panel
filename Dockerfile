@@ -9,6 +9,8 @@ FROM oven/bun:1 AS build-env
 WORKDIR /src
 ARG VITE_CONTROL_PLANE_URL=http://localhost:8080
 ENV VITE_CONTROL_PLANE_URL=${VITE_CONTROL_PLANE_URL}
+ARG VITE_CC_ADMIN_KEY=""
+ENV VITE_CC_ADMIN_KEY=${VITE_CC_ADMIN_KEY}
 COPY package.json package-lock.json* ./
 RUN bun install --no-save
 COPY . .
