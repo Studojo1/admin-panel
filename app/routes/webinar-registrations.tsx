@@ -19,6 +19,7 @@ interface Registration {
   year_of_study: string;
   graduation_year: string | null;
   life_stage: string | null;
+  referral_source: string | null;
   created_at: string;
 }
 
@@ -89,6 +90,7 @@ export default function WebinarRegistrations() {
   const stageBreakdown = useMemo(() => countBy((r) => r.life_stage), [rows]);
   const yearBreakdown = useMemo(() => countBy((r) => r.year_of_study), [rows]);
   const gradYearBreakdown = useMemo(() => countBy((r) => r.graduation_year), [rows]);
+  const referralBreakdown = useMemo(() => countBy((r) => r.referral_source), [rows]);
 
   const fmt = (iso: string) =>
     new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -128,10 +130,11 @@ export default function WebinarRegistrations() {
 
         {/* Breakdowns */}
         {!loading && rows.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
             <BreakdownCard title="Stage in life" items={stageBreakdown} />
             <BreakdownCard title="Year of study" items={yearBreakdown} />
             <BreakdownCard title="Graduation year" items={gradYearBreakdown} />
+            <BreakdownCard title="How they heard" items={referralBreakdown} />
           </div>
         )}
 
@@ -161,7 +164,7 @@ export default function WebinarRegistrations() {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {["#", "Date", "Name", "Email", "WhatsApp", "College", "Course", "Specialisation", "Year", "Grad Year", "Stage"].map((h) => (
+                  {["#", "Date", "Name", "Email", "WhatsApp", "College", "Course", "Specialisation", "Year", "Grad Year", "Stage", "Source"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       {h}
                     </th>
@@ -190,6 +193,7 @@ export default function WebinarRegistrations() {
                         <span className="text-gray-300">—</span>
                       )}
                     </td>
+                    <td className="px-4 py-3 text-gray-800">{dash(r.referral_source)}</td>
                   </tr>
                 ))}
               </tbody>
