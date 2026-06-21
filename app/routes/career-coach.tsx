@@ -42,6 +42,7 @@ interface OverviewData {
   dna: { total_generated: number; accuracy_rate: number; inaccuracy_count: number };
   tools: { total_clicks: number };
   active_per_hour?: { hour: string; label: string; active_users: number }[];
+  active_per_day?: { hour: string; label: string; active_users: number }[];
   active_per_week?: { hour: string; label: string; active_users: number }[];
   active_per_month?: { hour: string; label: string; active_users: number }[];
   generated_at: string;
@@ -482,7 +483,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
 
   const [tab, setTab] = useState<Tab>("overview");
   const [loading, setLoading] = useState(false);
-  const [activeGranularity, setActiveGranularity] = useState<"hour" | "week" | "month">("hour");
+  const [activeGranularity, setActiveGranularity] = useState<"hour" | "day" | "week" | "month">("hour");
   const [chartTz, setChartTz] = useState<"IST" | "UTC">("IST");
   // Drill-down: which chart bucket was clicked + the students active in it.
   const [activeBucket, setActiveBucket] = useState<{ hour: string; label: string } | null>(null);
@@ -810,11 +811,14 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                   const series =
                     activeGranularity === "hour"
                       ? overview.active_per_hour
+                      : activeGranularity === "day"
+                      ? overview.active_per_day
                       : activeGranularity === "week"
                       ? overview.active_per_week
                       : overview.active_per_month;
                   const meta = {
                     hour: { title: "Active users per hour", sub: `Distinct students who sent a message, last 24 hours (${chartTz})`, labelEvery: 2 },
+                    day: { title: "Active users per day", sub: "Distinct active students per day, last 30 days (IST)", labelEvery: 3 },
                     week: { title: "Active users per week", sub: "Distinct active students per week, last 12 weeks", labelEvery: 2 },
                     month: { title: "Active users per month", sub: "Distinct active students per month, last 12 months", labelEvery: 2 },
                   }[activeGranularity];
@@ -846,7 +850,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
                           )}
                           {/* Granularity toggle */}
                           <div className="flex rounded-full border-2 border-neutral-900 p-0.5">
-                            {(["hour", "week", "month"] as const).map((g) => (
+                            {(["hour", "day", "week", "month"] as const).map((g) => (
                               <button
                                 key={g}
                                 onClick={() => { setActiveGranularity(g); setActiveBucket(null); setBucketStudents(null); }}
