@@ -194,6 +194,13 @@ export interface FunnelStage {
   drop_off_pct_from_prev: number | null;
 }
 
+export interface PeriodReplyRate {
+  month: string;
+  leads_contacted: number;
+  leads_replied: number;
+  reply_rate: number;
+}
+
 export interface OutreachOverview {
   total_orders: number;
   paid_orders: number;
@@ -205,6 +212,9 @@ export interface OutreachOverview {
   total_emails_replied: number;
   total_emails_bounced: number;
   reply_rate_pct: number;
+  leads_contacted: number;
+  leads_replied: number;
+  period_reply_rates: PeriodReplyRate[];
   orders_by_status: Record<string, number>;
   monthly_metrics: OutreachMonthlyMetric[];
   funnel?: FunnelStage[];

@@ -479,6 +479,60 @@ export default function OutreachOrders() {
               </div>
             </motion.div>
 
+            {/* Reply Rate by Month (cohort table) */}
+            {(overview.period_reply_rates ?? []).length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.25 }}
+                className="rounded-2xl border-2 border-neutral-900 bg-white p-6 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] md:p-8"
+              >
+                <div className="mb-1 flex items-baseline justify-between">
+                  <h2 className="font-['Clash_Display'] text-xl font-medium leading-tight tracking-tight text-neutral-950 md:text-2xl">
+                    Reply Rate by Month
+                  </h2>
+                  <span className="font-['Satoshi'] text-sm text-neutral-500">
+                    Overall: <span className="font-semibold text-violet-600">{overview.reply_rate_pct}%</span>
+                    {" "}({overview.leads_replied} / {overview.leads_contacted} unique leads)
+                  </span>
+                </div>
+                <p className="mb-4 font-['Satoshi'] text-xs text-neutral-500">
+                  Cohort by month of first contact. Replies include follow-up responses. Excludes bounced, failed, and internal users.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="border-b-2 border-neutral-900">
+                        <th className="py-2 pr-6 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Month</th>
+                        <th className="py-2 pr-6 text-right font-['Satoshi'] text-sm font-bold text-neutral-950">Leads Contacted</th>
+                        <th className="py-2 pr-6 text-right font-['Satoshi'] text-sm font-bold text-neutral-950">Replied</th>
+                        <th className="py-2 text-right font-['Satoshi'] text-sm font-bold text-neutral-950">Reply Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(overview.period_reply_rates ?? []).map((row) => (
+                        <tr key={row.month} className="border-b border-neutral-100 last:border-0">
+                          <td className="py-2 pr-6 font-['Satoshi'] text-sm text-neutral-700">{row.month}</td>
+                          <td className="py-2 pr-6 text-right font-['Satoshi'] text-sm text-neutral-700">{row.leads_contacted.toLocaleString()}</td>
+                          <td className="py-2 pr-6 text-right font-['Satoshi'] text-sm text-neutral-700">{row.leads_replied}</td>
+                          <td className="py-2 text-right">
+                            <span className={`inline-block rounded-full px-2 py-0.5 font-['Satoshi'] text-xs font-semibold ${
+                              row.reply_rate >= 4 ? "bg-emerald-100 text-emerald-700" :
+                              row.reply_rate >= 2 ? "bg-violet-100 text-violet-700" :
+                              row.reply_rate > 0  ? "bg-yellow-100 text-yellow-700" :
+                              "bg-neutral-100 text-neutral-500"
+                            }`}>
+                              {row.reply_rate}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </motion.div>
+            )}
+
             {/* Search + Filter */}
             <motion.div
               initial={{ opacity: 0, y: 10 }}
