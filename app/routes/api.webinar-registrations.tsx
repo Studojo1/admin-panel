@@ -35,31 +35,63 @@ export async function loader({ request }: Route.LoaderArgs) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  // Migrate older tables that predate the referral_source column.
+  // Migrate older tables that predate later columns.
   await db.execute(sql`
     ALTER TABLE webinar_registrations ADD COLUMN IF NOT EXISTS referral_source TEXT
   `);
+  await db.execute(sql`
+    ALTER TABLE webinar_registrations ADD COLUMN IF NOT EXISTS webinar_id INTEGER
+  `);
 
   const url = new URL(request.url);
-  const limit = Math.min(parseInt(url.searchParams.get("limit") || "500"), 1000);
+  const limit = Math.min(parseInt(url.searchParams.get("limit") || "1000"), 2000);
   const offset = parseInt(url.searchParams.get("offset") || "0");
+
+  // List of webinars for the filter dropdown (active = 'upcoming' first).
+  const webinarsResult = await db.execute(sql`
+    SELECT id, title, status FROM webinars ORDER BY id DESC
+  `);
+  const webinars = webinarsResult.rows as { id: number; title: string; status: string }[];
+
+  // Which webinar to show. Default: the active (upcoming) one, else the latest.
+  const activeWebinar = webinars.find((w) => w.status === "upcoming") ?? webinars[0];
+  const webinarParam = url.searchParams.get("webinar");
+  const webinarId =
+    webinarParam && webinarParam !== "all"
+      ? parseInt(webinarParam)
+      : webinarParam === "all"
+        ? null
+        : (activeWebinar?.id ?? null);
+
+  const where =
+    webinarId === null ? sql`TRUE` : sql`r.webinar_id = ${webinarId}`;
 
   const [rows, statsResult] = await Promise.all([
     db.execute(sql`
-      SELECT id, full_name, whatsapp, email, college, course,
-             specialisation, year_of_study, graduation_year, life_stage,
-             referral_source, created_at
-      FROM webinar_registrations
-      ORDER BY created_at DESC
+      SELECT r.id, r.full_name, r.whatsapp, r.email, r.college, r.course,
+             r.specialisation, r.year_of_study, r.graduation_year, r.life_stage,
+             r.referral_source, r.webinar_id, w.title AS webinar_title, r.created_at
+      FROM webinar_registrations r
+      LEFT JOIN webinars w ON w.id = r.webinar_id
+      WHERE ${where}
+      ORDER BY r.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `),
     db.execute(sql`
       SELECT
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS last_24_hours
-      FROM webinar_registrations
+      FROM webinar_registrations r
+      WHERE ${where}
     `),
   ]);
 
-  return Response.json({ registrations: rows.rows, stats: statsResult.rows[0], limit, offset });
+  return Response.json({
+    registrations: rows.rows,
+    stats: statsResult.rows[0],
+    webinars,
+    selectedWebinar: webinarId === null ? "all" : webinarId,
+    limit,
+    offset,
+  });
 }

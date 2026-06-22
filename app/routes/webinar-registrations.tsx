@@ -20,12 +20,20 @@ interface Registration {
   graduation_year: string | null;
   life_stage: string | null;
   referral_source: string | null;
+  webinar_id: number | null;
+  webinar_title: string | null;
   created_at: string;
 }
 
 interface Stats {
   total: string;
   last_24_hours: string;
+}
+
+interface Webinar {
+  id: number;
+  title: string;
+  status: string;
 }
 
 const NOT_SPECIFIED = "__none__";
@@ -37,6 +45,11 @@ export default function WebinarRegistrations() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState<string>("");
+  const [webinars, setWebinars] = useState<Webinar[]>([]);
+  // "" until the loader tells us the default (active) webinar; then a numeric id
+  // string, or "all".
+  const [webinarFilter, setWebinarFilter] = useState<string>("");
+  const [initialised, setInitialised] = useState(false);
 
   useEffect(() => {
     if (isPending || !isAuthorized) return;
@@ -46,7 +59,8 @@ export default function WebinarRegistrations() {
       try {
         const token = await getToken();
         if (!token) throw new Error("Not authenticated");
-        const res = await fetch("/api/webinar-registrations", {
+        const qs = webinarFilter ? `?webinar=${encodeURIComponent(webinarFilter)}` : "";
+        const res = await fetch(`/api/webinar-registrations${qs}`, {
           headers: { Authorization: `Bearer ${token}` },
           credentials: "include",
         });
@@ -54,6 +68,12 @@ export default function WebinarRegistrations() {
         const data = await res.json();
         setRows(data.registrations || []);
         setStats(data.stats || null);
+        setWebinars(data.webinars || []);
+        // On first load, adopt the server's default selection (active webinar).
+        if (!initialised) {
+          setWebinarFilter(String(data.selectedWebinar));
+          setInitialised(true);
+        }
       } catch (e: any) {
         setError(e.message || "Failed to load");
       } finally {
@@ -62,7 +82,7 @@ export default function WebinarRegistrations() {
     };
 
     fetchRows();
-  }, [isPending, isAuthorized]);
+  }, [isPending, isAuthorized, webinarFilter]);
 
   const stages = useMemo(() => {
     const set = new Set<string>();
@@ -103,11 +123,28 @@ export default function WebinarRegistrations() {
     <div className="min-h-screen bg-[#F5F5F0]">
       <AdminHeader />
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
-            Webinar Signups
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">Everyone who registered for the webinar at studojo.com/webinar.</p>
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
+              Webinar Signups
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">Registrations from studojo.com/webinar, grouped by webinar.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-600">Webinar:</label>
+            <select
+              value={webinarFilter}
+              onChange={(e) => setWebinarFilter(e.target.value)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+            >
+              {webinars.map((w) => (
+                <option key={w.id} value={String(w.id)}>
+                  {w.title}{w.status === "upcoming" ? " (active)" : ""}
+                </option>
+              ))}
+              <option value="all">All webinars</option>
+            </select>
+          </div>
         </div>
 
         {stats && (
@@ -164,7 +201,7 @@ export default function WebinarRegistrations() {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {["#", "Date", "Name", "Email", "WhatsApp", "College", "Course", "Specialisation", "Year", "Grad Year", "Stage", "Source"].map((h) => (
+                  {["#", "Webinar", "Date", "Name", "Email", "WhatsApp", "College", "Course", "Specialisation", "Year", "Grad Year", "Stage", "Source"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       {h}
                     </th>
@@ -175,6 +212,7 @@ export default function WebinarRegistrations() {
                 {filtered.map((r) => (
                   <tr key={r.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-400 font-mono text-xs">{r.id}</td>
+                    <td className="px-4 py-3 text-gray-700 text-xs">{r.webinar_title ?? dash(null)}</td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{fmt(r.created_at)}</td>
                     <td className="px-4 py-3 text-gray-900 font-medium">{r.full_name}</td>
                     <td className="px-4 py-3 text-gray-800">{r.email}</td>
