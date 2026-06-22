@@ -50,6 +50,13 @@ export default function WebinarRegistrations() {
   // string, or "all".
   const [webinarFilter, setWebinarFilter] = useState<string>("");
   const [initialised, setInitialised] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  // Create / activate webinar control state.
+  const [newTitle, setNewTitle] = useState("");
+  const [newDate, setNewDate] = useState("");
+  const [newTime, setNewTime] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (isPending || !isAuthorized) return;
@@ -82,7 +89,58 @@ export default function WebinarRegistrations() {
     };
 
     fetchRows();
-  }, [isPending, isAuthorized, webinarFilter]);
+  }, [isPending, isAuthorized, webinarFilter, reloadKey]);
+
+  async function postWebinarAction(payload: Record<string, unknown>): Promise<any> {
+    const token = await getToken();
+    if (!token) throw new Error("Not authenticated");
+    const res = await fetch("/api/webinar-registrations", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setNotice(null);
+    if (!newTitle.trim()) { setNotice("Enter a webinar title."); return; }
+    setBusy(true);
+    try {
+      const data = await postWebinarAction({
+        intent: "create",
+        title: newTitle.trim(),
+        webinar_date: newDate || null,
+        webinar_time: newTime || "",
+      });
+      setNotice(`Created "${data.webinar.title}". Click "Make active" when you're ready for the signup link to record it.`);
+      setNewTitle(""); setNewDate(""); setNewTime("");
+      setReloadKey((k) => k + 1);
+    } catch (err: any) {
+      setNotice(err.message || "Failed to create webinar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleActivate(w: Webinar) {
+    if (!confirm(`Make "${w.title}" the ACTIVE webinar?\n\nNew signups from studojo.com/webinar will be recorded against it, and the currently active webinar will be marked conducted.`)) return;
+    setNotice(null);
+    setBusy(true);
+    try {
+      await postWebinarAction({ intent: "activate", id: w.id });
+      setNotice(`"${w.title}" is now active. New signups will be tagged to it.`);
+      setReloadKey((k) => k + 1);
+    } catch (err: any) {
+      setNotice(err.message || "Failed to activate webinar.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const stages = useMemo(() => {
     const set = new Set<string>();
@@ -145,6 +203,94 @@ export default function WebinarRegistrations() {
               <option value="all">All webinars</option>
             </select>
           </div>
+        </div>
+
+        {/* Manage webinars: create (draft) + activate */}
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Manage webinars</h2>
+            <span className="text-xs text-gray-400">Same signup link, recorded against the active webinar.</span>
+          </div>
+
+          {/* Existing webinars + activate buttons */}
+          <div className="space-y-2 mb-5">
+            {webinars.length === 0 ? (
+              <p className="text-sm text-gray-400">No webinars yet. Create one below.</p>
+            ) : (
+              webinars.map((w) => {
+                const active = w.status === "upcoming";
+                return (
+                  <div key={w.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-medium text-gray-900 truncate">{w.title}</span>
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${
+                          active
+                            ? "bg-green-100 text-green-700 border-green-200"
+                            : w.status === "draft"
+                              ? "bg-amber-100 text-amber-700 border-amber-200"
+                              : "bg-gray-200 text-gray-600 border-gray-300"
+                        }`}
+                      >
+                        {active ? "Active" : w.status}
+                      </span>
+                    </div>
+                    {active ? (
+                      <span className="text-xs text-gray-400">currently recording signups</span>
+                    ) : (
+                      <button
+                        onClick={() => handleActivate(w)}
+                        disabled={busy}
+                        className="shrink-0 rounded-lg border-2 border-neutral-900 bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
+                      >
+                        Make active
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Create new webinar (draft — not active until you click Make active) */}
+          <form onSubmit={handleCreate} className="flex flex-wrap items-end gap-3 border-t border-gray-100 pt-4">
+            <div className="flex flex-col">
+              <label className="text-xs font-medium text-gray-500 mb-1">New webinar title <span className="text-red-500">*</span></label>
+              <input
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="e.g. Webinar 3"
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+            </div>
+            <div className="flex flex-col">
+              <label className="text-xs font-medium text-gray-500 mb-1">Date (optional)</label>
+              <input
+                type="date"
+                value={newDate}
+                onChange={(e) => setNewDate(e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+            </div>
+            <div className="flex flex-col">
+              <label className="text-xs font-medium text-gray-500 mb-1">Time (optional)</label>
+              <input
+                value={newTime}
+                onChange={(e) => setNewTime(e.target.value)}
+                placeholder="e.g. 6:00 PM IST"
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-1.5 text-sm font-semibold text-gray-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
+            >
+              {busy ? "Saving…" : "Create webinar"}
+            </button>
+          </form>
+
+          {notice && <p className="mt-3 text-sm text-violet-700">{notice}</p>}
         </div>
 
         {stats && (

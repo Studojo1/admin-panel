@@ -3,12 +3,11 @@ import { getUserFromRequest } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 
-export async function loader({ request }: Route.LoaderArgs) {
+// Returns null if the request is from an admin/ops user, otherwise a Response
+// to return immediately.
+async function requireAdmin(request: Request): Promise<Response | null> {
   const user = await getUserFromRequest(request);
-  if (!user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const roleResult = await db.execute(
     sql`SELECT role FROM "user" WHERE id = ${user.id} LIMIT 1`
   );
@@ -16,6 +15,75 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (role !== "admin" && role !== "ops") {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
+  return null;
+}
+
+async function ensureWebinarsTable() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS webinars (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      webinar_date DATE,
+      webinar_time TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'upcoming',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+// POST: create a new webinar (status 'draft' — NOT active), or activate one.
+//   { intent: "create", title, webinar_date?, webinar_time? }
+//   { intent: "activate", id }
+export async function action({ request }: Route.ActionArgs) {
+  const denied = await requireAdmin(request);
+  if (denied) return denied;
+  if (request.method !== "POST") {
+    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  }
+
+  await ensureWebinarsTable();
+  const body = await request.json().catch(() => ({} as any));
+  const intent = body.intent as string;
+
+  if (intent === "create") {
+    const title = String(body.title ?? "").trim().slice(0, 200);
+    if (!title) return Response.json({ error: "Title is required" }, { status: 400 });
+    const webinarDate = body.webinar_date ? String(body.webinar_date).slice(0, 20) : null;
+    const webinarTime = String(body.webinar_time ?? "").trim().slice(0, 60);
+    // Created as 'draft' so it does NOT become active automatically. The admin
+    // flips it live with the separate "Make active" button.
+    const result = await db.execute(sql`
+      INSERT INTO webinars (title, webinar_date, webinar_time, status)
+      VALUES (${title}, ${webinarDate}, ${webinarTime}, 'draft')
+      RETURNING id, title, status
+    `);
+    return Response.json({ ok: true, webinar: result.rows[0] });
+  }
+
+  if (intent === "activate") {
+    const id = parseInt(body.id);
+    if (!id) return Response.json({ error: "id is required" }, { status: 400 });
+    // Exactly one active (upcoming) webinar at a time. Demote the current active
+    // one to 'conducted', then promote the chosen one to 'upcoming'.
+    await db.execute(sql`
+      UPDATE webinars SET status = 'conducted' WHERE status = 'upcoming' AND id <> ${id}
+    `);
+    const result = await db.execute(sql`
+      UPDATE webinars SET status = 'upcoming' WHERE id = ${id}
+      RETURNING id, title, status
+    `);
+    if (result.rows.length === 0) {
+      return Response.json({ error: "Webinar not found" }, { status: 404 });
+    }
+    return Response.json({ ok: true, webinar: result.rows[0] });
+  }
+
+  return Response.json({ error: "Unknown intent" }, { status: 400 });
+}
+
+export async function loader({ request }: Route.LoaderArgs) {
+  const denied = await requireAdmin(request);
+  if (denied) return denied;
 
   // The table is created lazily by the public form on first submit. Guard here
   // so the admin page works (shows zero) even before the first registration.
