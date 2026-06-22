@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { getToken } from "~/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Chart as ChartJS,
@@ -249,6 +250,7 @@ export default function Analytics() {
     }
 
     try {
+      const token = await getToken();
       const [statsRes, signupsRes, dailyEventsRes, , topRes] = await Promise.all([
         // Visitors, payments, campaigns from events
         safeQuery({
@@ -256,7 +258,7 @@ export default function Analytics() {
           query: `SELECT uniq(person_id) as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef}`,
         }),
         // Total new signups + daily breakdown — via server-side proxy (avoids CORS)
-        fetch(`/api/analytics?start=${startDate}&end=${endDate}`, { credentials: "include" })
+        fetch(`/api/analytics?start=${startDate}&end=${endDate}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} })
           .then((r) => r.ok ? r.json() : { count: 0, daily: [] })
           .catch(() => ({ count: 0, daily: [] })),
         // Daily visitors/payments/campaigns

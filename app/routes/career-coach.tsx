@@ -21,6 +21,7 @@ export function ErrorBoundary() {
     </main>
   );
 }
+
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Career Coach — Studojo Admin" }];
 }

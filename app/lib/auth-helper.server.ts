@@ -126,3 +126,21 @@ export async function getUserFromRequest(request: Request): Promise<UserInfo | n
   return null;
 }
 
+
+/**
+ * Gate for admin-only API routes. Returns the user if authenticated AND their
+ * role is 'admin' or 'ops', else null. Use at the top of sensitive loaders:
+ *   const admin = await requireAdmin(request);
+ *   if (!admin) return Response.json({ error: "Unauthorized" }, { status: 401 });
+ */
+export async function requireAdmin(request: Request): Promise<UserInfo | null> {
+  const user = await getUserFromRequest(request);
+  if (!user) return null;
+  try {
+    const r = await db.execute(sql`SELECT role FROM "user" WHERE id = ${user.id} LIMIT 1`);
+    const role = (r.rows[0] as any)?.role;
+    return role === "admin" || role === "ops" ? user : null;
+  } catch {
+    return null;
+  }
+}
