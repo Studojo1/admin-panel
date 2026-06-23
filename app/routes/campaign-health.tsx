@@ -604,6 +604,12 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
                         <p className="font-['Satoshi'] text-sm text-neutral-700">{p.flex_notes.outcome}</p>
                       </div>
                     )}
+                    {p.flex_notes?.why_now && (
+                      <div className="md:col-span-2">
+                        <p className="mb-1 font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-400">Why This Role</p>
+                        <p className="font-['Satoshi'] text-sm text-neutral-700">{p.flex_notes.why_now}</p>
+                      </div>
+                    )}
                   </div>
                 </ModalSection>
               )}
