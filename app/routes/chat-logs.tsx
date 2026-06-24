@@ -17,6 +17,8 @@ interface ChatLog {
   source: "nlp" | "llm" | "escalation";
   confidence: number;
   intent_id: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
   created_at: string;
 }
 
@@ -186,7 +188,7 @@ export default function ChatLogs() {
             <table className="w-full min-w-[700px]">
               <thead>
                 <tr className="border-b-2 border-neutral-900 bg-neutral-50">
-                  {["Time", "Session", "Source", "Conf.", "User Message", "Bot Response"].map((h) => (
+                  {["Time", "Session", "IP", "Source", "Conf.", "User Message", "Bot Response"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left font-['Satoshi'] text-xs font-semibold uppercase tracking-wide text-neutral-500">
                       {h}
                     </th>
@@ -214,6 +216,12 @@ export default function ChatLogs() {
                       </td>
                       <td className="px-4 py-3 font-['Satoshi'] text-xs text-neutral-400">
                         {log.session_id.slice(0, 18)}…
+                      </td>
+                      <td
+                        className="whitespace-nowrap px-4 py-3 font-['Satoshi'] text-xs text-neutral-500"
+                        title={log.user_agent || ""}
+                      >
+                        {log.ip_address || "—"}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2 py-0.5 font-['Satoshi'] text-xs font-semibold ${SOURCE_COLORS[log.source] || "bg-neutral-100 text-neutral-600"}`}>
