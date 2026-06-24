@@ -27,7 +27,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const [logsResult, statsResult] = await Promise.all([
     db.execute(sql`
-      SELECT id, session_id, user_message, bot_response, source, confidence, intent_id, created_at
+      SELECT id, session_id, user_message, bot_response, source, confidence, intent_id, ip_address, user_agent, created_at
       FROM support_chat_logs
       ${whereClause}
       ORDER BY created_at DESC
