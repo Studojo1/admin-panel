@@ -52,7 +52,7 @@ function macroHogql(tc: string, env: string) {
       uniqIf(person_id, event='$pageview') AS visits,
       uniqIf(person_id, event='$pageview' AND properties.$pathname LIKE '/outreach%') AS outreach,
       uniqIf(person_id, event='resume_uploaded') AS resume,
-      uniqIf(person_id, event='quiz_question_answered' AND toInt(properties.question_number) >= 13) AS quiz,
+      uniqIf(person_id, event='profile_quiz_completed') AS quiz,
       uniqIf(person_id, event='leads_loaded') AS leads,
       uniqIf(person_id, event='$pageview' AND properties.$pathname LIKE '/outreach/enrichment%') AS paypage,
       uniqIf(person_id, event='pay_now_clicked') AS paytap,
@@ -77,7 +77,7 @@ function nestedHogql(tc: string, env: string) {
         max(event='$pageview') AS v,
         max(event='$pageview' AND properties.$pathname LIKE '/outreach%') AS ro,
         max(event='resume_uploaded') AS ru,
-        max(event='quiz_question_answered' AND toInt(properties.question_number) >= 13) AS qz,
+        max(event='profile_quiz_completed') AS qz,
         max(event='leads_loaded') AS ld,
         max(event='$pageview' AND properties.$pathname LIKE '/outreach/enrichment%') AS pp,
         max(event='pay_now_clicked') AS pt

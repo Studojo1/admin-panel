@@ -57,7 +57,48 @@ export async function action({ request }: Route.ActionArgs) {
       VALUES (${title}, ${webinarDate}, ${webinarTime}, 'draft')
       RETURNING id, title, status
     `);
-    return Response.json({ ok: true, webinar: result.rows[0] });
+    const newWebinar = result.rows[0] as { id: number; title: string; status: string };
+
+    // Auto-enrol standing subscribers (people who clicked "register for the next
+    // one too") as registrants of this new webinar, and email them a
+    // confirmation. Idempotent via the (lower(email),webinar_id) unique index.
+    let enrolled = 0;
+    try {
+      const subs = await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS webinar_standing_subscribers (
+          email TEXT PRIMARY KEY, full_name TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      void subs;
+      const ins = await db.execute(sql`
+        INSERT INTO webinar_registrations (
+          full_name, whatsapp, email, college, course, year_of_study, referral_source, webinar_id
+        )
+        SELECT COALESCE(NULLIF(s.full_name,''),'there'), '', s.email, '', '', '', 'standing-subscriber', ${newWebinar.id}
+        FROM webinar_standing_subscribers s
+        ON CONFLICT (lower(email), webinar_id) DO NOTHING
+        RETURNING email, full_name
+      `);
+      enrolled = ins.rows.length;
+      // Fire a confirmation email to each newly enrolled subscriber (best-effort).
+      const base = process.env.EMAILER_SERVICE_URL;
+      if (base && enrolled > 0) {
+        for (const row of ins.rows as { email: string; full_name: string }[]) {
+          fetch(`${base}/v1/email/events`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              routing_key: "event.cc.webinar_registered",
+              event: { email: row.email, name: row.full_name || "there" },
+            }),
+          }).catch((e) => console.error("[webinar] standing-sub confirm failed:", e?.message));
+        }
+      }
+    } catch (e: any) {
+      console.error("[webinar] auto-enroll standing subscribers failed:", e?.message);
+    }
+
+    return Response.json({ ok: true, webinar: newWebinar, enrolled });
   }
 
   if (intent === "activate") {
