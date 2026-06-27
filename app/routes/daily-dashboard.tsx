@@ -22,7 +22,7 @@ const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 const fmt = (n: number) => (Math.round(n) ?? 0).toLocaleString("en-US");
 const niceDay = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
-type Day = { day: string; visitors: number; signups: number; orders: number; emails: number; replies: number; paid: number };
+type Day = { day: string; visitors: number; signups: number; orders: number; emails: number; replies: number; paid: number; reached: number };
 const METRICS = [
   { key: "visitors", label: "Visitors" },
   { key: "signups", label: "Signups" },
@@ -93,10 +93,10 @@ export default function DailyDashboard() {
     const chunk = daily.slice(i, i + group);
     if (!chunk.length) continue;
     const sum = (k: string) => chunk.reduce((a, r) => a + ((r as any)[k] || 0), 0);
-    const emails = sum("emails"); const replies = sum("replies");
+    const emails = sum("emails"); const replies = sum("replies"); const reached = sum("reached");
     buckets.push({
       label: group === 1 ? niceDay(chunk[0].day) : `${niceDay(chunk[0].day)}–${niceDay(chunk[chunk.length - 1].day)}`,
-      data: { visitors: sum("visitors"), signups: sum("signups"), orders: sum("orders"), emails, replies, paid: sum("paid"), replyRate: emails ? Math.round((replies / emails) * 1000) / 10 : 0 },
+      data: { visitors: sum("visitors"), signups: sum("signups"), orders: sum("orders"), emails, replies, paid: sum("paid"), reached, replyRate: reached ? Math.round((replies / reached) * 1000) / 10 : 0 },
     });
   }
 
@@ -107,14 +107,14 @@ export default function DailyDashboard() {
 
   // totals
   const T = (k: string) => daily.reduce((a, r) => a + ((r as any)[k] || 0), 0);
-  const totEmails = T("emails"); const totReplies = T("replies");
+  const totEmails = T("emails"); const totReplies = T("replies"); const totReached = T("reached");
   const cards = [
     { label: "Total Visitors", v: fmt(T("visitors")) },
     { label: "Total Signups", v: fmt(T("signups")) },
     { label: "Outreach Orders", v: fmt(T("orders")) },
     { label: "Emails Sent", v: fmt(totEmails) },
     { label: "Replies", v: fmt(totReplies) },
-    { label: "Avg Reply Rate", v: `${totEmails ? Math.round((totReplies / totEmails) * 1000) / 10 : 0}%` },
+    { label: "Avg Reply Rate", v: `${totReached ? Math.round((totReplies / totReached) * 1000) / 10 : 0}%` },
     { label: "Paid Conversions", v: fmt(T("paid")) },
   ];
 
