@@ -75,7 +75,10 @@ export default function DailyDashboard() {
       const token = await getToken();
       const [dbRes, visRes] = await Promise.all([
         fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()),
-        phQuery(`SELECT toDate(timestamp) AS day, uniq(person_id) AS v FROM events WHERE event='$pageview' AND timestamp >= toDateTime('${start} 00:00:00') AND timestamp <= toDateTime('${end} 23:59:59') GROUP BY day`),
+        // uniq(distinct_id) not uniq(person_id): person_id forces a person_distinct_id_overrides
+        // JOIN that made the 30d pageview query run ~5min and hit the 300s gateway timeout (500),
+        // hanging the whole dashboard. distinct_id needs no join — same query returns in ~1.5s.
+        phQuery(`SELECT toDate(timestamp) AS day, uniq(distinct_id) AS v FROM events WHERE event='$pageview' AND timestamp >= toDateTime('${start} 00:00:00') AND timestamp <= toDateTime('${end} 23:59:59') GROUP BY day`),
       ]);
       if (dbRes.error) throw new Error(dbRes.error);
       const visMap: Record<string, number> = {};

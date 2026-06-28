@@ -30,7 +30,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       q(sql`SELECT DATE(sent_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM emails_sent
             WHERE sent_at IS NOT NULL AND is_test = false
               AND DATE(sent_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
-      q(sql`SELECT DATE(reply_received_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM emails_sent
+      // Count distinct leads who replied (any sentiment) — deduped so one lead replying
+      // to both initial and follow-up doesn't count twice.
+      q(sql`SELECT DATE(reply_received_at + INTERVAL '330 minutes') AS day, COUNT(DISTINCT lead_id)::int AS n FROM emails_sent
             WHERE reply_received_at IS NOT NULL AND is_test = false
               AND DATE(reply_received_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
       q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM payment_orders
