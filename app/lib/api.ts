@@ -184,6 +184,7 @@ export interface OutreachMonthlyMetric {
   revenue_cents: number;
   emails_sent: number;
   emails_replied: number;
+  emails_opened: number;
 }
 
 export interface FunnelStage {
@@ -211,7 +212,9 @@ export interface OutreachOverview {
   total_emails_sent: number;
   total_emails_replied: number;
   total_emails_bounced: number;
+  total_emails_opened: number;
   reply_rate_pct: number;
+  open_rate_pct: number;
   leads_contacted: number;
   leads_replied: number;
   period_reply_rates: PeriodReplyRate[];
@@ -274,6 +277,8 @@ export interface CampaignEmail {
   reply_received_at: string | null;
   bounce_reason: string | null;
   error_message: string | null;
+  first_opened_at: string | null;
+  open_count: number;
 }
 
 export interface AdminCampaignDetail {

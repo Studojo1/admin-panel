@@ -60,6 +60,18 @@ function EmailRow({ email }: { email: CampaignEmail }) {
             {fmtStatus(email.status)}
           </span>
         </td>
+        <td className="px-4 py-3">
+          {email.first_opened_at ? (
+            <span
+              className="inline-block rounded-lg bg-indigo-100 px-2 py-0.5 font-['Satoshi'] text-xs font-medium text-indigo-700"
+              title={`First opened ${fmtDate(email.first_opened_at)}${email.open_count > 1 ? ` · ${email.open_count} opens` : ""}`}
+            >
+              Opened{email.open_count > 1 ? ` ×${email.open_count}` : ""}
+            </span>
+          ) : (
+            <span className="font-['Satoshi'] text-xs text-neutral-400">—</span>
+          )}
+        </td>
         <td className="px-4 py-3 font-['Satoshi'] text-xs text-neutral-600">{email.assigned_style ? fmtStatus(email.assigned_style) : "—"}</td>
         <td className="px-4 py-3 font-['Satoshi'] text-xs text-neutral-600">{fmtDate(email.sent_at)}</td>
         <td className="px-4 py-3">
@@ -77,7 +89,7 @@ function EmailRow({ email }: { email: CampaignEmail }) {
       </tr>
       {expanded && (
         <tr className="border-b border-neutral-100 bg-neutral-50">
-          <td colSpan={7} className="px-6 py-4">
+          <td colSpan={8} className="px-6 py-4">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {email.subject && (
                 <div>
@@ -257,6 +269,7 @@ export default function OutreachCampaignPage() {
                         <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Lead</th>
                         <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Company</th>
                         <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Status</th>
+                        <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Opened</th>
                         <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Style</th>
                         <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Sent At</th>
                         <th className="px-4 py-3 text-left font-['Satoshi'] text-sm font-bold text-neutral-950">Reply</th>

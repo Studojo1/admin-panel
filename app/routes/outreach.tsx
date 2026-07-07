@@ -124,6 +124,14 @@ export default function Outreach() {
         borderRadius: 6,
       },
       {
+        label: "Opened",
+        data: overview?.monthly_metrics.map((m) => m.emails_opened) || [],
+        backgroundColor: "rgba(99, 102, 241, 0.8)",
+        borderColor: "rgba(99, 102, 241, 1)",
+        borderWidth: 2,
+        borderRadius: 6,
+      },
+      {
         label: "Replies",
         data: overview?.monthly_metrics.map((m) => m.emails_replied) || [],
         backgroundColor: "rgba(16, 185, 129, 0.8)",
@@ -213,12 +221,14 @@ export default function Outreach() {
             </div>
 
             {/* Email stats */}
-            <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
               {[
                 { label: "Emails Sent", value: overview.total_emails_sent, color: "bg-blue-500" },
+                { label: "Opened", value: overview.total_emails_opened, color: "bg-indigo-400" },
                 { label: "Replies", value: overview.total_emails_replied, color: "bg-pink-500" },
                 { label: "Bounced", value: overview.total_emails_bounced, color: "bg-orange-500" },
-                { label: "Reply Rate", value: `${overview.reply_rate_pct}%`, color: "bg-indigo-500" },
+                { label: "Open Rate (approx)", value: `${overview.open_rate_pct}%`, color: "bg-indigo-500" },
+                { label: "Reply Rate", value: `${overview.reply_rate_pct}%`, color: "bg-violet-500" },
               ].map((stat, i) => (
                 <motion.div
                   key={stat.label}
