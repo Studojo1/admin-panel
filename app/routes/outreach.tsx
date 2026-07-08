@@ -73,6 +73,7 @@ export default function Outreach() {
   const [statusFilter, setStatusFilter] = useState("");
   const [openedEmails, setOpenedEmails] = useState<OpenedEmail[]>([]);
   const [openedLoading, setOpenedLoading] = useState(true);
+  const [openedView, setOpenedView] = useState<"opened" | "opened_replied">("opened");
   const limit = 50;
 
   useEffect(() => {
@@ -238,8 +239,8 @@ export default function Outreach() {
               {[
                 { label: "Emails Sent", value: overview.total_emails_sent, color: "bg-blue-500" },
                 { label: `Opened (of ${overview.total_emails_trackable} tracked)`, value: overview.total_emails_opened, color: "bg-indigo-400" },
-                { label: "Opened & Replied", value: overview.total_emails_opened_and_replied, color: "bg-teal-500" },
                 { label: "Replies", value: overview.total_emails_replied, color: "bg-pink-500" },
+                { label: "Bounced", value: overview.total_emails_bounced, color: "bg-orange-500" },
                 { label: "Open Rate (of tracked)", value: `${overview.open_rate_pct}%`, color: "bg-indigo-500" },
                 { label: "Reply Rate", value: `${overview.reply_rate_pct}%`, color: "bg-violet-500" },
               ].map((stat, i) => (
@@ -286,62 +287,78 @@ export default function Outreach() {
           </>
         )}
 
-        {/* Opened Emails — which student's email got opened */}
-        <div className="mb-4 mt-8 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-['Clash_Display'] text-2xl font-bold text-neutral-900">Opened Emails</h2>
-          <span className="font-['Satoshi'] text-sm text-neutral-500">
-            Emails a lead has opened, newest first — with the student who sent it
-          </span>
-        </div>
-        <div className="mb-10 overflow-hidden rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left">
-              <thead>
-                <tr className="border-b-2 border-neutral-900 bg-neutral-50">
-                  <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Student (sender)</th>
-                  <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Lead</th>
-                  <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Subject</th>
-                  <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Opened</th>
-                  <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Replied?</th>
-                </tr>
-              </thead>
-              <tbody>
-                {openedLoading ? (
-                  <tr><td colSpan={5} className="px-4 py-6 text-center font-['Satoshi'] text-sm text-neutral-500">Loading…</td></tr>
-                ) : openedEmails.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-6 text-center font-['Satoshi'] text-sm text-neutral-500">No opened emails yet.</td></tr>
-                ) : (
-                  openedEmails.map((e) => (
-                    <tr key={e.id} className="border-b border-neutral-100 hover:bg-neutral-50">
-                      <td className="px-4 py-3">
-                        <div className="font-['Satoshi'] text-sm font-semibold text-neutral-900">{e.student_name}</div>
-                        <div className="font-['Satoshi'] text-xs text-neutral-500">{e.student_email}</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-['Satoshi'] text-sm text-neutral-800">{e.lead_name}</div>
-                        <div className="font-['Satoshi'] text-xs text-neutral-500">{e.lead_company || e.to_email}</div>
-                      </td>
-                      <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-700">{e.subject || "—"}</td>
-                      <td className="px-4 py-3">
-                        <span className="font-['Satoshi'] text-xs text-neutral-700">{e.first_opened_at ? new Date(e.first_opened_at).toLocaleString() : "—"}</span>
-                        {e.open_count > 1 && (
-                          <span className="ml-1 font-['Satoshi'] text-xs font-semibold text-indigo-600">×{e.open_count}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {e.status === "replied" ? (
-                          <span className="inline-block rounded-lg bg-emerald-100 px-2 py-0.5 font-['Satoshi'] text-xs font-medium text-emerald-700">Replied</span>
-                        ) : (
-                          <span className="font-['Satoshi'] text-xs text-neutral-400">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {/* Email engagement — pick Opened or Opened & Replied from the dropdown */}
+        {(() => {
+          const rows = openedView === "opened_replied"
+            ? openedEmails.filter((e) => e.status === "replied")
+            : openedEmails;
+          return (
+            <>
+              <div className="mb-4 mt-8 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="font-['Clash_Display'] text-2xl font-bold text-neutral-900">Email Engagement</h2>
+                <select
+                  value={openedView}
+                  onChange={(e) => setOpenedView(e.target.value as "opened" | "opened_replied")}
+                  className="rounded-xl border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] focus:outline-none focus:ring-2 focus:ring-violet-400"
+                >
+                  <option value="opened">Opened ({openedEmails.length})</option>
+                  <option value="opened_replied">Opened &amp; Replied ({openedEmails.filter((e) => e.status === "replied").length})</option>
+                </select>
+              </div>
+              <div className="mb-10 overflow-hidden rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] text-left">
+                    <thead>
+                      <tr className="border-b-2 border-neutral-900 bg-neutral-50">
+                        <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Student (sender)</th>
+                        <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Lead</th>
+                        <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Subject</th>
+                        <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Opened</th>
+                        <th className="px-4 py-3 font-['Satoshi'] text-sm font-bold text-neutral-950">Replied?</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {openedLoading ? (
+                        <tr><td colSpan={5} className="px-4 py-6 text-center font-['Satoshi'] text-sm text-neutral-500">Loading…</td></tr>
+                      ) : rows.length === 0 ? (
+                        <tr><td colSpan={5} className="px-4 py-6 text-center font-['Satoshi'] text-sm text-neutral-500">
+                          {openedView === "opened_replied" ? "No opened-and-replied emails yet." : "No opened emails yet."}
+                        </td></tr>
+                      ) : (
+                        rows.map((e) => (
+                          <tr key={e.id} className="border-b border-neutral-100 hover:bg-neutral-50">
+                            <td className="px-4 py-3">
+                              <div className="font-['Satoshi'] text-sm font-semibold text-neutral-900">{e.student_name}</div>
+                              <div className="font-['Satoshi'] text-xs text-neutral-500">{e.student_email}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-['Satoshi'] text-sm text-neutral-800">{e.lead_name}</div>
+                              <div className="font-['Satoshi'] text-xs text-neutral-500">{e.lead_company || e.to_email}</div>
+                            </td>
+                            <td className="px-4 py-3 font-['Satoshi'] text-sm text-neutral-700">{e.subject || "—"}</td>
+                            <td className="px-4 py-3">
+                              <span className="font-['Satoshi'] text-xs text-neutral-700">{e.first_opened_at ? new Date(e.first_opened_at).toLocaleString() : "—"}</span>
+                              {e.open_count > 1 && (
+                                <span className="ml-1 font-['Satoshi'] text-xs font-semibold text-indigo-600">×{e.open_count}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              {e.status === "replied" ? (
+                                <span className="inline-block rounded-lg bg-emerald-100 px-2 py-0.5 font-['Satoshi'] text-xs font-medium text-emerald-700">Replied</span>
+                              ) : (
+                                <span className="font-['Satoshi'] text-xs text-neutral-400">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
         {/* Users table */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
