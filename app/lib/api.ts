@@ -213,6 +213,8 @@ export interface OutreachOverview {
   total_emails_replied: number;
   total_emails_bounced: number;
   total_emails_opened: number;
+  total_emails_trackable: number;
+  total_emails_opened_and_replied: number;
   reply_rate_pct: number;
   open_rate_pct: number;
   leads_contacted: number;
@@ -221,6 +223,22 @@ export interface OutreachOverview {
   orders_by_status: Record<string, number>;
   monthly_metrics: OutreachMonthlyMetric[];
   funnel?: FunnelStage[];
+}
+
+export interface OpenedEmail {
+  id: number;
+  campaign_id: number | null;
+  student_name: string;
+  student_email: string;
+  student_id: string | null;
+  lead_name: string;
+  lead_company: string;
+  to_email: string | null;
+  subject: string | null;
+  sent_at: string | null;
+  first_opened_at: string | null;
+  open_count: number;
+  status: string;
 }
 
 export type FunnelStageKey =
@@ -493,6 +511,10 @@ export async function getOutreachUserDetail(userId: string): Promise<OutreachUse
 
 export async function getAdminCampaignEmails(campaignId: number): Promise<AdminCampaignDetail> {
   return outreachProxyFetch<AdminCampaignDetail>("campaign_emails", { campaign_id: campaignId.toString() });
+}
+
+export async function getOpenedEmails(limit = 100): Promise<{ total: number; emails: OpenedEmail[] }> {
+  return outreachProxyFetch<{ total: number; emails: OpenedEmail[] }>("opened_emails", { limit: limit.toString() });
 }
 
 export async function listCareers(limit = 50, offset = 0): Promise<CareerApplication[]> {
