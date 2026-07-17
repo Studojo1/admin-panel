@@ -194,6 +194,18 @@ export function objectionRequired(outcome: Outcome): boolean {
   return outcome === "neutral" || outcome === "not_interested";
 }
 
+/**
+ * "Other" with no detail is worse than useless — it reports a count of things
+ * nobody can act on. If you pick it, you say what it was.
+ */
+export function objectionNeedsNote(o: Objection | null): boolean {
+  return o === "other";
+}
+
+export function lostReasonNeedsNote(r: LostReason | null): boolean {
+  return r === "other" || r === "tool_gap";
+}
+
 export interface Company {
   id: number;
   name: string;
@@ -249,6 +261,8 @@ export interface CallLog {
   picked_up: boolean;
   outcome: Outcome | null;
   objection: Objection | null;
+  /** What they actually said. Required when the objection is "other". */
+  objection_note: string | null;
   temperature_at_time: Temperature | null;
   note: string | null;
   next_action_at: string | null;
@@ -450,8 +464,7 @@ export type ViewKey =
   | "overview"
   | "today"
   | "pre_gtm"
-  | "whatsapp"
-  | "open"
+  | "working"
   | "blocked"
   | "accounts"
   | "feedback"
@@ -461,8 +474,7 @@ export const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "today", label: "Today" },
   { key: "pre_gtm", label: "Pre-GTM" },
-  { key: "whatsapp", label: "WhatsApp Group" },
-  { key: "open", label: "Open" },
+  { key: "working", label: "Working" },
   { key: "blocked", label: "Blocked" },
   { key: "accounts", label: "Accounts (Won)" },
   { key: "feedback", label: "Feedback Loop" },
@@ -477,9 +489,9 @@ export function companyMatchesView(c: Company, view: ViewKey, now: Date = new Da
       return isOnTodaysList(c.next_action_at, now) || isUpcoming(c.next_action_at, now);
     case "pre_gtm":
       return !c.whatsapp_group_made && PRE_GTM_STAGES.includes(c.stage);
-    case "whatsapp":
-      return c.whatsapp_group_made && c.stage === "whatsapp_group";
-    case "open":
+    // Everything actively in play, including companies sitting at whatsapp_group
+    // (that stage no longer has its own tab, so it must land somewhere).
+    case "working":
       return OPEN_STAGES.includes(c.stage);
     case "blocked":
       return BLOCKED_STAGES.includes(c.stage);

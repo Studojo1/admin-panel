@@ -12,7 +12,9 @@ import {
   addDays,
   addHours,
   addMinutes,
+  objectionNeedsNote,
   objectionRequired,
+  lostReasonNeedsNote,
   stageForOutcome,
   suggestNextAction,
   toLocalInputValue,
@@ -37,6 +39,7 @@ export function CheckInModal({
   const [pickedUp, setPickedUp] = useState<boolean | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [objection, setObjection] = useState<Objection | null>(null);
+  const [objectionNote, setObjectionNote] = useState("");
   const [temperature, setTemperature] = useState<Temperature | null>(company.temperature);
   const [note, setNote] = useState("");
   const [blockerType, setBlockerType] = useState<BlockerType | null>(company.blocker_type);
@@ -73,11 +76,13 @@ export function CheckInModal({
   };
 
   const needsObjection = outcome ? objectionRequired(outcome) : false;
+  const objectionNoteMissing = objectionNeedsNote(objection) && !objectionNote.trim();
   const lostIncomplete = outcome === "closed_lost" && (!lostReason || !lostFeedback.trim());
   const canSave =
     pickedUp !== null &&
     !!nextAt &&
-    (pickedUp === false || (!!outcome && (!needsObjection || !!objection) && !lostIncomplete));
+    (pickedUp === false ||
+      (!!outcome && (!needsObjection || !!objection) && !objectionNoteMissing && !lostIncomplete));
 
   const save = async () => {
     setSaving(true);
@@ -91,6 +96,7 @@ export function CheckInModal({
           picked_up: pickedUp,
           outcome,
           objection,
+          objection_note: objectionNote.trim() || null,
           temperature_at_time: temperature,
           note: note.trim() || null,
           next_action_at: new Date(nextAt).toISOString(),
@@ -177,6 +183,25 @@ export function CheckInModal({
                   </Choice>
                 ))}
               </div>
+              {objection && (
+                <input
+                  value={objectionNote}
+                  onChange={(e) => setObjectionNote(e.target.value)}
+                  placeholder={
+                    objectionNeedsNote(objection)
+                      ? "Required — what was it, in their words?"
+                      : "Detail (optional) — what exactly did they say?"
+                  }
+                  className={`${inputCls} mt-2 ${
+                    objectionNoteMissing ? "border-rose-400 ring-1 ring-rose-300" : ""
+                  }`}
+                />
+              )}
+              {objectionNoteMissing && (
+                <p className="text-xs text-rose-600 mt-1">
+                  "Other" on its own tells you nothing later. Say what it was.
+                </p>
+              )}
             </Field>
           )}
 
@@ -244,11 +269,20 @@ export function CheckInModal({
                   />
                 </Field>
               )}
-              <Field label="Their feedback — what would have changed this? (required)">
+              <Field
+                label={
+                  lostReasonNeedsNote(lostReason)
+                    ? lostReason === "tool_gap"
+                      ? "What was missing from the tool? (required)"
+                      : "What was the reason, in their words? (required)"
+                    : "Their feedback — what would have changed this? (required)"
+                }
+              >
                 <textarea
                   value={lostFeedback}
                   onChange={(e) => setLostFeedback(e.target.value)}
                   rows={2}
+                  placeholder="This is the only thing that tells you how to win the next one."
                   className={inputCls}
                 />
               </Field>

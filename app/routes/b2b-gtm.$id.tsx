@@ -300,7 +300,10 @@ function CompanyBody({
                     )}
                     {l.objection && (
                       <span className="px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200">
-                        {OBJECTION_LABELS[l.objection]}
+                        {l.objection === "other" && l.objection_note
+                          ? l.objection_note
+                          : OBJECTION_LABELS[l.objection]}
+                        {l.objection !== "other" && l.objection_note ? `: ${l.objection_note}` : ""}
                       </span>
                     )}
                     {l.value_discussed && (

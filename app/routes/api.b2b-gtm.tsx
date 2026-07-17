@@ -78,6 +78,16 @@ async function ensureTables() {
     )
   `);
   await db.execute(sql`ALTER TABLE b2b_call_logs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'call'`);
+  await db.execute(sql`ALTER TABLE b2b_call_logs ADD COLUMN IF NOT EXISTS objection_note TEXT`);
+
+  // The seed used to prefix imported notes with "Imported from Excel: ".
+  // Strip it in place so the notes read exactly as they were written, without
+  // forcing a re-import that would discard calls logged since.
+  await db.execute(sql`
+    UPDATE b2b_call_logs
+    SET note = regexp_replace(note, '^Imported from Excel: ', '')
+    WHERE note LIKE 'Imported from Excel: %'
+  `);
 
   await db.execute(
     sql`CREATE INDEX IF NOT EXISTS b2b_companies_next_action_idx ON b2b_companies (next_action_at)`
@@ -338,7 +348,7 @@ async function seedIfEmpty(loggedBy: string) {
           company_id, kind, picked_up, outcome, temperature_at_time, note, logged_by
         ) VALUES (
           ${companyId}, 'call', TRUE, NULL, ${row.temperature ?? null},
-          ${"Imported from Excel: " + row.notes}, ${loggedBy}
+          ${row.notes}, ${loggedBy}
         )
       `);
     }
@@ -411,11 +421,16 @@ export async function loader({ request }: Route.LoaderArgs) {
       FROM b2b_companies
     `),
     // Why isn't BOB closing — a GROUP BY, not a guess.
+    // "Other" groups by what was actually typed, so it never collapses into a
+    // single unactionable row.
     db.execute(sql`
-      SELECT objection, COUNT(*)::int AS n
+      SELECT
+        objection,
+        CASE WHEN objection = 'other' THEN objection_note ELSE NULL END AS detail,
+        COUNT(*)::int AS n
       FROM b2b_call_logs
       WHERE objection IS NOT NULL
-      GROUP BY objection
+      GROUP BY objection, CASE WHEN objection = 'other' THEN objection_note ELSE NULL END
       ORDER BY n DESC
     `),
   ]);
@@ -616,6 +631,7 @@ export async function action({ request }: Route.ActionArgs) {
       picked_up,
       outcome,
       objection,
+      objection_note,
       temperature_at_time,
       note,
       next_action_at,
@@ -640,9 +656,18 @@ export async function action({ request }: Route.ActionArgs) {
       );
     }
 
+    // "Other" with no detail is an unactionable row in the stats. Enforced here
+    // as well as in the form so the rule holds whatever the client sends.
+    if (objection === "other" && !objection_note?.trim()) {
+      return Response.json(
+        { error: "Tell us what the objection actually was." },
+        { status: 400 }
+      );
+    }
+
     await db.execute(sql`
       INSERT INTO b2b_call_logs (
-        company_id, contact_id, kind, picked_up, outcome, objection,
+        company_id, contact_id, kind, picked_up, outcome, objection, objection_note,
         temperature_at_time, note, next_action_at, value_discussed, logged_by
       ) VALUES (
         ${company_id},
@@ -651,6 +676,7 @@ export async function action({ request }: Route.ActionArgs) {
         ${picked_up ?? false},
         ${outcome ?? null},
         ${objection ?? null},
+        ${objection_note?.trim() || null},
         ${temperature_at_time ?? null},
         ${note ?? null},
         ${next_action_at ?? null},
