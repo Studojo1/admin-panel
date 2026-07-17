@@ -47,9 +47,16 @@ async function ensureTables() {
       phone TEXT,
       role TEXT,
       is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+      is_inactive BOOLEAN NOT NULL DEFAULT FALSE,
+      left_note TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  // Additive columns for tables that predate them. Postgres supports
+  // IF NOT EXISTS here, so this is safe to run on every request.
+  await db.execute(sql`ALTER TABLE b2b_contacts ADD COLUMN IF NOT EXISTS is_inactive BOOLEAN NOT NULL DEFAULT FALSE`);
+  await db.execute(sql`ALTER TABLE b2b_contacts ADD COLUMN IF NOT EXISTS left_note TEXT`);
 
   // Append-only. A company's current state is a projection of its latest row here.
   await db.execute(sql`
@@ -58,6 +65,7 @@ async function ensureTables() {
       company_id INTEGER NOT NULL REFERENCES b2b_companies(id) ON DELETE CASCADE,
       contact_id INTEGER REFERENCES b2b_contacts(id) ON DELETE SET NULL,
       called_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      kind TEXT NOT NULL DEFAULT 'call',
       picked_up BOOLEAN NOT NULL DEFAULT FALSE,
       outcome TEXT,
       objection TEXT,
@@ -69,6 +77,7 @@ async function ensureTables() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await db.execute(sql`ALTER TABLE b2b_call_logs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'call'`);
 
   await db.execute(
     sql`CREATE INDEX IF NOT EXISTS b2b_companies_next_action_idx ON b2b_companies (next_action_at)`
@@ -326,9 +335,9 @@ async function seedIfEmpty(loggedBy: string) {
     if (row.notes) {
       await db.execute(sql`
         INSERT INTO b2b_call_logs (
-          company_id, picked_up, outcome, temperature_at_time, note, logged_by
+          company_id, kind, picked_up, outcome, temperature_at_time, note, logged_by
         ) VALUES (
-          ${companyId}, TRUE, NULL, ${row.temperature ?? null},
+          ${companyId}, 'call', TRUE, NULL, ${row.temperature ?? null},
           ${"Imported from Excel: " + row.notes}, ${loggedBy}
         )
       `);
@@ -346,22 +355,37 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const url = new URL(request.url);
 
-  // Timeline for a single company.
+  // Everything the company detail page needs, in one round trip.
   const companyId = url.searchParams.get("company_id");
   if (companyId) {
-    const logs = await db.execute(sql`
-      SELECT l.*, c.name AS contact_name
-      FROM b2b_call_logs l
-      LEFT JOIN b2b_contacts c ON c.id = l.contact_id
-      WHERE l.company_id = ${parseInt(companyId)}
-      ORDER BY l.called_at DESC
-    `);
-    return Response.json({ logs: logs.rows });
+    const id = parseInt(companyId);
+    const [company, contacts, logs] = await Promise.all([
+      db.execute(sql`SELECT * FROM b2b_companies WHERE id = ${id}`),
+      db.execute(
+        sql`SELECT * FROM b2b_contacts WHERE company_id = ${id} ORDER BY is_inactive ASC, is_primary DESC, id ASC`
+      ),
+      db.execute(sql`
+        SELECT l.*, c.name AS contact_name
+        FROM b2b_call_logs l
+        LEFT JOIN b2b_contacts c ON c.id = l.contact_id
+        WHERE l.company_id = ${id}
+        ORDER BY l.called_at DESC
+      `),
+    ]);
+    if (company.rows.length === 0) {
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+    return Response.json({
+      company: { ...(company.rows[0] as any), contacts: contacts.rows },
+      logs: logs.rows,
+      me: admin.email,
+    });
   }
 
   const [companies, contacts, lastLogs, stats, objectionStats] = await Promise.all([
     db.execute(sql`SELECT * FROM b2b_companies ORDER BY next_action_at ASC NULLS LAST, name ASC`),
-    db.execute(sql`SELECT * FROM b2b_contacts ORDER BY is_primary DESC, id ASC`),
+    // Inactive contacts must never win the primary slot the cards read from.
+    db.execute(sql`SELECT * FROM b2b_contacts ORDER BY is_inactive ASC, is_primary DESC, id ASC`),
     // Latest log per company — the "where we left things off" projection.
     db.execute(sql`
       SELECT DISTINCT ON (company_id) *
@@ -371,7 +395,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     db.execute(sql`
       SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE next_action_at <= NOW())::int AS due_now,
+        -- Overdue OR scheduled later today: a 3pm callback counts at 9am.
+        -- Both sides compared in IST, since that's the working day.
+        COUNT(*) FILTER (
+          WHERE next_action_at <= NOW()
+             OR (next_action_at AT TIME ZONE 'Asia/Kolkata')::date
+                = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+        )::int AS due_now,
         COUNT(*) FILTER (WHERE temperature = 'hot')::int AS hot,
         COUNT(*) FILTER (WHERE stage LIKE 'blocked_%')::int AS blocked,
         COUNT(*) FILTER (WHERE needs_brochure)::int AS brochures,
@@ -468,6 +498,73 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ id: companyId });
   }
 
+  /**
+   * The contact moved on and handed us to someone else (Akshee -> Kulture Hire).
+   * This says NOTHING about interest, so it deliberately touches neither
+   * `outcome` nor stage/temperature. The company and its whole timeline stay
+   * exactly where they are; only who we call changes.
+   */
+  if (request.method === "POST" && intent === "contact_change") {
+    const {
+      company_id,
+      old_contact_id,
+      left_note,
+      new_name,
+      new_phone,
+      new_role,
+      note,
+      next_action_at,
+      next_action_reason,
+    } = body;
+
+    if (!new_name && !new_phone) {
+      return Response.json(
+        { error: "A replacement contact needs at least a name or a phone number." },
+        { status: 400 }
+      );
+    }
+
+    // Retire the old contact but keep the row: their history stays readable.
+    if (old_contact_id) {
+      await db.execute(sql`
+        UPDATE b2b_contacts
+        SET is_inactive = TRUE, is_primary = FALSE, left_note = ${left_note || null}
+        WHERE id = ${old_contact_id}
+      `);
+    }
+
+    const ins = await db.execute(sql`
+      INSERT INTO b2b_contacts (company_id, name, phone, role, is_primary, is_inactive)
+      VALUES (${company_id}, ${new_name ?? null}, ${new_phone ?? null}, ${
+      new_role ?? null
+    }, TRUE, FALSE)
+      RETURNING id
+    `);
+    const newContactId = (ins.rows[0] as any).id as number;
+
+    await db.execute(sql`
+      INSERT INTO b2b_call_logs (
+        company_id, contact_id, kind, picked_up, note, next_action_at, logged_by
+      ) VALUES (
+        ${company_id}, ${newContactId}, 'contact_change', TRUE,
+        ${note || `Contact changed. Now speaking to ${new_name ?? new_phone}.`},
+        ${next_action_at ?? null}, ${admin.email}
+      )
+    `);
+
+    if (next_action_at) {
+      await db.execute(sql`
+        UPDATE b2b_companies
+        SET next_action_at = ${next_action_at},
+            next_action_reason = ${next_action_reason || "Re-engage the new contact"},
+            updated_at = NOW()
+        WHERE id = ${company_id}
+      `);
+    }
+
+    return Response.json({ ok: true, contact_id: newContactId });
+  }
+
   if (request.method === "POST" && intent === "contact") {
     await db.execute(sql`
       INSERT INTO b2b_contacts (company_id, name, phone, role, is_primary)
@@ -545,11 +642,12 @@ export async function action({ request }: Route.ActionArgs) {
 
     await db.execute(sql`
       INSERT INTO b2b_call_logs (
-        company_id, contact_id, picked_up, outcome, objection,
+        company_id, contact_id, kind, picked_up, outcome, objection,
         temperature_at_time, note, next_action_at, value_discussed, logged_by
       ) VALUES (
         ${company_id},
         ${contact_id ?? null},
+        'call',
         ${picked_up ?? false},
         ${outcome ?? null},
         ${objection ?? null},

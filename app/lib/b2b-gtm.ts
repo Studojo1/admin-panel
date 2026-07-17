@@ -228,13 +228,24 @@ export interface Contact {
   phone: string | null;
   role: string | null;
   is_primary: boolean;
+  /** They left the company or handed us on. Kept for history, never called again. */
+  is_inactive?: boolean;
+  left_note?: string | null;
 }
+
+/**
+ * What kind of event a log row records. A contact change is NOT an interest
+ * signal — the person moved on, which says nothing about whether the company
+ * wants BOB. Keeping it out of `outcome` is the whole point.
+ */
+export type LogKind = "call" | "contact_change";
 
 export interface CallLog {
   id: number;
   company_id: number;
   contact_id: number | null;
   called_at: string;
+  kind: LogKind;
   picked_up: boolean;
   outcome: Outcome | null;
   objection: Objection | null;
@@ -244,6 +255,7 @@ export interface CallLog {
   value_discussed: string | null;
   logged_by: string | null;
   created_at: string;
+  contact_name?: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -389,9 +401,49 @@ export function daysSince(iso: string | null | undefined, now: Date = new Date()
   return Math.floor((now.getTime() - new Date(iso).getTime()) / DAY);
 }
 
+/** Already slipped: the moment has passed. */
 export function isOverdue(nextActionAt: string | null, now: Date = new Date()): boolean {
   if (!nextActionAt) return false;
   return new Date(nextActionAt).getTime() <= now.getTime();
+}
+
+/**
+ * Scheduled for today but not yet reached — a 3pm callback seen at 9am.
+ * These must show all day: you plan the day when you open the dashboard, not
+ * at the exact minute each call falls due.
+ */
+export function isLaterToday(nextActionAt: string | null, now: Date = new Date()): boolean {
+  if (!nextActionAt) return false;
+  const d = new Date(nextActionAt);
+  return d.getTime() > now.getTime() && isSameCalendarDay(d, now);
+}
+
+export function isSameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/** On today's list: anything overdue, plus everything else scheduled today. */
+export function isOnTodaysList(nextActionAt: string | null, now: Date = new Date()): boolean {
+  return isOverdue(nextActionAt, now) || isLaterToday(nextActionAt, now);
+}
+
+export const LOOKAHEAD_DAYS = 7;
+
+/** Coming up in the next `days` days, after today. */
+export function isUpcoming(
+  nextActionAt: string | null,
+  now: Date = new Date(),
+  days = LOOKAHEAD_DAYS
+): boolean {
+  if (!nextActionAt) return false;
+  const d = new Date(nextActionAt);
+  if (isOnTodaysList(nextActionAt, now)) return false;
+  const horizon = new Date(now.getTime() + days * DAY);
+  return d.getTime() > now.getTime() && d.getTime() <= horizon.getTime();
 }
 
 export type ViewKey =
@@ -422,7 +474,7 @@ export function companyMatchesView(c: Company, view: ViewKey, now: Date = new Da
     case "overview":
       return true;
     case "today":
-      return isOverdue(c.next_action_at, now);
+      return isOnTodaysList(c.next_action_at, now) || isUpcoming(c.next_action_at, now);
     case "pre_gtm":
       return !c.whatsapp_group_made && PRE_GTM_STAGES.includes(c.stage);
     case "whatsapp":

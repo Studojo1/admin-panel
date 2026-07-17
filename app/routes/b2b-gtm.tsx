@@ -1,43 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AdminHeader } from "~/components";
-import { useAdminGuard } from "~/lib/auth-guard";
-import { getToken } from "~/lib/api";
-import { useModal } from "~/components/common/modal-context";
+import { Link } from "react-router";
 import { toast } from "sonner";
+import { AdminHeader } from "~/components";
+import { useModal } from "~/components/common/modal-context";
+import { useAdminGuard } from "~/lib/auth-guard";
 import type { Route } from "./+types/b2b-gtm";
+import { CheckInModal, ContactChangeModal } from "~/components/b2b/check-in-modal";
+import {
+  BrochureBadge,
+  Choice,
+  Field,
+  Shell,
+  StageBadge,
+  TempBadge,
+  authedFetch,
+  inputCls,
+} from "~/components/b2b/shared";
 import {
   ALL_STAGES,
   BLOCKED_STAGES,
-  BLOCKER_TYPES,
-  LOST_REASONS,
-  LOST_REASON_LABELS,
-  OBJECTIONS,
   OBJECTION_LABELS,
-  OUTCOMES,
-  OUTCOME_LABELS,
   STAGE_LABELS,
   STALE_ACCOUNT_DAYS,
   TEMPERATURES,
   VIEWS,
   WON_STAGES,
   addDays,
-  addHours,
-  addMinutes,
   companyMatchesView,
   daysSince,
   formatDateTime,
   formatValue,
+  isLaterToday,
   isOverdue,
-  objectionRequired,
-  stageForOutcome,
-  suggestNextAction,
+  isUpcoming,
   toLocalInputValue,
-  type BlockerType,
-  type CallLog,
   type Company,
-  type LostReason,
   type Objection,
-  type Outcome,
   type Stage,
   type Temperature,
   type ViewKey,
@@ -45,25 +43,6 @@ import {
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: "B2B GTM Motion – Admin Panel" }];
-}
-
-async function authedFetch(url: string, opts: RequestInit = {}) {
-  const token = await getToken();
-  if (!token) throw new Error("Not authenticated");
-  const res = await fetch(url, {
-    ...opts,
-    headers: {
-      ...(opts.headers || {}),
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    credentials: "include",
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${res.status}`);
-  }
-  return res.json();
 }
 
 interface Stats {
@@ -77,48 +56,30 @@ interface Stats {
   committed_value: string;
 }
 
-const TEMP_STYLES: Record<Temperature, string> = {
-  hot: "bg-red-100 text-red-700 border-red-200",
-  warm: "bg-orange-100 text-orange-700 border-orange-200",
-  neutral: "bg-gray-100 text-gray-600 border-gray-200",
-  cold: "bg-blue-100 text-blue-700 border-blue-200",
-};
+/** Stat cards double as filters — clicking one narrows the list to exactly those. */
+type CardKey = "due_now" | "hot" | "blocked" | "accounts" | "renewals_due" | "brochures" | "committed";
 
-function TempBadge({ t }: { t: Temperature | null }) {
-  if (!t) return <span className="text-gray-300 text-xs">—</span>;
-  return (
-    <span
-      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${TEMP_STYLES[t]}`}
-    >
-      {t}
-    </span>
-  );
-}
-
-function StageBadge({ s }: { s: Stage }) {
-  const won = WON_STAGES.includes(s);
-  const blocked = BLOCKED_STAGES.includes(s);
-  const lost = s.startsWith("closed_lost") || s === "feedback_pending" || s === "comeback_scheduled";
-  const cls = won
-    ? "bg-green-100 text-green-700 border-green-200"
-    : blocked
-    ? "bg-amber-100 text-amber-700 border-amber-200"
-    : lost
-    ? "bg-rose-100 text-rose-700 border-rose-200"
-    : "bg-violet-100 text-violet-700 border-violet-200";
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${cls}`}>
-      {STAGE_LABELS[s] ?? s}
-    </span>
-  );
-}
-
-function BrochureBadge() {
-  return (
-    <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-300">
-      Brochure needed
-    </span>
-  );
+function matchesCard(c: Company, card: CardKey, now: Date): boolean {
+  switch (card) {
+    case "due_now":
+      return isOverdue(c.next_action_at, now) || isLaterToday(c.next_action_at, now);
+    case "hot":
+      return c.temperature === "hot";
+    case "blocked":
+      return BLOCKED_STAGES.includes(c.stage);
+    case "accounts":
+    case "committed":
+      return WON_STAGES.includes(c.stage);
+    case "renewals_due": {
+      if (!c.next_purchase_due) return false;
+      const due = new Date(c.next_purchase_due).getTime();
+      return due <= now.getTime() + 7 * 86400000;
+    }
+    case "brochures":
+      return c.needs_brochure;
+    default:
+      return true;
+  }
 }
 
 export default function B2BGtm() {
@@ -127,13 +88,13 @@ export default function B2BGtm() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [objectionStats, setObjectionStats] = useState<{ objection: string; n: number }[]>([]);
-  const [me, setMe] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<ViewKey>("overview");
+  const [card, setCard] = useState<CardKey | null>(null);
   const [search, setSearch] = useState("");
   const [checkIn, setCheckIn] = useState<Company | null>(null);
-  const [detail, setDetail] = useState<Company | null>(null);
+  const [contactChange, setContactChange] = useState<Company | null>(null);
   const [adding, setAdding] = useState(false);
   const notifiedRef = useRef<Set<number>>(new Set());
 
@@ -143,7 +104,6 @@ export default function B2BGtm() {
       setCompanies(data.companies || []);
       setStats(data.stats || null);
       setObjectionStats(data.objection_stats || []);
-      setMe(data.me || "");
       setError(null);
     } catch (e: any) {
       setError(e.message || "Failed to load");
@@ -157,16 +117,13 @@ export default function B2BGtm() {
     load();
   }, [isPending, isAuthorized, load]);
 
-  // Ask once, up front, so the 30-minute callbacks can actually reach you.
   useEffect(() => {
     if (isPending || !isAuthorized) return;
     if (typeof Notification === "undefined") return;
-    if (Notification.permission === "default") {
-      Notification.requestPermission();
-    }
+    if (Notification.permission === "default") Notification.requestPermission();
   }, [isPending, isAuthorized]);
 
-  // Poll for due items. Fires an OS notification even when the tab is backgrounded.
+  // Notify only when a call actually falls due, not when it's merely today.
   useEffect(() => {
     if (isPending || !isAuthorized) return;
     const tick = () => {
@@ -176,8 +133,8 @@ export default function B2BGtm() {
         if (notifiedRef.current.has(c.id)) continue;
         notifiedRef.current.add(c.id);
         if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-          const contact = c.contacts?.[0]?.name ? ` (${c.contacts[0].name})` : "";
-          new Notification(`Call ${c.name}${contact}`, {
+          const contact = c.contacts?.find((x) => !x.is_inactive)?.name;
+          new Notification(`Call ${c.name}${contact ? ` (${contact})` : ""}`, {
             body: c.next_action_reason || c.last_log?.note || "Follow-up due now",
             tag: `b2b-${c.id}`,
           });
@@ -194,21 +151,33 @@ export default function B2BGtm() {
 
   const now = new Date();
 
-  const dueList = useMemo(
+  const overdue = useMemo(
     () =>
       companies
         .filter((c) => isOverdue(c.next_action_at, now))
-        .sort(
-          (a, b) =>
-            new Date(a.next_action_at!).getTime() - new Date(b.next_action_at!).getTime()
-        ),
+        .sort((a, b) => +new Date(a.next_action_at!) - +new Date(b.next_action_at!)),
+    [companies]
+  );
+  const laterToday = useMemo(
+    () =>
+      companies
+        .filter((c) => isLaterToday(c.next_action_at, now))
+        .sort((a, b) => +new Date(a.next_action_at!) - +new Date(b.next_action_at!)),
+    [companies]
+  );
+  const upcoming = useMemo(
+    () =>
+      companies
+        .filter((c) => isUpcoming(c.next_action_at, now))
+        .sort((a, b) => +new Date(a.next_action_at!) - +new Date(b.next_action_at!)),
     [companies]
   );
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return companies.filter((c) => {
-      if (!companyMatchesView(c, view, now)) return false;
+      if (card && !matchesCard(c, card, now)) return false;
+      if (!card && !companyMatchesView(c, view, now)) return false;
       if (!q) return true;
       const hay = [c.name, c.notes, ...(c.contacts || []).map((x) => x.name)]
         .filter(Boolean)
@@ -216,7 +185,7 @@ export default function B2BGtm() {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [companies, view, search]);
+  }, [companies, view, card, search]);
 
   if (isPending) return null;
 
@@ -234,6 +203,20 @@ export default function B2BGtm() {
       toast.error(e.message);
     }
   };
+
+  const cards: { key: CardKey; label: string; value: string | number; alert?: boolean }[] = stats
+    ? [
+        { key: "due_now", label: "Today", value: overdue.length + laterToday.length, alert: overdue.length > 0 },
+        { key: "hot", label: "Hot", value: stats.hot },
+        { key: "blocked", label: "Blocked", value: stats.blocked },
+        { key: "accounts", label: "Accounts", value: stats.accounts },
+        { key: "renewals_due", label: "Renewals ≤7d", value: stats.renewals_due, alert: stats.renewals_due > 0 },
+        { key: "brochures", label: "Brochures", value: stats.brochures, alert: stats.brochures > 0 },
+        { key: "committed", label: "Committed", value: formatValue(stats.committed_value) },
+      ]
+    : [];
+
+  const showToday = !card && view === "today";
 
   return (
     <div className="min-h-screen bg-[#F5F5F0]">
@@ -270,20 +253,20 @@ export default function B2BGtm() {
           </div>
         </div>
 
-        {dueList.length > 0 && (
+        {overdue.length > 0 && (
           <div className="mb-6 rounded-2xl border-2 border-neutral-900 bg-violet-500 text-white px-5 py-4 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
             <p className="font-bold" style={{ fontFamily: "Clash Display, sans-serif" }}>
-              {dueList.length} {dueList.length === 1 ? "call" : "calls"} due now
+              {overdue.length} {overdue.length === 1 ? "call is" : "calls are"} overdue
             </p>
             <p className="text-sm text-violet-50 mt-0.5">
-              {dueList
-                .slice(0, 4)
-                .map((c) => c.name)
-                .join(", ")}
-              {dueList.length > 4 ? ` and ${dueList.length - 4} more` : ""}
+              {overdue.slice(0, 4).map((c) => c.name).join(", ")}
+              {overdue.length > 4 ? ` and ${overdue.length - 4} more` : ""}
             </p>
             <button
-              onClick={() => setView("today")}
+              onClick={() => {
+                setCard(null);
+                setView("today");
+              }}
               className="mt-2 text-sm font-medium underline underline-offset-2"
             >
               Open today's list
@@ -293,27 +276,27 @@ export default function B2BGtm() {
 
         {stats && (
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
-            {[
-              { label: "Due now", value: stats.due_now, alert: stats.due_now > 0 },
-              { label: "Hot", value: stats.hot },
-              { label: "Blocked", value: stats.blocked },
-              { label: "Accounts", value: stats.accounts },
-              { label: "Renewals ≤7d", value: stats.renewals_due, alert: stats.renewals_due > 0 },
-              { label: "Brochures", value: stats.brochures, alert: stats.brochures > 0 },
-              { label: "Committed", value: formatValue(stats.committed_value) },
-            ].map((s) => (
-              <div
-                key={s.label}
-                className={`bg-white rounded-2xl border p-4 shadow-sm ${
-                  s.alert ? "border-violet-400" : "border-gray-200"
-                }`}
-              >
-                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
-                  {s.label}
-                </p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">{s.value}</p>
-              </div>
-            ))}
+            {cards.map((s) => {
+              const active = card === s.key;
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => setCard(active ? null : s.key)}
+                  className={`text-left bg-white rounded-2xl border p-4 shadow-sm transition-all hover:border-violet-400 ${
+                    active
+                      ? "border-neutral-900 border-2 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+                      : s.alert
+                      ? "border-violet-400"
+                      : "border-gray-200"
+                  }`}
+                >
+                  <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+                    {s.label}
+                  </p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">{s.value}</p>
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -322,20 +305,22 @@ export default function B2BGtm() {
             <ul className="space-y-1">
               {VIEWS.map((v) => {
                 const count = companies.filter((c) => companyMatchesView(c, v.key, now)).length;
+                const activeView = !card && view === v.key;
                 return (
                   <li key={v.key}>
                     <button
-                      onClick={() => setView(v.key)}
+                      onClick={() => {
+                        setCard(null);
+                        setView(v.key);
+                      }}
                       className={`w-full text-left px-3 py-2 rounded-xl text-sm flex justify-between items-center ${
-                        view === v.key
+                        activeView
                           ? "bg-neutral-900 text-white font-medium"
                           : "text-gray-600 hover:bg-white"
                       }`}
                     >
                       <span>{v.label}</span>
-                      <span className={view === v.key ? "text-gray-300" : "text-gray-400"}>
-                        {count}
-                      </span>
+                      <span className={activeView ? "text-gray-300" : "text-gray-400"}>{count}</span>
                     </button>
                   </li>
                 );
@@ -360,12 +345,22 @@ export default function B2BGtm() {
           </nav>
 
           <div className="flex-1 min-w-0">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search company, contact or notes…"
-              className="w-full mb-4 px-4 py-2 rounded-xl border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
-            />
+            <div className="flex items-center gap-3 mb-4">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search company, contact or notes…"
+                className="flex-1 px-4 py-2 rounded-xl border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+              />
+              {card && (
+                <button
+                  onClick={() => setCard(null)}
+                  className="px-3 py-2 rounded-xl bg-neutral-900 text-white text-xs font-medium whitespace-nowrap"
+                >
+                  {cards.find((c) => c.key === card)?.label} ×
+                </button>
+              )}
+            </div>
 
             {error && (
               <div className="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
@@ -375,6 +370,15 @@ export default function B2BGtm() {
 
             {loading ? (
               <div className="text-center py-16 text-gray-400 text-sm">Loading…</div>
+            ) : showToday ? (
+              <TodayView
+                overdue={overdue}
+                laterToday={laterToday}
+                upcoming={upcoming}
+                now={now}
+                onCheckIn={setCheckIn}
+                onContactChange={setContactChange}
+              />
             ) : visible.length === 0 ? (
               <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-400 text-sm">
                 Nothing here.
@@ -387,7 +391,7 @@ export default function B2BGtm() {
                     c={c}
                     now={now}
                     onCheckIn={() => setCheckIn(c)}
-                    onOpen={() => setDetail(c)}
+                    onContactChange={() => setContactChange(c)}
                   />
                 ))}
               </div>
@@ -401,26 +405,120 @@ export default function B2BGtm() {
           company={checkIn}
           onClose={() => setCheckIn(null)}
           onSaved={() => {
-            setCheckIn(null);
             notifiedRef.current.delete(checkIn.id);
+            setCheckIn(null);
             load();
           }}
         />
       )}
-
-      {detail && (
-        <DetailModal
-          company={detail}
-          me={me}
-          onClose={() => setDetail(null)}
+      {contactChange && (
+        <ContactChangeModal
+          company={contactChange}
+          onClose={() => setContactChange(null)}
           onSaved={() => {
-            setDetail(null);
+            setContactChange(null);
             load();
           }}
         />
       )}
+      {adding && (
+        <AddModal
+          onClose={() => setAdding(false)}
+          onSaved={() => {
+            setAdding(false);
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
 
-      {adding && <AddModal onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
+function TodayView({
+  overdue,
+  laterToday,
+  upcoming,
+  now,
+  onCheckIn,
+  onContactChange,
+}: {
+  overdue: Company[];
+  laterToday: Company[];
+  upcoming: Company[];
+  now: Date;
+  onCheckIn: (c: Company) => void;
+  onContactChange: (c: Company) => void;
+}) {
+  if (overdue.length === 0 && laterToday.length === 0 && upcoming.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-400 text-sm">
+        Nothing scheduled today or in the next week.
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-6">
+      <Section title="Overdue" count={overdue.length} tone="alert">
+        {overdue.map((c) => (
+          <LeadCard
+            key={c.id}
+            c={c}
+            now={now}
+            onCheckIn={() => onCheckIn(c)}
+            onContactChange={() => onContactChange(c)}
+          />
+        ))}
+      </Section>
+      <Section title="Later today" count={laterToday.length}>
+        {laterToday.map((c) => (
+          <LeadCard
+            key={c.id}
+            c={c}
+            now={now}
+            onCheckIn={() => onCheckIn(c)}
+            onContactChange={() => onContactChange(c)}
+          />
+        ))}
+      </Section>
+      <Section title="Next 7 days" count={upcoming.length} muted>
+        {upcoming.map((c) => (
+          <LeadCard
+            key={c.id}
+            c={c}
+            now={now}
+            onCheckIn={() => onCheckIn(c)}
+            onContactChange={() => onContactChange(c)}
+          />
+        ))}
+      </Section>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  count,
+  tone,
+  muted,
+  children,
+}: {
+  title: string;
+  count: number;
+  tone?: "alert";
+  muted?: boolean;
+  children: React.ReactNode;
+}) {
+  if (count === 0) return null;
+  return (
+    <div>
+      <p
+        className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${
+          tone === "alert" ? "text-violet-700" : muted ? "text-gray-400" : "text-gray-500"
+        }`}
+      >
+        {title} ({count})
+      </p>
+      <div className="space-y-3">{children}</div>
     </div>
   );
 }
@@ -429,15 +527,15 @@ function LeadCard({
   c,
   now,
   onCheckIn,
-  onOpen,
+  onContactChange,
 }: {
   c: Company;
   now: Date;
   onCheckIn: () => void;
-  onOpen: () => void;
+  onContactChange: () => void;
 }) {
   const overdue = isOverdue(c.next_action_at, now);
-  const contact = c.contacts?.[0];
+  const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
   const isAccount = WON_STAGES.includes(c.stage);
   const quiet = daysSince(c.last_log?.called_at ?? c.updated_at, now);
   const stale = isAccount && quiet !== null && quiet > STALE_ACCOUNT_DAYS;
@@ -451,12 +549,12 @@ function LeadCard({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={onOpen}
+            <Link
+              to={`/b2b-gtm/${c.id}`}
               className="font-semibold text-gray-900 hover:text-violet-600 truncate"
             >
               {c.name}
-            </button>
+            </Link>
             <StageBadge s={c.stage} />
             <TempBadge t={c.temperature} />
             {c.needs_brochure && <BrochureBadge />}
@@ -485,12 +583,8 @@ function LeadCard({
             <p className="text-sm text-gray-600 mt-2 line-clamp-2">{c.last_log?.note || c.notes}</p>
           )}
 
-          {c.blocker_note && (
-            <p className="text-xs text-amber-700 mt-1">Blocker: {c.blocker_note}</p>
-          )}
-          {c.lost_feedback && (
-            <p className="text-xs text-rose-700 mt-1">Feedback: {c.lost_feedback}</p>
-          )}
+          {c.blocker_note && <p className="text-xs text-amber-700 mt-1">Blocker: {c.blocker_note}</p>}
+          {c.lost_feedback && <p className="text-xs text-rose-700 mt-1">Feedback: {c.lost_feedback}</p>}
 
           <div className="mt-2 text-xs">
             {c.next_action_at ? (
@@ -507,473 +601,28 @@ function LeadCard({
           </div>
         </div>
 
-        <button
-          onClick={onCheckIn}
-          className="shrink-0 px-3 py-1.5 rounded-xl bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700"
-        >
-          Log call
-        </button>
+        <div className="shrink-0 flex flex-col gap-1.5">
+          <button
+            onClick={onCheckIn}
+            className="px-3 py-1.5 rounded-xl bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700"
+          >
+            Log call
+          </button>
+          <button
+            onClick={onContactChange}
+            className="px-3 py-1.5 rounded-xl bg-white text-sky-700 text-xs font-medium border border-sky-300 hover:bg-sky-50 whitespace-nowrap"
+          >
+            Contact changed
+          </button>
+          <Link
+            to={`/b2b-gtm/${c.id}`}
+            className="px-3 py-1.5 rounded-xl bg-white text-gray-600 text-xs font-medium border border-gray-300 hover:bg-gray-50 text-center"
+          >
+            Open
+          </Link>
+        </div>
       </div>
     </div>
-  );
-}
-
-function CheckInModal({
-  company,
-  onClose,
-  onSaved,
-}: {
-  company: Company;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [pickedUp, setPickedUp] = useState<boolean | null>(null);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [objection, setObjection] = useState<Objection | null>(null);
-  const [temperature, setTemperature] = useState<Temperature | null>(company.temperature);
-  const [note, setNote] = useState("");
-  const [blockerType, setBlockerType] = useState<BlockerType | null>(company.blocker_type);
-  const [blockerNote, setBlockerNote] = useState("");
-  const [lostReason, setLostReason] = useState<LostReason | null>(null);
-  const [lostFeedback, setLostFeedback] = useState("");
-  const [competitorExpiry, setCompetitorExpiry] = useState("");
-  const [dealValue, setDealValue] = useState(company.deal_value ?? "");
-  const [nextPurchaseDue, setNextPurchaseDue] = useState("");
-  const [nextAt, setNextAt] = useState("");
-  const [nextReason, setNextReason] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  // Re-suggest whenever the answers change. Always overridable.
-  useEffect(() => {
-    if (pickedUp === null) return;
-    const s = suggestNextAction({
-      pickedUp,
-      outcome,
-      temperature,
-      lostReason,
-      competitorExpiry: competitorExpiry ? new Date(competitorExpiry) : null,
-      nextPurchaseDue: nextPurchaseDue ? new Date(nextPurchaseDue) : null,
-      stage: company.stage,
-    });
-    setNextAt(toLocalInputValue(s.at));
-    setNextReason(s.reason);
-  }, [pickedUp, outcome, temperature, lostReason, competitorExpiry, nextPurchaseDue, company.stage]);
-
-  const quick = (d: Date, reason: string) => {
-    setNextAt(toLocalInputValue(d));
-    setNextReason(reason);
-  };
-
-  const needsObjection = outcome ? objectionRequired(outcome) : false;
-  const lostIncomplete = outcome === "closed_lost" && (!lostReason || !lostFeedback.trim());
-  const canSave =
-    pickedUp !== null &&
-    !!nextAt &&
-    (pickedUp === false ||
-      (!!outcome && (!needsObjection || !!objection) && !lostIncomplete));
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const stage = outcome
-        ? stageForOutcome(outcome, company.stage, blockerType)
-        : null;
-      await authedFetch("/api/b2b-gtm?action=log", {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: company.id,
-          contact_id: company.contacts?.[0]?.id ?? null,
-          picked_up: pickedUp,
-          outcome,
-          objection,
-          temperature_at_time: temperature,
-          note: note.trim() || null,
-          next_action_at: new Date(nextAt).toISOString(),
-          next_action_reason: nextReason,
-          value_discussed: dealValue === "" ? null : Number(dealValue),
-          stage,
-          blocker_type: outcome === "blocked" ? blockerType : undefined,
-          blocker_note: outcome === "blocked" ? blockerNote : undefined,
-          lost_reason: outcome === "closed_lost" ? lostReason : undefined,
-          lost_feedback: outcome === "closed_lost" ? lostFeedback : undefined,
-          comeback_at:
-            outcome === "closed_lost" ? new Date(nextAt).toISOString() : undefined,
-          next_purchase_due:
-            outcome === "closed_won" && nextPurchaseDue
-              ? new Date(nextPurchaseDue).toISOString()
-              : undefined,
-        }),
-      });
-      toast.success("Logged");
-      onSaved();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Shell title={`Log call — ${company.name}`} onClose={onClose}>
-      {(company.last_log?.note || company.notes) && (
-        <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 mb-4">
-          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-            Where we left things off
-          </p>
-          <p className="text-sm text-gray-700">{company.last_log?.note || company.notes}</p>
-        </div>
-      )}
-
-      <Field label="Did they pick up?">
-        <div className="flex gap-2">
-          <Choice active={pickedUp === true} onClick={() => setPickedUp(true)}>
-            Yes
-          </Choice>
-          <Choice active={pickedUp === false} onClick={() => setPickedUp(false)}>
-            No
-          </Choice>
-        </div>
-      </Field>
-
-      {pickedUp === false && (
-        <Field label="When should we try again?">
-          <div className="flex flex-wrap gap-2">
-            <Choice onClick={() => quick(addMinutes(new Date(), 30), "Retry — no answer")}>
-              30 min
-            </Choice>
-            <Choice onClick={() => quick(addHours(new Date(), 1), "Retry — no answer")}>1 hr</Choice>
-            <Choice onClick={() => quick(addHours(new Date(), 2), "Retry — no answer")}>2 hrs</Choice>
-            <Choice onClick={() => quick(addDays(new Date(), 1), "Retry — no answer")}>
-              Tomorrow
-            </Choice>
-          </div>
-        </Field>
-      )}
-
-      {pickedUp === true && (
-        <>
-          <Field label="How did it go?">
-            <div className="grid grid-cols-2 gap-2">
-              {OUTCOMES.map((o) => (
-                <Choice key={o} active={outcome === o} onClick={() => setOutcome(o)}>
-                  {OUTCOME_LABELS[o]}
-                </Choice>
-              ))}
-            </div>
-          </Field>
-
-          {needsObjection && (
-            <Field label="What's the objection? (required)">
-              <div className="grid grid-cols-2 gap-2">
-                {OBJECTIONS.map((o) => (
-                  <Choice key={o} active={objection === o} onClick={() => setObjection(o)}>
-                    {OBJECTION_LABELS[o]}
-                  </Choice>
-                ))}
-              </div>
-            </Field>
-          )}
-
-          {outcome === "blocked" && (
-            <>
-              <Field label="What's blocking them?">
-                <div className="flex flex-wrap gap-2">
-                  {BLOCKER_TYPES.map((b) => (
-                    <Choice key={b} active={blockerType === b} onClick={() => setBlockerType(b)}>
-                      {b}
-                    </Choice>
-                  ))}
-                </div>
-              </Field>
-              <Field label="Blocker detail">
-                <input
-                  value={blockerNote}
-                  onChange={(e) => setBlockerNote(e.target.value)}
-                  placeholder="e.g. waiting on their tech team to sign off"
-                  className={inputCls}
-                />
-              </Field>
-            </>
-          )}
-
-          {outcome === "closed_won" && (
-            <>
-              <Field label="Deal value (₹) — this is the floor, not the finish line">
-                <input
-                  type="number"
-                  value={dealValue}
-                  onChange={(e) => setDealValue(e.target.value)}
-                  className={inputCls}
-                />
-              </Field>
-              <Field label="When should they buy again?">
-                <input
-                  type="datetime-local"
-                  value={nextPurchaseDue}
-                  onChange={(e) => setNextPurchaseDue(e.target.value)}
-                  className={inputCls}
-                />
-              </Field>
-            </>
-          )}
-
-          {outcome === "closed_lost" && (
-            <>
-              <Field label="Why? (required)">
-                <div className="grid grid-cols-2 gap-2">
-                  {LOST_REASONS.map((r) => (
-                    <Choice key={r} active={lostReason === r} onClick={() => setLostReason(r)}>
-                      {LOST_REASON_LABELS[r]}
-                    </Choice>
-                  ))}
-                </div>
-              </Field>
-              {lostReason === "competitor_contract" && (
-                <Field label="When does their contract expire? The window reopens then.">
-                  <input
-                    type="datetime-local"
-                    value={competitorExpiry}
-                    onChange={(e) => setCompetitorExpiry(e.target.value)}
-                    className={inputCls}
-                  />
-                </Field>
-              )}
-              <Field label="Their feedback — what would have changed this? (required)">
-                <textarea
-                  value={lostFeedback}
-                  onChange={(e) => setLostFeedback(e.target.value)}
-                  rows={2}
-                  className={inputCls}
-                />
-              </Field>
-            </>
-          )}
-
-          <Field label="Temperature now">
-            <div className="flex gap-2">
-              {TEMPERATURES.map((t) => (
-                <Choice key={t} active={temperature === t} onClick={() => setTemperature(t)}>
-                  {t}
-                </Choice>
-              ))}
-            </div>
-          </Field>
-
-          <Field label="Notes">
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              placeholder="What did they actually say?"
-              className={inputCls}
-            />
-          </Field>
-        </>
-      )}
-
-      {pickedUp !== null && (
-        <Field label="Next action">
-          <input
-            type="datetime-local"
-            value={nextAt}
-            onChange={(e) => setNextAt(e.target.value)}
-            className={inputCls}
-          />
-          <input
-            value={nextReason}
-            onChange={(e) => setNextReason(e.target.value)}
-            placeholder="Why are we calling them then?"
-            className={inputCls + " mt-2"}
-          />
-          <p className="text-xs text-gray-400 mt-1">Suggested by rule — change it freely.</p>
-        </Field>
-      )}
-
-      {lostIncomplete && (
-        <p className="text-xs text-rose-600 mb-3">
-          A no needs a reason and feedback. That's the whole point of asking.
-        </p>
-      )}
-
-      <div className="flex justify-end gap-2 pt-2">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
-          Cancel
-        </button>
-        <button
-          disabled={!canSave || saving}
-          onClick={save}
-          className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium disabled:opacity-40"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </div>
-    </Shell>
-  );
-}
-
-function DetailModal({
-  company,
-  me,
-  onClose,
-  onSaved,
-}: {
-  company: Company;
-  me: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [logs, setLogs] = useState<CallLog[]>([]);
-  const [stage, setStage] = useState<Stage>(company.stage);
-  const [owner, setOwner] = useState(company.owner ?? "");
-  const [needsBrochure, setNeedsBrochure] = useState(company.needs_brochure);
-  const [whatsapp, setWhatsapp] = useState(company.whatsapp_group_made);
-  const [dealValue, setDealValue] = useState(company.deal_value ?? "");
-  const [nextPurchaseDue, setNextPurchaseDue] = useState(
-    company.next_purchase_due ? toLocalInputValue(new Date(company.next_purchase_due)) : ""
-  );
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    authedFetch(`/api/b2b-gtm?company_id=${company.id}`)
-      .then((d) => setLogs(d.logs || []))
-      .catch(() => {});
-  }, [company.id]);
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await authedFetch("/api/b2b-gtm?action=company", {
-        method: "PATCH",
-        body: JSON.stringify({
-          id: company.id,
-          fields: {
-            stage,
-            owner,
-            needs_brochure: needsBrochure,
-            whatsapp_group_made: whatsapp,
-            deal_value: dealValue === "" ? null : Number(dealValue),
-            next_purchase_due: nextPurchaseDue ? new Date(nextPurchaseDue).toISOString() : null,
-          },
-        }),
-      });
-      toast.success("Saved");
-      onSaved();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Shell title={company.name} onClose={onClose} wide>
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <Field label="Stage">
-          <select value={stage} onChange={(e) => setStage(e.target.value as Stage)} className={inputCls}>
-            {ALL_STAGES.map((s) => (
-              <option key={s} value={s}>
-                {STAGE_LABELS[s]}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Owner (leave blank if it's yours)">
-          <input
-            value={owner}
-            onChange={(e) => setOwner(e.target.value)}
-            placeholder={me}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Deal value (₹)">
-          <input
-            type="number"
-            value={dealValue}
-            onChange={(e) => setDealValue(e.target.value)}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Next purchase due">
-          <input
-            type="datetime-local"
-            value={nextPurchaseDue}
-            onChange={(e) => setNextPurchaseDue(e.target.value)}
-            className={inputCls}
-          />
-        </Field>
-      </div>
-
-      <div className="flex gap-4 mb-4">
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={whatsapp}
-            onChange={(e) => setWhatsapp(e.target.checked)}
-            className="rounded"
-          />
-          WhatsApp group made
-        </label>
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={needsBrochure}
-            onChange={(e) => setNeedsBrochure(e.target.checked)}
-            className="rounded"
-          />
-          Needs a brochure
-        </label>
-      </div>
-
-      <div className="flex justify-end gap-2 mb-6">
-        <button
-          disabled={saving}
-          onClick={save}
-          className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium disabled:opacity-40"
-        >
-          {saving ? "Saving…" : "Save changes"}
-        </button>
-      </div>
-
-      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
-        Timeline ({logs.length})
-      </p>
-      <div className="space-y-2 max-h-72 overflow-y-auto">
-        {logs.length === 0 && <p className="text-sm text-gray-400">No calls logged yet.</p>}
-        {logs.map((l) => (
-          <div key={l.id} className="rounded-xl border border-gray-200 p-3 bg-gray-50">
-            <div className="flex items-center gap-2 flex-wrap text-xs">
-              <span className="text-gray-500">{formatDateTime(l.called_at)}</span>
-              <span
-                className={`px-2 py-0.5 rounded-full font-medium border ${
-                  l.picked_up
-                    ? "bg-green-100 text-green-700 border-green-200"
-                    : "bg-gray-100 text-gray-500 border-gray-200"
-                }`}
-              >
-                {l.picked_up ? "Picked up" : "No answer"}
-              </span>
-              {l.outcome && (
-                <span className="px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700 border border-violet-200">
-                  {OUTCOME_LABELS[l.outcome]}
-                </span>
-              )}
-              {l.objection && (
-                <span className="px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200">
-                  {OBJECTION_LABELS[l.objection]}
-                </span>
-              )}
-              {l.value_discussed && (
-                <span className="px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 border border-green-200">
-                  {formatValue(l.value_discussed)}
-                </span>
-              )}
-              {l.logged_by && <span className="text-gray-400 ml-auto">{l.logged_by}</span>}
-            </div>
-            {l.note && <p className="text-sm text-gray-700 mt-1.5">{l.note}</p>}
-          </div>
-        ))}
-      </div>
-    </Shell>
   );
 }
 
@@ -1036,7 +685,11 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
         </Field>
       </div>
       <Field label="Stage">
-        <select value={stage} onChange={(e) => setStage(e.target.value as Stage)} className={inputCls}>
+        <select
+          value={stage}
+          onChange={(e) => setStage(e.target.value as Stage)}
+          className={inputCls}
+        >
           {ALL_STAGES.map((s) => (
             <option key={s} value={s}>
               {STAGE_LABELS[s]}
@@ -1063,7 +716,12 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
         WhatsApp group made (moves them into GTM)
       </label>
       <Field label="Context">
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={inputCls} />
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={3}
+          className={inputCls}
+        />
       </Field>
       <Field label="First follow-up">
         <input
@@ -1086,74 +744,5 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
         </button>
       </div>
     </Shell>
-  );
-}
-
-/* ---- small shared bits ---- */
-
-const inputCls =
-  "w-full px-3 py-2 rounded-xl border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400";
-
-function Shell({
-  title,
-  onClose,
-  wide,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  wide?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto">
-      <div
-        className={`bg-white rounded-2xl border-2 border-neutral-900 shadow-[6px_6px_0px_0px_rgba(25,26,35,1)] w-full ${
-          wide ? "max-w-2xl" : "max-w-lg"
-        } my-8`}
-      >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
-          <h2 className="font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
-            {title}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-900 text-xl leading-none">
-            ×
-          </button>
-        </div>
-        <div className="p-5">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-4">
-      <label className="block text-xs font-semibold text-gray-600 mb-1.5">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function Choice({
-  active,
-  onClick,
-  children,
-}: {
-  active?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1.5 rounded-xl text-sm border capitalize transition-colors ${
-        active
-          ? "bg-neutral-900 text-white border-neutral-900 font-medium"
-          : "bg-white text-gray-700 border-gray-300 hover:border-gray-400"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
