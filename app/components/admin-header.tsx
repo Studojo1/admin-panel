@@ -18,6 +18,7 @@ const NAV_LINKS = [
   { to: "/tickets", label: "Tickets" },
   { to: "/webinar-registrations", label: "Webinar Signups" },
   { to: "/email-sequences", label: "Emails" },
+  { to: "/sensei", label: "Sensei" },
   { to: "/analytics", label: "Analytics" },
   { to: "/utm-builder", label: "UTM Builder" },
   { to: "/coupons", label: "Coupons" },
@@ -131,6 +132,22 @@ export function AdminHeader() {
               )}
             </AnimatePresence>
           </div>
+
+          {/* Sensei workspace admin */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.3 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <Link
+              to="/sensei"
+              className="rounded-lg border-2 border-neutral-900 bg-neutral-900 px-4 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+            >
+              ◈ Sensei
+            </Link>
+          </motion.div>
 
           {/* Email dashboard */}
           <motion.a

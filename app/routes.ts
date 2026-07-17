@@ -21,6 +21,8 @@ export default [
   route("settings", "routes/settings.tsx"),
   route("api/settings", "routes/api.settings.tsx"),
   route("email-sequences", "routes/email-sequences.tsx"),
+  route("sensei", "routes/sensei.tsx"),
+  route("api/sensei", "routes/api.sensei.tsx"),
   route("chat-logs", "routes/chat-logs.tsx"),
   route("api/chat-logs", "routes/api.chat-logs.tsx"),
   route("ops-alerts", "routes/ops-alerts.tsx"),
