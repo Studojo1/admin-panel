@@ -71,6 +71,7 @@ async function ensureTables() {
       called_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       kind TEXT NOT NULL DEFAULT 'call',
       picked_up BOOLEAN NOT NULL DEFAULT FALSE,
+      attendees TEXT,
       outcome TEXT,
       objection TEXT,
       temperature_at_time TEXT,
@@ -83,6 +84,7 @@ async function ensureTables() {
   `);
   await db.execute(sql`ALTER TABLE b2b_call_logs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'call'`);
   await db.execute(sql`ALTER TABLE b2b_call_logs ADD COLUMN IF NOT EXISTS objection_note TEXT`);
+  await db.execute(sql`ALTER TABLE b2b_call_logs ADD COLUMN IF NOT EXISTS attendees TEXT`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS needs_leads BOOLEAN NOT NULL DEFAULT FALSE`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_note TEXT`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_change BOOLEAN NOT NULL DEFAULT FALSE`);
@@ -681,7 +683,9 @@ export async function action({ request }: Route.ActionArgs) {
     const {
       company_id,
       contact_id,
+      kind,
       picked_up,
+      attendees,
       outcome,
       objection,
       objection_note,
@@ -720,13 +724,14 @@ export async function action({ request }: Route.ActionArgs) {
 
     await db.execute(sql`
       INSERT INTO b2b_call_logs (
-        company_id, contact_id, kind, picked_up, outcome, objection, objection_note,
+        company_id, contact_id, kind, picked_up, attendees, outcome, objection, objection_note,
         temperature_at_time, note, next_action_at, value_discussed, logged_by
       ) VALUES (
         ${company_id},
         ${contact_id ?? null},
-        'call',
+        ${kind === "meet" ? "meet" : "call"},
         ${picked_up ?? false},
+        ${attendees?.trim() || null},
         ${outcome ?? null},
         ${objection ?? null},
         ${objection_note?.trim() || null},

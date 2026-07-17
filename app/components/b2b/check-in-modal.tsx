@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   BLOCKER_TYPES,
+  CONTACT_METHODS,
   LOST_REASONS,
   LOST_REASON_LABELS,
   OBJECTIONS,
@@ -12,6 +13,8 @@ import {
   addDays,
   addHours,
   addMinutes,
+  methodReachedThem,
+  methodToKind,
   objectionNeedsNote,
   objectionRequired,
   lostReasonNeedsNote,
@@ -20,6 +23,7 @@ import {
   toLocalInputValue,
   type BlockerType,
   type Company,
+  type ContactMethod,
   type LostReason,
   type Objection,
   type Outcome,
@@ -36,7 +40,8 @@ export function CheckInModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [pickedUp, setPickedUp] = useState<boolean | null>(null);
+  const [method, setMethod] = useState<ContactMethod | null>(null);
+  const [attendees, setAttendees] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [objection, setObjection] = useState<Objection | null>(null);
   const [objectionNote, setObjectionNote] = useState("");
@@ -56,9 +61,10 @@ export function CheckInModal({
   const activeContact = (company.contacts || []).find((c) => !c.is_inactive) ?? company.contacts?.[0];
 
   useEffect(() => {
-    if (pickedUp === null) return;
+    if (method === null) return;
     const s = suggestNextAction({
-      pickedUp,
+      pickedUp: methodReachedThem(method),
+      method,
       outcome,
       temperature,
       lostReason,
@@ -68,20 +74,21 @@ export function CheckInModal({
     });
     setNextAt(toLocalInputValue(s.at));
     setNextReason(s.reason);
-  }, [pickedUp, outcome, temperature, lostReason, competitorExpiry, nextPurchaseDue, company.stage]);
+  }, [method, outcome, temperature, lostReason, competitorExpiry, nextPurchaseDue, company.stage]);
 
   const quick = (d: Date, reason: string) => {
     setNextAt(toLocalInputValue(d));
     setNextReason(reason);
   };
 
+  const reached = method ? methodReachedThem(method) : false;
   const needsObjection = outcome ? objectionRequired(outcome) : false;
   const objectionNoteMissing = objectionNeedsNote(objection) && !objectionNote.trim();
   const lostIncomplete = outcome === "closed_lost" && (!lostReason || !lostFeedback.trim());
   const canSave =
-    pickedUp !== null &&
+    method !== null &&
     !!nextAt &&
-    (pickedUp === false ||
+    (!reached ||
       (!!outcome && (!needsObjection || !!objection) && !objectionNoteMissing && !lostIncomplete));
 
   const save = async () => {
@@ -93,7 +100,9 @@ export function CheckInModal({
         body: JSON.stringify({
           company_id: company.id,
           contact_id: activeContact?.id ?? null,
-          picked_up: pickedUp,
+          kind: methodToKind(method!),
+          picked_up: reached,
+          attendees: method === "meet" ? attendees.trim() || null : null,
           outcome,
           objection,
           objection_note: objectionNote.trim() || null,
@@ -124,7 +133,12 @@ export function CheckInModal({
   };
 
   return (
-    <Shell title={`Log call — ${company.name}`} onClose={onClose}>
+    <Shell
+      title={`${method === "meet" ? "Log meet" : method === "no_show" ? "Log no-show" : "Log call"} — ${
+        company.name
+      }`}
+      onClose={onClose}
+    >
       {(company.last_log?.note || company.notes) && (
         <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 mb-4">
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
@@ -134,35 +148,68 @@ export function CheckInModal({
         </div>
       )}
 
-      <Field label="Did they pick up?">
-        <div className="flex gap-2">
-          <Choice active={pickedUp === true} onClick={() => setPickedUp(true)}>
-            Yes
-          </Choice>
-          <Choice active={pickedUp === false} onClick={() => setPickedUp(false)}>
-            No
-          </Choice>
+      <Field label="How did we reach them?">
+        <div className="flex flex-wrap gap-2">
+          {CONTACT_METHODS.map((m) => (
+            <Choice key={m.key} active={method === m.key} onClick={() => setMethod(m.key)}>
+              {m.label}
+            </Choice>
+          ))}
         </div>
       </Field>
 
-      {pickedUp === false && (
+      {method === "meet" && (
+        <Field label="Who joined from their side? (optional)">
+          <input
+            value={attendees}
+            onChange={(e) => setAttendees(e.target.value)}
+            placeholder="e.g. Himanshu + 2 from their tech team"
+            className={inputCls}
+          />
+        </Field>
+      )}
+
+      {(method === "no_answer" || method === "no_show") && (
         <Field label="When should we try again?">
           <div className="flex flex-wrap gap-2">
-            <Choice onClick={() => quick(addMinutes(new Date(), 30), "Retry — no answer")}>
-              30 min
-            </Choice>
-            <Choice onClick={() => quick(addHours(new Date(), 1), "Retry — no answer")}>1 hr</Choice>
-            <Choice onClick={() => quick(addHours(new Date(), 2), "Retry — no answer")}>
-              2 hrs
-            </Choice>
-            <Choice onClick={() => quick(addDays(new Date(), 1), "Retry — no answer")}>
+            {method === "no_answer" && (
+              <>
+                <Choice onClick={() => quick(addMinutes(new Date(), 30), "Retry — no answer")}>
+                  30 min
+                </Choice>
+                <Choice onClick={() => quick(addHours(new Date(), 1), "Retry — no answer")}>
+                  1 hr
+                </Choice>
+                <Choice onClick={() => quick(addHours(new Date(), 2), "Retry — no answer")}>
+                  2 hrs
+                </Choice>
+              </>
+            )}
+            <Choice
+              onClick={() =>
+                quick(
+                  addDays(new Date(), 1),
+                  method === "no_show" ? "No-showed the meet — reschedule" : "Retry — no answer"
+                )
+              }
+            >
               Tomorrow
+            </Choice>
+            <Choice
+              onClick={() =>
+                quick(
+                  addDays(new Date(), 3),
+                  method === "no_show" ? "No-showed the meet — reschedule" : "Retry — no answer"
+                )
+              }
+            >
+              In 3 days
             </Choice>
           </div>
         </Field>
       )}
 
-      {pickedUp === true && (
+      {reached && (
         <>
           <Field label="How did it go?">
             <div className="grid grid-cols-2 gap-2">
@@ -311,7 +358,7 @@ export function CheckInModal({
         </>
       )}
 
-      {pickedUp !== null && (
+      {method !== null && (
         <Field label="Next action">
           <input
             type="datetime-local"

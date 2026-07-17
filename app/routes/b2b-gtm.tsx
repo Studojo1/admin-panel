@@ -21,6 +21,7 @@ import {
   OBJECTION_LABELS,
   STAGE_LABELS,
   STALE_ACCOUNT_DAYS,
+  TEAM,
   TEMPERATURES,
   VIEWS,
   WON_STAGES,
@@ -638,14 +639,18 @@ function ExpandedPanel({
             </div>
             <div>
               <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                Owner
+                Who's handling it
               </p>
-              <input
-                value={owner}
-                onChange={(e) => setOwner(e.target.value)}
-                placeholder="blank = you"
-                className={inputCls}
-              />
+              <div className="flex flex-wrap gap-1.5">
+                <Choice active={!owner} onClick={() => setOwner("")}>
+                  Me
+                </Choice>
+                {TEAM.map((t) => (
+                  <Choice key={t} active={owner === t} onClick={() => setOwner(t)}>
+                    {t}
+                  </Choice>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -901,6 +906,17 @@ function LogEntry({ l }: { l: CallLog }) {
             Contact changed
           </span>
         )}
+        {l.kind === "meet" && (
+          <span
+            className={`px-1.5 py-0.5 rounded-full font-medium border ${
+              l.picked_up
+                ? "bg-indigo-100 text-indigo-700 border-indigo-200"
+                : "bg-rose-100 text-rose-700 border-rose-200"
+            }`}
+          >
+            {l.picked_up ? "Google Meet" : "No-showed"}
+          </span>
+        )}
         {l.kind === "call" && (
           <span
             className={`px-1.5 py-0.5 rounded-full font-medium border ${
@@ -912,6 +928,7 @@ function LogEntry({ l }: { l: CallLog }) {
             {l.picked_up ? "Call" : "No answer"}
           </span>
         )}
+        {l.attendees && <span className="text-gray-500">with {l.attendees}</span>}
         {l.objection && (
           <span className="px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200">
             {l.objection === "other" && l.objection_note

@@ -254,14 +254,38 @@ export interface Contact {
 /**
  * What kind of event a log row records.
  *
- * - `call`: a logged call, with an outcome.
+ * - `call`: a phone call, with an outcome.
+ * - `meet`: a Google Meet. Same outcome questions as a call, but there's no
+ *   "did they pick up" — it either happened or they no-showed.
  * - `contact_change`: the person moved on. NOT an interest signal — it says
  *   nothing about whether the company wants BOB, which is why it's not an
  *   `outcome`.
  * - `note`: something they said, feedback, or an action for us. Dated, never
  *   overwritten. The accumulation of these IS the context.
  */
-export type LogKind = "call" | "contact_change" | "note";
+export type LogKind = "call" | "meet" | "contact_change" | "note";
+
+/**
+ * How the check-in starts. A Meet has no pick-up question, so this replaces
+ * the old yes/no rather than nesting under it.
+ */
+export type ContactMethod = "call" | "meet" | "no_answer" | "no_show";
+
+export const CONTACT_METHODS: { key: ContactMethod; label: string }[] = [
+  { key: "call", label: "Phone call" },
+  { key: "meet", label: "Google Meet" },
+  { key: "no_answer", label: "No answer" },
+  { key: "no_show", label: "Meet no-show" },
+];
+
+/** Did we actually speak to them? Drives whether the outcome questions show. */
+export function methodReachedThem(m: ContactMethod): boolean {
+  return m === "call" || m === "meet";
+}
+
+export function methodToKind(m: ContactMethod): LogKind {
+  return m === "meet" || m === "no_show" ? "meet" : "call";
+}
 
 export interface CallLog {
   id: number;
@@ -269,7 +293,10 @@ export interface CallLog {
   contact_id: number | null;
   called_at: string;
   kind: LogKind;
+  /** For a call: they answered. For a meet: it went ahead (false = no-show). */
   picked_up: boolean;
+  /** Who turned up from their side. Meets often pull in more people than a call. */
+  attendees: string | null;
   outcome: Outcome | null;
   objection: Objection | null;
   /** What they actually said. Required when the objection is "other". */
@@ -313,6 +340,7 @@ export interface Suggestion {
  */
 export function suggestNextAction(input: {
   pickedUp: boolean;
+  method?: ContactMethod | null;
   outcome?: Outcome | null;
   temperature?: Temperature | null;
   lostReason?: LostReason | null;
@@ -324,6 +352,11 @@ export function suggestNextAction(input: {
   const now = input.now ?? new Date();
 
   if (!input.pickedUp) {
+    // A no-show is a stronger signal than a missed call: they committed to a
+    // time and didn't come. Chase it sooner, and say what it was.
+    if (input.method === "no_show") {
+      return { at: addDays(now, 1), reason: "No-showed the meet — reschedule" };
+    }
     return { at: addDays(now, 1), reason: "No answer — retry tomorrow" };
   }
 
@@ -417,6 +450,13 @@ export function stageForOutcome(
       return null;
   }
 }
+
+/**
+ * The team. Owner is stored as a plain string, so these are buttons rather than
+ * free text — typing a name slightly differently would split the Team view.
+ * Blank owner means it's yours.
+ */
+export const TEAM = ["Hegde", "Jeremy", "Vivaan"] as const;
 
 /** An account that has gone quiet this long needs attention regardless of its next action. */
 export const STALE_ACCOUNT_DAYS = 45;

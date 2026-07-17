@@ -5,7 +5,7 @@ import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import type { Route } from "./+types/b2b-gtm.$id";
 import { CheckInModal, ContactChangeModal } from "~/components/b2b/check-in-modal";
-import { Field, StageBadge, TempBadge, authedFetch, inputCls } from "~/components/b2b/shared";
+import { Choice, Field, StageBadge, TempBadge, authedFetch, inputCls } from "~/components/b2b/shared";
 import {
   ALL_STAGES,
   FLAGS,
@@ -13,6 +13,7 @@ import {
   OUTCOME_LABELS,
   STAGE_LABELS,
   STALE_ACCOUNT_DAYS,
+  TEAM,
   WON_STAGES,
   activeFlags,
   daysSince,
@@ -293,6 +294,17 @@ function CompanyBody({
                         Note
                       </span>
                     )}
+                    {l.kind === "meet" && (
+                      <span
+                        className={`px-2 py-0.5 rounded-full font-medium border ${
+                          l.picked_up
+                            ? "bg-indigo-100 text-indigo-700 border-indigo-200"
+                            : "bg-rose-100 text-rose-700 border-rose-200"
+                        }`}
+                      >
+                        {l.picked_up ? "Google Meet" : "No-showed the meet"}
+                      </span>
+                    )}
                     {l.kind === "call" && (
                       <span
                         className={`px-2 py-0.5 rounded-full font-medium border ${
@@ -304,6 +316,7 @@ function CompanyBody({
                         {l.picked_up ? "Picked up" : "No answer"}
                       </span>
                     )}
+                    {l.attendees && <span className="text-gray-500">with {l.attendees}</span>}
                     {l.outcome && (
                       <span className="px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700 border border-violet-200">
                         {OUTCOME_LABELS[l.outcome]}
@@ -514,13 +527,17 @@ function EditPanel({
           ))}
         </select>
       </Field>
-      <Field label="Owner (blank = yours)">
-        <input
-          value={owner}
-          onChange={(e) => setOwner(e.target.value)}
-          placeholder={me}
-          className={inputCls}
-        />
+      <Field label="Who's handling it">
+        <div className="flex flex-wrap gap-1.5">
+          <Choice active={!owner} onClick={() => setOwner("")}>
+            Me
+          </Choice>
+          {TEAM.map((t) => (
+            <Choice key={t} active={owner === t} onClick={() => setOwner(t)}>
+              {t}
+            </Choice>
+          ))}
+        </div>
       </Field>
       <Field label="Deal value (₹)">
         <input
