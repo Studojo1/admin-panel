@@ -295,16 +295,25 @@ export default function B2BGtm() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    {["", "Company", "Contact", "Phone", "Stage", "Temp", "Next action", "Context", ""].map(
-                      (h, i) => (
-                        <th
-                          key={i}
-                          className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
-                        >
-                          {h}
-                        </th>
-                      )
-                    )}
+                    {[
+                      "",
+                      "Company",
+                      "Contact",
+                      "Phone",
+                      "Stage",
+                      "Temp",
+                      "Handled by",
+                      "Next action",
+                      "Context",
+                      "",
+                    ].map((h, i) => (
+                      <th
+                        key={i}
+                        className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -430,6 +439,9 @@ function Row({
         <td className="px-3 py-2.5 whitespace-nowrap">
           <TempBadge t={c.temperature} />
         </td>
+        <td className="px-3 py-2.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+          <OwnerPicker c={c} onSaved={onSaved} />
+        </td>
         <td className="px-3 py-2.5 whitespace-nowrap text-xs">
           {c.next_action_at ? (
             <span
@@ -461,7 +473,7 @@ function Row({
 
       {expanded && (
         <tr className="bg-gray-50">
-          <td colSpan={9} className="px-3 pb-4 pt-1">
+          <td colSpan={10} className="px-3 pb-4 pt-1">
             <ExpandedPanel
               c={c}
               now={now}
@@ -488,7 +500,6 @@ function ExpandedPanel({
 }) {
   const [stage, setStage] = useState<Stage>(c.stage);
   const [temperature, setTemperature] = useState<Temperature | null>(c.temperature);
-  const [owner, setOwner] = useState(c.owner ?? "");
   const [flags, setFlags] = useState<Record<string, boolean>>({
     needs_brochure: c.needs_brochure,
     needs_leads: c.needs_leads,
@@ -519,9 +530,10 @@ function ExpandedPanel({
         body: JSON.stringify({
           id: c.id,
           fields: {
+            // owner is handled by the row picker; sending a stale copy here
+            // would silently revert it.
             stage,
             temperature,
-            owner,
             notes,
             next_action_at: nextAt ? new Date(nextAt).toISOString() : null,
             next_action_reason: nextReason,
@@ -620,38 +632,21 @@ function ExpandedPanel({
 
         {/* Editable fields + contacts. */}
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                Stage
-              </p>
-              <select
-                value={stage}
-                onChange={(e) => setStage(e.target.value as Stage)}
-                className={inputCls}
-              >
-                {ALL_STAGES.map((s) => (
-                  <option key={s} value={s}>
-                    {STAGE_LABELS[s]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                Who's handling it
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                <Choice active={!owner} onClick={() => setOwner("")}>
-                  Me
-                </Choice>
-                {TEAM.map((t) => (
-                  <Choice key={t} active={owner === t} onClick={() => setOwner(t)}>
-                    {t}
-                  </Choice>
-                ))}
-              </div>
-            </div>
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+              Stage
+            </p>
+            <select
+              value={stage}
+              onChange={(e) => setStage(e.target.value as Stage)}
+              className={inputCls}
+            >
+              {ALL_STAGES.map((s) => (
+                <option key={s} value={s}>
+                  {STAGE_LABELS[s]}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -760,6 +755,53 @@ function ExpandedPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Assign a company without expanding the row. Saves on change.
+ *
+ * Deliberately a labelled control rather than a colour: a tint would collide
+ * with the flag dots (yellow already means "brochure", green "needs leads")
+ * and would still need memorising.
+ */
+function OwnerPicker({ c, onSaved }: { c: Company; onSaved: () => void }) {
+  const [saving, setSaving] = useState(false);
+
+  const assign = async (value: string) => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=company", {
+        method: "PATCH",
+        body: JSON.stringify({ id: c.id, fields: { owner: value } }),
+      });
+      toast.success(value ? `Assigned to ${value}` : "Assigned to you");
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <select
+      value={c.owner ?? ""}
+      disabled={saving}
+      onChange={(e) => assign(e.target.value)}
+      className={`text-xs rounded-full border px-2 py-0.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:opacity-50 ${
+        c.owner
+          ? "bg-sky-100 text-sky-700 border-sky-200 font-medium"
+          : "bg-white text-gray-400 border-gray-200"
+      }`}
+    >
+      <option value="">Me</option>
+      {TEAM.map((t) => (
+        <option key={t} value={t}>
+          {t}
+        </option>
+      ))}
+    </select>
   );
 }
 
