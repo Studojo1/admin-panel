@@ -216,6 +216,12 @@ export interface Company {
   whatsapp_group_made: boolean;
   needs_brochure: boolean;
   brochure_note: string | null;
+  /** They want leads they haven't been sent yet. */
+  needs_leads: boolean;
+  leads_note: string | null;
+  /** They have leads, but the wrong ones — spec needs changing. */
+  leads_change: boolean;
+  leads_change_note: string | null;
   next_action_at: string | null;
   next_action_reason: string | null;
   they_reachout_on: string | null;
@@ -246,11 +252,16 @@ export interface Contact {
 }
 
 /**
- * What kind of event a log row records. A contact change is NOT an interest
- * signal — the person moved on, which says nothing about whether the company
- * wants BOB. Keeping it out of `outcome` is the whole point.
+ * What kind of event a log row records.
+ *
+ * - `call`: a logged call, with an outcome.
+ * - `contact_change`: the person moved on. NOT an interest signal — it says
+ *   nothing about whether the company wants BOB, which is why it's not an
+ *   `outcome`.
+ * - `note`: something they said, feedback, or an action for us. Dated, never
+ *   overwritten. The accumulation of these IS the context.
  */
-export type LogKind = "call" | "contact_change";
+export type LogKind = "call" | "contact_change" | "note";
 
 export interface CallLog {
   id: number;
@@ -504,6 +515,54 @@ export function companyMatchesView(c: Company, view: ViewKey, now: Date = new Da
     default:
       return true;
   }
+}
+
+/**
+ * Things we owe them. Defined once so a flag can't be added to the form but
+ * forgotten in the row, the counts or the filters.
+ */
+export interface FlagDef {
+  key: "needs_brochure" | "needs_leads" | "leads_change";
+  noteKey: "brochure_note" | "leads_note" | "leads_change_note";
+  label: string;
+  short: string;
+  dot: string;
+  badge: string;
+  placeholder: string;
+}
+
+export const FLAGS: FlagDef[] = [
+  {
+    key: "needs_brochure",
+    noteKey: "brochure_note",
+    label: "Needs a brochure",
+    short: "Brochure",
+    dot: "bg-yellow-500",
+    badge: "bg-yellow-100 text-yellow-800 border-yellow-300",
+    placeholder: "What should the brochure cover?",
+  },
+  {
+    key: "needs_leads",
+    noteKey: "leads_note",
+    label: "Needs leads",
+    short: "Leads",
+    dot: "bg-emerald-500",
+    badge: "bg-emerald-100 text-emerald-800 border-emerald-300",
+    placeholder: "What leads do they want?",
+  },
+  {
+    key: "leads_change",
+    noteKey: "leads_change_note",
+    label: "Leads need changing",
+    short: "Fix leads",
+    dot: "bg-orange-500",
+    badge: "bg-orange-100 text-orange-800 border-orange-300",
+    placeholder: "What's wrong with the leads we sent?",
+  },
+];
+
+export function activeFlags(c: Company): FlagDef[] {
+  return FLAGS.filter((f) => c[f.key]);
 }
 
 export function formatValue(v: string | number | null | undefined): string {

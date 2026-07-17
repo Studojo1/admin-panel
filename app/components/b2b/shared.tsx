@@ -63,14 +63,6 @@ export function StageBadge({ s }: { s: Stage }) {
   );
 }
 
-export function BrochureBadge() {
-  return (
-    <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-300">
-      Brochure needed
-    </span>
-  );
-}
-
 export const inputCls =
   "w-full px-3 py-2 rounded-xl border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400";
 

@@ -5,21 +5,16 @@ import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import type { Route } from "./+types/b2b-gtm.$id";
 import { CheckInModal, ContactChangeModal } from "~/components/b2b/check-in-modal";
-import {
-  BrochureBadge,
-  Field,
-  StageBadge,
-  TempBadge,
-  authedFetch,
-  inputCls,
-} from "~/components/b2b/shared";
+import { Field, StageBadge, TempBadge, authedFetch, inputCls } from "~/components/b2b/shared";
 import {
   ALL_STAGES,
+  FLAGS,
   OBJECTION_LABELS,
   OUTCOME_LABELS,
   STAGE_LABELS,
   STALE_ACCOUNT_DAYS,
   WON_STAGES,
+  activeFlags,
   daysSince,
   formatDateTime,
   formatValue,
@@ -162,7 +157,15 @@ function CompanyBody({
           <div className="flex items-center gap-2 flex-wrap mt-2">
             <StageBadge s={company.stage} />
             <TempBadge t={company.temperature} />
-            {company.needs_brochure && <BrochureBadge />}
+            {activeFlags(company).map((f) => (
+              <span
+                key={f.key}
+                className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${f.badge}`}
+                title={company[f.noteKey] || undefined}
+              >
+                {f.label}
+              </span>
+            ))}
             {company.owner && (
               <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-sky-100 text-sky-700 border border-sky-200">
                 {company.owner}
@@ -229,7 +232,7 @@ function CompanyBody({
       <div className="grid lg:grid-cols-3 gap-5 mt-5">
         <div className="lg:col-span-2 space-y-5">
           {/* Context first — this is what you read before dialling. */}
-          <Panel title="Context">
+          <Panel title="About this company">
             {company.notes ? (
               <p className="text-sm text-gray-700 whitespace-pre-wrap">{company.notes}</p>
             ) : (
@@ -273,16 +276,24 @@ function CompanyBody({
                   className={`rounded-xl border p-3 ${
                     l.kind === "contact_change"
                       ? "border-sky-200 bg-sky-50"
+                      : l.kind === "note"
+                      ? "border-violet-200 bg-violet-50"
                       : "border-gray-200 bg-gray-50"
                   }`}
                 >
                   <div className="flex items-center gap-2 flex-wrap text-xs">
                     <span className="text-gray-500">{formatDateTime(l.called_at)}</span>
-                    {l.kind === "contact_change" ? (
+                    {l.kind === "contact_change" && (
                       <span className="px-2 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700 border border-sky-200">
                         Contact changed
                       </span>
-                    ) : (
+                    )}
+                    {l.kind === "note" && (
+                      <span className="px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700 border border-violet-200">
+                        Note
+                      </span>
+                    )}
+                    {l.kind === "call" && (
                       <span
                         className={`px-2 py-0.5 rounded-full font-medium border ${
                           l.picked_up
@@ -438,8 +449,16 @@ function EditPanel({
 }) {
   const [stage, setStage] = useState<Stage>(company.stage);
   const [owner, setOwner] = useState(company.owner ?? "");
-  const [needsBrochure, setNeedsBrochure] = useState(company.needs_brochure);
-  const [brochureNote, setBrochureNote] = useState(company.brochure_note ?? "");
+  const [flags, setFlags] = useState<Record<string, boolean>>({
+    needs_brochure: company.needs_brochure,
+    needs_leads: company.needs_leads,
+    leads_change: company.leads_change,
+  });
+  const [flagNotes, setFlagNotes] = useState<Record<string, string>>({
+    brochure_note: company.brochure_note ?? "",
+    leads_note: company.leads_note ?? "",
+    leads_change_note: company.leads_change_note ?? "",
+  });
   const [whatsapp, setWhatsapp] = useState(company.whatsapp_group_made);
   const [dealValue, setDealValue] = useState(company.deal_value ?? "");
   const [nextPurchaseDue, setNextPurchaseDue] = useState(
@@ -458,12 +477,16 @@ function EditPanel({
           fields: {
             stage,
             owner,
-            needs_brochure: needsBrochure,
-            brochure_note: brochureNote,
             whatsapp_group_made: whatsapp,
             deal_value: dealValue === "" ? null : Number(dealValue),
             next_purchase_due: nextPurchaseDue ? new Date(nextPurchaseDue).toISOString() : null,
             notes,
+            needs_brochure: flags.needs_brochure,
+            brochure_note: flagNotes.brochure_note,
+            needs_leads: flags.needs_leads,
+            leads_note: flagNotes.leads_note,
+            leads_change: flags.leads_change,
+            leads_change_note: flagNotes.leads_change_note,
           },
         }),
       });
@@ -532,23 +555,30 @@ function EditPanel({
         />
         WhatsApp group made
       </label>
-      <label className="flex items-center gap-2 text-sm text-gray-700 mb-2">
-        <input
-          type="checkbox"
-          checked={needsBrochure}
-          onChange={(e) => setNeedsBrochure(e.target.checked)}
-          className="rounded"
-        />
-        Needs a brochure
-      </label>
-      {needsBrochure && (
-        <input
-          value={brochureNote}
-          onChange={(e) => setBrochureNote(e.target.value)}
-          placeholder="What should the brochure cover?"
-          className={inputCls + " mb-2"}
-        />
-      )}
+      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+        What we owe them
+      </p>
+      {FLAGS.map((f) => (
+        <div key={f.key} className="mb-1.5">
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={!!flags[f.key]}
+              onChange={(e) => setFlags({ ...flags, [f.key]: e.target.checked })}
+              className="rounded"
+            />
+            {f.label}
+          </label>
+          {flags[f.key] && (
+            <input
+              value={flagNotes[f.noteKey] ?? ""}
+              onChange={(e) => setFlagNotes({ ...flagNotes, [f.noteKey]: e.target.value })}
+              placeholder={f.placeholder}
+              className={inputCls + " mt-1 text-xs"}
+            />
+          )}
+        </div>
+      ))}
       <button
         disabled={saving}
         onClick={save}

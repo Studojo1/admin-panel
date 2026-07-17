@@ -17,12 +17,14 @@ import {
 } from "~/components/b2b/shared";
 import {
   ALL_STAGES,
+  FLAGS,
   OBJECTION_LABELS,
   STAGE_LABELS,
   STALE_ACCOUNT_DAYS,
   TEMPERATURES,
   VIEWS,
   WON_STAGES,
+  activeFlags,
   addDays,
   companyMatchesView,
   daysSince,
@@ -31,6 +33,7 @@ import {
   isLaterToday,
   isOverdue,
   toLocalInputValue,
+  type CallLog,
   type Company,
   type Objection,
   type Stage,
@@ -48,6 +51,8 @@ interface Stats {
   hot: number;
   blocked: number;
   brochures: number;
+  leads_wanted: number;
+  leads_to_fix: number;
   accounts: number;
   renewals_due: number;
   committed_value: string;
@@ -197,6 +202,8 @@ export default function B2BGtm() {
                   {stats.total} companies · {overdue.length} overdue · {formatValue(stats.committed_value)}{" "}
                   committed
                   {stats.brochures > 0 ? ` · ${stats.brochures} brochure` : ""}
+                  {stats.leads_wanted > 0 ? ` · ${stats.leads_wanted} need leads` : ""}
+                  {stats.leads_to_fix > 0 ? ` · ${stats.leads_to_fix} leads to fix` : ""}
                 </>
               ) : (
                 "Every lead always has a next action."
@@ -390,12 +397,13 @@ function Row({
         <td className="px-3 py-2.5 font-medium text-gray-900 whitespace-nowrap">
           <div className="flex items-center gap-1.5">
             {c.name}
-            {c.needs_brochure && (
+            {activeFlags(c).map((f) => (
               <span
-                className="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0"
-                title="Brochure needed"
+                key={f.key}
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${f.dot}`}
+                title={c[f.noteKey] ? `${f.label}: ${c[f.noteKey]}` : f.label}
               />
-            )}
+            ))}
             {stale && (
               <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title={`Quiet ${quiet}d`} />
             )}
@@ -480,7 +488,16 @@ function ExpandedPanel({
   const [stage, setStage] = useState<Stage>(c.stage);
   const [temperature, setTemperature] = useState<Temperature | null>(c.temperature);
   const [owner, setOwner] = useState(c.owner ?? "");
-  const [needsBrochure, setNeedsBrochure] = useState(c.needs_brochure);
+  const [flags, setFlags] = useState<Record<string, boolean>>({
+    needs_brochure: c.needs_brochure,
+    needs_leads: c.needs_leads,
+    leads_change: c.leads_change,
+  });
+  const [flagNotes, setFlagNotes] = useState<Record<string, string>>({
+    brochure_note: c.brochure_note ?? "",
+    leads_note: c.leads_note ?? "",
+    leads_change_note: c.leads_change_note ?? "",
+  });
   const [notes, setNotes] = useState(c.notes ?? "");
   const [nextAt, setNextAt] = useState(
     c.next_action_at ? toLocalInputValue(new Date(c.next_action_at)) : ""
@@ -504,11 +521,16 @@ function ExpandedPanel({
             stage,
             temperature,
             owner,
-            needs_brochure: needsBrochure,
             notes,
             next_action_at: nextAt ? new Date(nextAt).toISOString() : null,
             next_action_reason: nextReason,
             deal_value: dealValue === "" ? null : Number(dealValue),
+            needs_brochure: flags.needs_brochure,
+            brochure_note: flagNotes.brochure_note,
+            needs_leads: flags.needs_leads,
+            leads_note: flagNotes.leads_note,
+            leads_change: flags.leads_change,
+            leads_change_note: flagNotes.leads_change_note,
           },
         }),
       });
@@ -524,29 +546,23 @@ function ExpandedPanel({
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="grid lg:grid-cols-3 gap-5">
-        {/* Context — what you read before dialling. */}
         <div className="lg:col-span-2 space-y-3">
+          {/* The company as a whole: stable background, edited rarely. */}
           <div>
             <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-              Context
+              About this company
             </p>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              placeholder="What's the story with this company?"
+              rows={2}
+              placeholder="Background that stays true: size, what they do, how their BD team works…"
               className={inputCls}
             />
           </div>
 
-          {c.last_log?.note && c.last_log.note !== notes && (
-            <div className="rounded-lg bg-gray-50 border border-gray-200 p-2.5">
-              <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
-                Last call — {formatDateTime(c.last_log.called_at)}
-              </p>
-              <p className="text-sm text-gray-700 mt-0.5">{c.last_log.note}</p>
-            </div>
-          )}
+          {/* The running record. Every call, every bit of feedback, dated. */}
+          <NotesFeed companyId={c.id} onSaved={onSaved} />
 
           {c.blocker_note && (
             <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5">
@@ -694,15 +710,32 @@ function ExpandedPanel({
             </button>
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={needsBrochure}
-              onChange={(e) => setNeedsBrochure(e.target.checked)}
-              className="rounded"
-            />
-            Needs a brochure
-          </label>
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+              What we owe them
+            </p>
+            {FLAGS.map((f) => (
+              <div key={f.key} className="mb-1.5">
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={!!flags[f.key]}
+                    onChange={(e) => setFlags({ ...flags, [f.key]: e.target.checked })}
+                    className="rounded"
+                  />
+                  {f.label}
+                </label>
+                {flags[f.key] && (
+                  <input
+                    value={flagNotes[f.noteKey] ?? ""}
+                    onChange={(e) => setFlagNotes({ ...flagNotes, [f.noteKey]: e.target.value })}
+                    placeholder={f.placeholder}
+                    className={inputCls + " mt-1 text-xs"}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
 
           <div className="flex gap-2 pt-1">
             <button
@@ -721,6 +754,179 @@ function ExpandedPanel({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The running record. Every call, note and contact change, newest first, with
+ * a box to add another. Notes are dated entries that never overwrite each
+ * other — the accumulation is the context.
+ */
+function NotesFeed({ companyId, onSaved }: { companyId: number; onSaved: () => void }) {
+  const [logs, setLogs] = useState<CallLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [text, setText] = useState("");
+  const [withDate, setWithDate] = useState(false);
+  const [nextAt, setNextAt] = useState(toLocalInputValue(addDays(new Date(), 1)));
+  const [saving, setSaving] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await authedFetch(`/api/b2b-gtm?company_id=${companyId}`);
+      setLogs(d.logs || []);
+    } catch {
+      // The panel is still usable without the feed.
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const add = async () => {
+    if (!text.trim()) return;
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=note", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyId,
+          note: text.trim(),
+          next_action_at: withDate && nextAt ? new Date(nextAt).toISOString() : null,
+        }),
+      });
+      setText("");
+      setWithDate(false);
+      toast.success("Note added");
+      await load();
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const shown = showAll ? logs : logs.slice(0, 4);
+
+  return (
+    <div>
+      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+        Notes &amp; history {logs.length > 0 && <span className="text-gray-400">({logs.length})</span>}
+      </p>
+
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={2}
+          placeholder="What did they say? What do we need to do?"
+          className="w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+        />
+        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+          <label className="flex items-center gap-1.5 text-xs text-gray-600">
+            <input
+              type="checkbox"
+              checked={withDate}
+              onChange={(e) => setWithDate(e.target.checked)}
+              className="rounded"
+            />
+            Set a follow-up
+          </label>
+          {withDate && (
+            <input
+              type="datetime-local"
+              value={nextAt}
+              onChange={(e) => setNextAt(e.target.value)}
+              className="px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white"
+            />
+          )}
+          <button
+            disabled={!text.trim() || saving}
+            onClick={add}
+            className="ml-auto px-3 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
+          >
+            {saving ? "Adding…" : "Add note"}
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="text-xs text-gray-400">Loading notes…</p>
+      ) : logs.length === 0 ? (
+        <p className="text-xs text-gray-400">Nothing logged yet.</p>
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            {shown.map((l) => (
+              <LogEntry key={l.id} l={l} />
+            ))}
+          </div>
+          {logs.length > 4 && (
+            <button
+              onClick={() => setShowAll(!showAll)}
+              className="text-xs text-violet-600 hover:underline mt-1.5"
+            >
+              {showAll ? "Show less" : `Show all ${logs.length}`}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function LogEntry({ l }: { l: CallLog }) {
+  const tone =
+    l.kind === "contact_change"
+      ? "border-sky-200 bg-sky-50"
+      : l.kind === "note"
+      ? "border-violet-200 bg-violet-50"
+      : "border-gray-200 bg-white";
+  return (
+    <div className={`rounded-lg border p-2 ${tone}`}>
+      <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+        <span className="text-gray-500">{formatDateTime(l.called_at)}</span>
+        {l.kind === "note" && (
+          <span className="px-1.5 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700 border border-violet-200">
+            Note
+          </span>
+        )}
+        {l.kind === "contact_change" && (
+          <span className="px-1.5 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700 border border-sky-200">
+            Contact changed
+          </span>
+        )}
+        {l.kind === "call" && (
+          <span
+            className={`px-1.5 py-0.5 rounded-full font-medium border ${
+              l.picked_up
+                ? "bg-green-100 text-green-700 border-green-200"
+                : "bg-gray-100 text-gray-500 border-gray-200"
+            }`}
+          >
+            {l.picked_up ? "Call" : "No answer"}
+          </span>
+        )}
+        {l.objection && (
+          <span className="px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200">
+            {l.objection === "other" && l.objection_note
+              ? l.objection_note
+              : OBJECTION_LABELS[l.objection]}
+          </span>
+        )}
+        {l.value_discussed && (
+          <span className="px-1.5 py-0.5 rounded-full font-medium bg-green-100 text-green-700 border border-green-200">
+            {formatValue(l.value_discussed)}
+          </span>
+        )}
+        {l.logged_by && <span className="text-gray-400 ml-auto">{l.logged_by.split("@")[0]}</span>}
+      </div>
+      {l.note && <p className="text-sm text-gray-700 mt-1">{l.note}</p>}
     </div>
   );
 }

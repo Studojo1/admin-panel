@@ -23,6 +23,10 @@ async function ensureTables() {
       whatsapp_group_made BOOLEAN NOT NULL DEFAULT FALSE,
       needs_brochure BOOLEAN NOT NULL DEFAULT FALSE,
       brochure_note TEXT,
+      needs_leads BOOLEAN NOT NULL DEFAULT FALSE,
+      leads_note TEXT,
+      leads_change BOOLEAN NOT NULL DEFAULT FALSE,
+      leads_change_note TEXT,
       next_action_at TIMESTAMPTZ,
       next_action_reason TEXT,
       they_reachout_on TEXT,
@@ -79,6 +83,10 @@ async function ensureTables() {
   `);
   await db.execute(sql`ALTER TABLE b2b_call_logs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'call'`);
   await db.execute(sql`ALTER TABLE b2b_call_logs ADD COLUMN IF NOT EXISTS objection_note TEXT`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS needs_leads BOOLEAN NOT NULL DEFAULT FALSE`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_note TEXT`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_change BOOLEAN NOT NULL DEFAULT FALSE`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_change_note TEXT`);
 
   // The seed used to prefix imported notes with "Imported from Excel: ".
   // Strip it in place so the notes read exactly as they were written, without
@@ -126,6 +134,8 @@ const SEED_ROWS: Array<{
   blockerType?: string;
   lostReason?: string;
   needsBrochure?: boolean;
+  needsLeads?: boolean;
+  leadsNote?: string;
 }> = [
   {
     contact: "Vamsi",
@@ -230,6 +240,8 @@ const SEED_ROWS: Array<{
     status: "awaiting_response",
     notes: "Need to send new updated leads",
     stage: "gtm_active",
+    needsLeads: true,
+    leadsNote: "New updated leads",
   },
   {
     contact: "Umar/Afsal (Jr)",
@@ -315,7 +327,7 @@ async function seedIfEmpty(loggedBy: string) {
     const inserted = await db.execute(sql`
       INSERT INTO b2b_companies (
         name, stage, temperature, status, whatsapp_group_made,
-        needs_brochure, next_action_reason, they_reachout_on,
+        needs_brochure, needs_leads, leads_note, next_action_reason, they_reachout_on,
         deal_value, blocker_type, lost_reason, notes
       ) VALUES (
         ${row.company.trim()},
@@ -324,6 +336,8 @@ async function seedIfEmpty(loggedBy: string) {
         ${row.status ?? null},
         ${whatsappMade},
         ${row.needsBrochure ?? false},
+        ${row.needsLeads ?? false},
+        ${row.leadsNote ?? null},
         ${row.reachoutNote ?? null},
         ${row.theyReachout ?? null},
         ${row.dealValue ?? null},
@@ -415,6 +429,8 @@ export async function loader({ request }: Route.LoaderArgs) {
         COUNT(*) FILTER (WHERE temperature = 'hot')::int AS hot,
         COUNT(*) FILTER (WHERE stage LIKE 'blocked_%')::int AS blocked,
         COUNT(*) FILTER (WHERE needs_brochure)::int AS brochures,
+        COUNT(*) FILTER (WHERE needs_leads)::int AS leads_wanted,
+        COUNT(*) FILTER (WHERE leads_change)::int AS leads_to_fix,
         COUNT(*) FILTER (WHERE stage IN ('closed_won','onboarding','using','renewal_due','expansion_pitch','repeat_buyer'))::int AS accounts,
         COUNT(*) FILTER (WHERE next_purchase_due IS NOT NULL AND next_purchase_due <= NOW() + INTERVAL '7 days')::int AS renewals_due,
         COALESCE(SUM(deal_value) FILTER (WHERE stage IN ('closed_won','onboarding','using','renewal_due','expansion_pitch','repeat_buyer')), 0) AS committed_value
@@ -514,6 +530,39 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   /**
+   * A dated note: something they said, feedback, or an action for us. Not a
+   * call, so it carries no outcome and never touches stage or temperature.
+   * The accumulation of these is the context.
+   */
+  if (request.method === "POST" && intent === "note") {
+    const { company_id, note, next_action_at, next_action_reason } = body;
+
+    if (!note?.trim()) {
+      return Response.json({ error: "A note needs something in it." }, { status: 400 });
+    }
+
+    await db.execute(sql`
+      INSERT INTO b2b_call_logs (company_id, kind, picked_up, note, next_action_at, logged_by)
+      VALUES (${company_id}, 'note', FALSE, ${note.trim()}, ${next_action_at ?? null}, ${admin.email})
+    `);
+
+    // Only move the follow-up if the note actually set one.
+    if (next_action_at) {
+      await db.execute(sql`
+        UPDATE b2b_companies
+        SET next_action_at = ${next_action_at},
+            next_action_reason = ${next_action_reason || note.trim().slice(0, 120)},
+            updated_at = NOW()
+        WHERE id = ${company_id}
+      `);
+    } else {
+      await db.execute(sql`UPDATE b2b_companies SET updated_at = NOW() WHERE id = ${company_id}`);
+    }
+
+    return Response.json({ ok: true });
+  }
+
+  /**
    * The contact moved on and handed us to someone else (Akshee -> Kulture Hire).
    * This says NOTHING about interest, so it deliberately touches neither
    * `outcome` nor stage/temperature. The company and its whole timeline stay
@@ -601,6 +650,10 @@ export async function action({ request }: Route.ActionArgs) {
     if ("whatsapp_group_made" in f) sets.push(sql`whatsapp_group_made = ${f.whatsapp_group_made}`);
     if ("needs_brochure" in f) sets.push(sql`needs_brochure = ${f.needs_brochure}`);
     if ("brochure_note" in f) sets.push(sql`brochure_note = ${f.brochure_note || null}`);
+    if ("needs_leads" in f) sets.push(sql`needs_leads = ${f.needs_leads}`);
+    if ("leads_note" in f) sets.push(sql`leads_note = ${f.leads_note || null}`);
+    if ("leads_change" in f) sets.push(sql`leads_change = ${f.leads_change}`);
+    if ("leads_change_note" in f) sets.push(sql`leads_change_note = ${f.leads_change_note || null}`);
     if ("next_action_at" in f) sets.push(sql`next_action_at = ${f.next_action_at || null}`);
     if ("next_action_reason" in f) sets.push(sql`next_action_reason = ${f.next_action_reason || null}`);
     if ("they_reachout_on" in f) sets.push(sql`they_reachout_on = ${f.they_reachout_on || null}`);
