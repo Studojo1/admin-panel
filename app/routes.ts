@@ -21,8 +21,6 @@ export default [
   route("settings", "routes/settings.tsx"),
   route("api/settings", "routes/api.settings.tsx"),
   route("email-sequences", "routes/email-sequences.tsx"),
-  route("sensei", "routes/sensei.tsx"),
-  route("api/sensei", "routes/api.sensei.tsx"),
   route("chat-logs", "routes/chat-logs.tsx"),
   route("api/chat-logs", "routes/api.chat-logs.tsx"),
   route("ops-alerts", "routes/ops-alerts.tsx"),
@@ -46,8 +44,7 @@ export default [
   route("career-coach", "routes/career-coach.tsx"),
   route("webinar-registrations", "routes/webinar-registrations.tsx"),
   route("api/webinar-registrations", "routes/api.webinar-registrations.tsx"),
-  route("b2b-gtm", "routes/b2b-gtm.tsx"),
-  route("b2b-gtm/:id", "routes/b2b-gtm.$id.tsx"),
-  route("api/b2b-gtm", "routes/api.b2b-gtm.tsx"),
+  route("sensei", "routes/sensei.tsx"),
+  route("api/sensei", "routes/api.sensei.tsx"),
 ] satisfies RouteConfig;
 
