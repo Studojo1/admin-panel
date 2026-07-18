@@ -16,15 +16,42 @@ async function requireAdmin(request: Request): Promise<boolean> {
   return role === "admin" || role === "ops";
 }
 
+// Sensei support tickets land in the shared `tickets` table with source='sensei'
+// (written by the studojo frontend's /api/sensei-ticket). Read them straight
+// from this panel's DB — same DB the main Tickets tab uses.
+async function loadSenseiTickets() {
+  const exists = await db.execute(
+    sql`SELECT to_regclass('public.tickets') AS t`,
+  );
+  if (!exists.rows[0]?.t) return [];
+  const r = await db.execute(sql`
+    SELECT t.id, t.user_email, t.user_name, t.category, t.priority, t.status,
+           t.context, t.created_at,
+           COALESCE((SELECT LEFT(m.body, 160) FROM ticket_messages m
+                     WHERE m.ticket_id = t.id ORDER BY m.created_at ASC LIMIT 1), '') AS first_message
+    FROM tickets t
+    WHERE t.source = 'sensei'
+    ORDER BY CASE t.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+             t.created_at DESC
+    LIMIT 100
+  `);
+  return r.rows;
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   if (!(await requireAdmin(request))) return Response.json({ error: "Forbidden" }, { status: 403 });
-  try {
-    const res = await fetch(`${BOB_API}/admin/orgs`, { headers: { "X-Superadmin-Secret": SECRET } });
-    const d = await res.json().catch(() => ({}));
-    return Response.json({ orgs: d.orgs || [] }, { status: res.ok ? 200 : 502 });
-  } catch {
-    return Response.json({ orgs: [], error: "bob-svc unreachable" }, { status: 502 });
-  }
+  const [analytics, tickets] = await Promise.all([
+    fetch(`${BOB_API}/admin/analytics`, { headers: { "X-Superadmin-Secret": SECRET } })
+      .then((r) => r.json())
+      .catch(() => ({})),
+    loadSenseiTickets().catch(() => []),
+  ]);
+  return Response.json({
+    orgs: analytics.orgs || [],
+    users: analytics.users || [],
+    totals: analytics.totals || null,
+    tickets,
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {
