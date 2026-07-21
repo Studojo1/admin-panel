@@ -49,7 +49,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   return Response.json({
     orgs: analytics.orgs || [],
     users: analytics.users || [],
+    chats: analytics.chats || [],
     totals: analytics.totals || null,
+    rates: analytics.rates || null,
     tickets,
   });
 }
