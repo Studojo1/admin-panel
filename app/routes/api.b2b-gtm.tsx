@@ -142,6 +142,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Vamsi",
     company: "ATA",
+    phone: "9486215579",
     temperature: "cold",
     status: "awaiting_response",
     notes: "15-30 students B2B2C,",
@@ -150,6 +151,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Anisha",
     company: "Sharpner tech",
+    phone: "9871025029",
     temperature: "hot",
     status: "accepted",
     notes:
@@ -160,6 +162,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Senthil",
     company: "Bluecode",
+    phone: "6382215245",
     status: "declined",
     notes: "Doesnt have money.",
     stage: "feedback_pending",
@@ -168,6 +171,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Hiren",
     company: "Mahika",
+    phone: "9820282701",
     status: "accepted",
     notes: "Accepted to sign PO for 10k (Phone numbers)",
     stage: "closed_won",
@@ -176,6 +180,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Vimal Singh",
     company: "Board infinity",
+    phone: "9867025843",
     theyReachout: "He will reachout on 14th July",
     temperature: "cold",
     status: "awaiting_response",
@@ -187,6 +192,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Rohan sanija",
     company: "Polaris",
+    phone: "9015113737",
     temperature: "warm",
     notes: "pricing for just intelignece and lead based pricing",
     stage: "blocked_pricing",
@@ -195,6 +201,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Sudipta",
     company: "Newton school",
+    phone: "8597376616",
     status: "declined",
     notes: "got annual plan of lusha and revspot",
     stage: "feedback_pending",
@@ -210,6 +217,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Sahil",
     company: "Preplaced",
+    phone: "8237372919",
     temperature: "warm",
     status: "awaiting_response",
     notes: "Happy with leads, asking for pricing",
@@ -219,6 +227,7 @@ const SEED_ROWS: Array<{
   {
     contact: "satish",
     company: "Palle",
+    phone: "9740588499",
     reachoutNote: "20th",
     temperature: "neutral",
     status: "awaiting_response",
@@ -229,6 +238,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Rajat or Raghav",
     company: "Unsaid talks",
+    phone: "7303573374",
     temperature: "warm",
     status: "awaiting_response",
     notes: "Need to check capmign, D2c got 2 conatacts",
@@ -237,6 +247,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Nikhil",
     company: "upspir",
+    phone: "9818547905",
     reachoutNote: "16th",
     temperature: "hot",
     status: "awaiting_response",
@@ -259,6 +270,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Jatin miglani",
     company: "Ethans",
+    phone: "9527354004",
     notes: "Pitch B2B, B2B2C, 2 weeks ago he said his team will get back to us",
     stage: "gtm_active",
   },
@@ -274,6 +286,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Himanshu (founder)",
     company: "Fin X",
+    phone: "9324845088",
     temperature: "warm",
     status: "awaiting_response",
     notes: "Will add tech team to grp, to get back with pricing",
@@ -283,6 +296,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Adhithya",
     company: "Skillfyme",
+    phone: "9074416276",
     notes:
       "She joined, she has to sedn 3 resumes, she has appolo she might buy next month, might have price objection, she liked the leads and platform (premade leads), she wants the 7 day free trials, she wants pricing as of 16th",
     stage: "blocked_pricing",
@@ -291,6 +305,7 @@ const SEED_ROWS: Array<{
   {
     contact: "Ankita",
     company: "Analytics lab",
+    phone: "9910446413",
     reachoutNote: "Need to send brochure on 15th",
     notes: "She loved tool, need to share pricing",
     stage: "blocked_pricing",
@@ -308,12 +323,14 @@ const SEED_ROWS: Array<{
   {
     contact: "Aman",
     company: "Masai",
+    phone: "8210251639",
     notes: "No whatsapp yet",
     stage: "cold_call_done",
   },
   {
     contact: "Bibek",
     company: "Presidency",
+    phone: "7008972494",
     reachoutNote: "20th",
     stage: "gtm_active",
   },
@@ -371,6 +388,137 @@ async function seedIfEmpty(loggedBy: string) {
   }
 
   return { seeded: true, count: SEED_ROWS.length };
+}
+
+/**
+ * Phone numbers and late additions from the updated sheet.
+ *
+ * seedIfEmpty() no-ops once companies exist, so this is the path for
+ * corrections to an already-populated board. Idempotent: phones only fill a
+ * blank, and companies/contacts are matched before insert. Notes are
+ * deliberately NOT touched — the board's own notes are now the source of truth.
+ */
+const PHONE_BACKFILL: { company: string; contact: string; phone: string }[] = [
+  { company: "ATA", contact: "Vamsi", phone: "9486215579" },
+  { company: "Sharpner tech", contact: "Anisha", phone: "9871025029" },
+  { company: "Bluecode", contact: "Senthil", phone: "6382215245" },
+  { company: "Mahika", contact: "Hiren", phone: "9820282701" },
+  { company: "Board infinity", contact: "Vimal Singh", phone: "9867025843" },
+  { company: "Polaris", contact: "Rohan sanija", phone: "9015113737" },
+  { company: "Newton school", contact: "Sudipta", phone: "8597376616" },
+  { company: "Preplaced", contact: "Sahil", phone: "8237372919" },
+  { company: "Palle", contact: "satish", phone: "9740588499" },
+  { company: "Unsaid talks", contact: "Rajat or Raghav", phone: "7303573374" },
+  { company: "upspir", contact: "Nikhil", phone: "9818547905" },
+  { company: "Ethans", contact: "Jatin miglani", phone: "9527354004" },
+  { company: "Kulture hire", contact: "Akshee", phone: "8890074827" },
+  { company: "Fin X", contact: "Himanshu (founder)", phone: "9324845088" },
+  { company: "Skillfyme", contact: "Adhithya", phone: "9074416276" },
+  { company: "Analytics lab", contact: "Ankita", phone: "9910446413" },
+  { company: "Masai", contact: "Aman", phone: "8210251639" },
+  { company: "Presidency", contact: "Bibek", phone: "7008972494" },
+  { company: "Brototype", contact: "Umar/Afsal (Jr)", phone: "9995591306 (Afsal)" },
+];
+
+/** Companies on the sheet that aren't on the board yet. */
+const NEW_COMPANIES: { company: string; contact: string; phone?: string }[] = [
+  { company: "Eduleem", contact: "Shiladitya" },
+];
+
+/**
+ * Extra people at companies that ALREADY exist. Kept separate from
+ * NEW_COMPANIES on purpose: adding "Kulture hire / Kadhiravan" as a company
+ * would fork the account and strand Akshee's history on the old row.
+ */
+const NEW_CONTACTS: { company: string; contact: string; phone?: string }[] = [
+  { company: "Kulture hire", contact: "Kadhiravan" },
+];
+
+async function backfillFromSheet(loggedBy: string) {
+  let phonesSet = 0;
+  let contactsAdded = 0;
+  let companiesAdded = 0;
+
+  const findCompany = async (name: string) => {
+    const r = await db.execute(
+      sql`SELECT id FROM b2b_companies WHERE LOWER(TRIM(name)) = ${name.trim().toLowerCase()} LIMIT 1`
+    );
+    return r.rows.length ? ((r.rows[0] as any).id as number) : null;
+  };
+
+  // 1. Phones — only where we don't already have one, so manual edits win.
+  for (const row of PHONE_BACKFILL) {
+    const companyId = await findCompany(row.company);
+    if (!companyId) continue;
+
+    const existing = await db.execute(sql`
+      SELECT id, phone FROM b2b_contacts
+      WHERE company_id = ${companyId}
+        AND LOWER(TRIM(name)) = ${row.contact.trim().toLowerCase()}
+      LIMIT 1
+    `);
+
+    if (existing.rows.length) {
+      const c = existing.rows[0] as any;
+      if (!c.phone) {
+        await db.execute(sql`UPDATE b2b_contacts SET phone = ${row.phone} WHERE id = ${c.id}`);
+        phonesSet++;
+      }
+    } else {
+      await db.execute(sql`
+        INSERT INTO b2b_contacts (company_id, name, phone, is_primary)
+        VALUES (${companyId}, ${row.contact.trim()}, ${row.phone}, FALSE)
+      `);
+      contactsAdded++;
+    }
+  }
+
+  // 2. Companies not on the board yet.
+  for (const row of NEW_COMPANIES) {
+    if (await findCompany(row.company)) continue;
+    const ins = await db.execute(sql`
+      INSERT INTO b2b_companies (name, stage, whatsapp_group_made)
+      VALUES (${row.company.trim()}, 'cold_call_done', FALSE)
+      RETURNING id
+    `);
+    const companyId = (ins.rows[0] as any).id as number;
+    await db.execute(sql`
+      INSERT INTO b2b_contacts (company_id, name, phone, is_primary)
+      VALUES (${companyId}, ${row.contact.trim()}, ${row.phone ?? null}, TRUE)
+    `);
+    companiesAdded++;
+  }
+
+  // 3. Extra contacts at existing companies.
+  for (const row of NEW_CONTACTS) {
+    const companyId = await findCompany(row.company);
+    if (!companyId) continue;
+    const dupe = await db.execute(sql`
+      SELECT id FROM b2b_contacts
+      WHERE company_id = ${companyId}
+        AND LOWER(TRIM(name)) = ${row.contact.trim().toLowerCase()}
+      LIMIT 1
+    `);
+    if (dupe.rows.length) continue;
+
+    // Primary only if every existing contact has gone inactive.
+    const active = await db.execute(
+      sql`SELECT COUNT(*)::int AS n FROM b2b_contacts WHERE company_id = ${companyId} AND NOT is_inactive`
+    );
+    const isPrimary = ((active.rows[0] as any).n ?? 0) === 0;
+
+    await db.execute(sql`
+      INSERT INTO b2b_contacts (company_id, name, phone, is_primary)
+      VALUES (${companyId}, ${row.contact.trim()}, ${row.phone ?? null}, ${isPrimary})
+    `);
+    await db.execute(sql`
+      INSERT INTO b2b_call_logs (company_id, kind, picked_up, note, logged_by)
+      VALUES (${companyId}, 'note', FALSE, ${"Added " + row.contact.trim() + " from the sheet."}, ${loggedBy})
+    `);
+    contactsAdded++;
+  }
+
+  return { phonesSet, contactsAdded, companiesAdded };
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -490,6 +638,12 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "seed") {
     const result = await seedIfEmpty(admin.email);
+    return Response.json(result);
+  }
+
+  // Corrections from an updated sheet, for a board that's already populated.
+  if (intent === "backfill") {
+    const result = await backfillFromSheet(admin.email);
     return Response.json(result);
   }
 

@@ -170,6 +170,30 @@ export default function B2BGtm() {
 
   if (isPending) return null;
 
+  /** Pull phone numbers and late additions from the updated sheet. Safe to re-run. */
+  const backfill = async () => {
+    const ok = await showConfirm(
+      "Pull phone numbers and any new companies from the latest sheet? Existing notes, stages and edits are left alone, and phone numbers you've already set won't be overwritten.",
+      "Sync"
+    );
+    if (!ok) return;
+    try {
+      const r = await authedFetch("/api/b2b-gtm?action=backfill", {
+        method: "POST",
+        body: "{}",
+      });
+      const parts = [
+        r.phonesSet ? `${r.phonesSet} phone${r.phonesSet === 1 ? "" : "s"}` : null,
+        r.companiesAdded ? `${r.companiesAdded} new compan${r.companiesAdded === 1 ? "y" : "ies"}` : null,
+        r.contactsAdded ? `${r.contactsAdded} contact${r.contactsAdded === 1 ? "" : "s"}` : null,
+      ].filter(Boolean);
+      toast.success(parts.length ? `Synced: ${parts.join(", ")}` : "Already up to date");
+      load();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
   const seed = async () => {
     const ok = await showConfirm(
       "Import the 21 rows from your sheet? Stages are inferred from your notes and will need a quick review. Does nothing if leads already exist.",
@@ -218,6 +242,14 @@ export default function B2BGtm() {
             >
               + Add company
             </button>
+            {companies.length > 0 && !loading && (
+              <button
+                onClick={backfill}
+                className="px-4 py-2 rounded-xl bg-white text-gray-700 text-sm font-medium border border-gray-300 hover:bg-gray-50"
+              >
+                Sync sheet
+              </button>
+            )}
             {companies.length === 0 && !loading && (
               <button
                 onClick={seed}
@@ -702,6 +734,7 @@ function ExpandedPanel({
                 {x.left_note ? ` — ${x.left_note}` : ""}
               </p>
             ))}
+            <AddContact companyId={c.id} onSaved={onSaved} />
             <button
               onClick={onContactChange}
               className="mt-1.5 text-xs text-sky-700 hover:underline font-medium"
@@ -753,6 +786,92 @@ function ExpandedPanel({
             </Link>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Add another person at a company that already exists — a second stakeholder,
+ * not a replacement. Distinct from "Contact changed", which retires the old
+ * contact; this one just adds alongside.
+ */
+function AddContact({ companyId, onSaved }: { companyId: number; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [role, setRole] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=contact", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyId,
+          name: name.trim() || null,
+          phone: phone.trim() || null,
+          role: role.trim() || null,
+        }),
+      });
+      toast.success("Contact added");
+      setName("");
+      setPhone("");
+      setRole("");
+      setOpen(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-1.5 mr-3 text-xs text-violet-600 hover:underline font-medium"
+      >
+        + Add contact
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
+      <div className="grid grid-cols-2 gap-1.5">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Name"
+          className="px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+        />
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="Phone"
+          className="px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+        />
+      </div>
+      <input
+        value={role}
+        onChange={(e) => setRole(e.target.value)}
+        placeholder="Role (optional)"
+        className="w-full mt-1.5 px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+      />
+      <div className="flex justify-end gap-2 mt-1.5">
+        <button onClick={() => setOpen(false)} className="text-xs text-gray-500">
+          Cancel
+        </button>
+        <button
+          disabled={saving || (!name.trim() && !phone.trim())}
+          onClick={save}
+          className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
+        >
+          {saving ? "Adding…" : "Add"}
+        </button>
       </div>
     </div>
   );
