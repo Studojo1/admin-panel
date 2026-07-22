@@ -412,6 +412,7 @@ const PHONE_BACKFILL: { company: string; contact: string; phone: string }[] = [
   { company: "upspir", contact: "Nikhil", phone: "9818547905" },
   { company: "Ethans", contact: "Jatin miglani", phone: "9527354004" },
   { company: "Kulture hire", contact: "Akshee", phone: "8890074827" },
+  { company: "Eduleem", contact: "Shiladitya", phone: "9123623532" },
   { company: "Fin X", contact: "Himanshu (founder)", phone: "9324845088" },
   { company: "Skillfyme", contact: "Adhithya", phone: "9074416276" },
   { company: "Analytics lab", contact: "Ankita", phone: "9910446413" },
@@ -446,31 +447,60 @@ async function backfillFromSheet(loggedBy: string) {
     return r.rows.length ? ((r.rows[0] as any).id as number) : null;
   };
 
-  // 1. Phones — only where we don't already have one, so manual edits win.
+  // 1. Phones. Matched on the COMPANY, not the person: contacts get renamed
+  //    and replaced (Akshee -> KD at Kulture Hire), and an earlier version of
+  //    this matched on contact name, so a renamed contact silently created a
+  //    duplicate row that carried the number while the card kept showing the
+  //    original — the number looked missing. Fill the contact the card
+  //    actually displays: the first ACTIVE one, else the first one at all.
+  //    Never overwrite a number already present, so manual edits win.
   for (const row of PHONE_BACKFILL) {
     const companyId = await findCompany(row.company);
     if (!companyId) continue;
 
-    const existing = await db.execute(sql`
+    const target = await db.execute(sql`
       SELECT id, phone FROM b2b_contacts
       WHERE company_id = ${companyId}
-        AND LOWER(TRIM(name)) = ${row.contact.trim().toLowerCase()}
+      ORDER BY is_inactive ASC, is_primary DESC, id ASC
       LIMIT 1
     `);
 
-    if (existing.rows.length) {
-      const c = existing.rows[0] as any;
-      if (!c.phone) {
+    if (target.rows.length) {
+      const c = target.rows[0] as any;
+      if (!c.phone || !String(c.phone).trim()) {
         await db.execute(sql`UPDATE b2b_contacts SET phone = ${row.phone} WHERE id = ${c.id}`);
         phonesSet++;
       }
     } else {
+      // Company exists with no contact at all — create the one from the sheet.
       await db.execute(sql`
         INSERT INTO b2b_contacts (company_id, name, phone, is_primary)
-        VALUES (${companyId}, ${row.contact.trim()}, ${row.phone}, FALSE)
+        VALUES (${companyId}, ${row.contact.trim()}, ${row.phone}, TRUE)
       `);
       contactsAdded++;
     }
+  }
+
+  // 1b. Clean up duplicate contacts the old name-matching backfill created:
+  //     a second row with the same phone as the sheet, no history attached,
+  //     sitting behind the contact the card displays.
+  for (const row of PHONE_BACKFILL) {
+    const companyId = await findCompany(row.company);
+    if (!companyId) continue;
+    await db.execute(sql`
+      DELETE FROM b2b_contacts
+      WHERE company_id = ${companyId}
+        AND phone = ${row.phone}
+        AND is_primary = FALSE
+        AND is_inactive = FALSE
+        AND id NOT IN (SELECT contact_id FROM b2b_call_logs WHERE contact_id IS NOT NULL)
+        AND id <> (
+          SELECT id FROM b2b_contacts
+          WHERE company_id = ${companyId}
+          ORDER BY is_inactive ASC, is_primary DESC, id ASC
+          LIMIT 1
+        )
+    `);
   }
 
   // 2. Companies not on the board yet.
