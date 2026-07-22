@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  BLOCKER_LABELS,
   BLOCKER_TYPES,
   CONTACT_METHODS,
   LOST_REASONS,
@@ -66,6 +67,7 @@ export function CheckInModal({
       pickedUp: methodReachedThem(method),
       method,
       outcome,
+      blockerType,
       temperature,
       lostReason,
       competitorExpiry: competitorExpiry ? new Date(competitorExpiry) : null,
@@ -74,7 +76,16 @@ export function CheckInModal({
     });
     setNextAt(toLocalInputValue(s.at));
     setNextReason(s.reason);
-  }, [method, outcome, temperature, lostReason, competitorExpiry, nextPurchaseDue, company.stage]);
+  }, [
+    method,
+    outcome,
+    blockerType,
+    temperature,
+    lostReason,
+    competitorExpiry,
+    nextPurchaseDue,
+    company.stage,
+  ]);
 
   const quick = (d: Date, reason: string) => {
     setNextAt(toLocalInputValue(d));
@@ -258,7 +269,7 @@ export function CheckInModal({
                 <div className="flex flex-wrap gap-2">
                   {BLOCKER_TYPES.map((b) => (
                     <Choice key={b} active={blockerType === b} onClick={() => setBlockerType(b)}>
-                      {b}
+                      {BLOCKER_LABELS[b]}
                     </Choice>
                   ))}
                 </div>

@@ -31,6 +31,10 @@ export type Stage =
   | "blocked_timing"
   | "blocked_approval"
   | "blocked_budget"
+  // Silence, not an objection: they owe us a reply or a meeting.
+  | "blocked_no_response"
+  | "blocked_no_show"
+  | "blocked_no_show_ghosted"
   // Won -> expansion. repeat_buyer loops back to renewal_due each cycle.
   | "closed_won"
   | "onboarding"
@@ -50,6 +54,9 @@ export const BLOCKED_STAGES: Stage[] = [
   "blocked_timing",
   "blocked_approval",
   "blocked_budget",
+  "blocked_no_response",
+  "blocked_no_show",
+  "blocked_no_show_ghosted",
 ];
 export const WON_STAGES: Stage[] = [
   "closed_won",
@@ -80,6 +87,9 @@ export const STAGE_LABELS: Record<Stage, string> = {
   blocked_timing: "Blocked: timing",
   blocked_approval: "Blocked: approval",
   blocked_budget: "Blocked: budget",
+  blocked_no_response: "Didn't get back to us",
+  blocked_no_show: "Didn't join the meeting",
+  blocked_no_show_ghosted: "No-showed, never came back",
   closed_won: "Closed won",
   onboarding: "Onboarding",
   using: "Using",
@@ -149,15 +159,43 @@ export const LOST_REASON_LABELS: Record<LostReason, string> = {
   other: "Other",
 };
 
-export type BlockerType = "pricing" | "timing" | "approval" | "budget";
+export type BlockerType =
+  | "pricing"
+  | "timing"
+  | "approval"
+  | "budget"
+  | "no_response"
+  | "no_show"
+  | "no_show_ghosted";
 
-export const BLOCKER_TYPES: BlockerType[] = ["pricing", "timing", "approval", "budget"];
+export const BLOCKER_TYPES: BlockerType[] = [
+  "pricing",
+  "timing",
+  "approval",
+  "budget",
+  "no_response",
+  "no_show",
+  "no_show_ghosted",
+];
+
+export const BLOCKER_LABELS: Record<BlockerType, string> = {
+  pricing: "Pricing",
+  timing: "Timing",
+  approval: "Approval",
+  budget: "Budget",
+  no_response: "Didn't get back to us",
+  no_show: "Didn't join the meeting",
+  no_show_ghosted: "No-showed, never came back",
+};
 
 export const BLOCKER_STAGE: Record<BlockerType, Stage> = {
   pricing: "blocked_pricing",
   timing: "blocked_timing",
   approval: "blocked_approval",
   budget: "blocked_budget",
+  no_response: "blocked_no_response",
+  no_show: "blocked_no_show",
+  no_show_ghosted: "blocked_no_show_ghosted",
 };
 
 export type Outcome =
@@ -349,6 +387,7 @@ export function suggestNextAction(input: {
   pickedUp: boolean;
   method?: ContactMethod | null;
   outcome?: Outcome | null;
+  blockerType?: BlockerType | null;
   temperature?: Temperature | null;
   lostReason?: LostReason | null;
   competitorExpiry?: Date | null;
@@ -372,6 +411,17 @@ export function suggestNextAction(input: {
       return { at: addMinutes(now, 30), reason: "They asked for a callback shortly" };
 
     case "blocked":
+      // Silence needs chasing sooner than an objection does: the trail goes
+      // cold, and each of these is a different kind of quiet.
+      if (input.blockerType === "no_response") {
+        return { at: addDays(now, 3), reason: "No reply yet — chase them" };
+      }
+      if (input.blockerType === "no_show") {
+        return { at: addDays(now, 1), reason: "Missed the meeting — rebook it" };
+      }
+      if (input.blockerType === "no_show_ghosted") {
+        return { at: addDays(now, 7), reason: "No-showed and went quiet — last try" };
+      }
       return { at: addDays(now, 14), reason: "Chase the blocker" };
 
     case "closed_won":

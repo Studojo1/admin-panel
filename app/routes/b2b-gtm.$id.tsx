@@ -8,6 +8,7 @@ import { CheckInModal, ContactChangeModal } from "~/components/b2b/check-in-moda
 import { Choice, Field, StageBadge, TempBadge, authedFetch, inputCls } from "~/components/b2b/shared";
 import {
   ALL_STAGES,
+  BLOCKER_LABELS,
   FLAGS,
   OBJECTION_LABELS,
   OUTCOME_LABELS,
@@ -242,7 +243,10 @@ function CompanyBody({
             {company.blocker_note && (
               <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-3">
                 <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">
-                  Blocker{company.blocker_type ? ` — ${company.blocker_type}` : ""}
+                  Blocker
+                  {company.blocker_type
+                    ? ` — ${BLOCKER_LABELS[company.blocker_type] ?? company.blocker_type}`
+                    : ""}
                 </p>
                 <p className="text-sm text-amber-900 mt-0.5">{company.blocker_note}</p>
               </div>

@@ -17,6 +17,7 @@ import {
 } from "~/components/b2b/shared";
 import {
   ALL_STAGES,
+  BLOCKER_LABELS,
   FLAGS,
   OBJECTION_LABELS,
   STAGE_LABELS,
@@ -678,7 +679,7 @@ function ExpandedPanel({
           {c.blocker_note && (
             <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5">
               <p className="text-[10px] font-semibold text-amber-800 uppercase tracking-wide">
-                Blocker{c.blocker_type ? ` — ${c.blocker_type}` : ""}
+                Blocker{c.blocker_type ? ` — ${BLOCKER_LABELS[c.blocker_type] ?? c.blocker_type}` : ""}
               </p>
               <p className="text-sm text-amber-900 mt-0.5">{c.blocker_note}</p>
             </div>
