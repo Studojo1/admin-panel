@@ -277,6 +277,8 @@ function CompanyBody({
                   className={`rounded-xl border p-3 ${
                     l.kind === "contact_change"
                       ? "border-sky-200 bg-sky-50"
+                      : l.kind === "handoff"
+                      ? "border-emerald-200 bg-emerald-50"
                       : l.kind === "note"
                       ? "border-violet-200 bg-violet-50"
                       : "border-gray-200 bg-gray-50"
@@ -287,6 +289,11 @@ function CompanyBody({
                     {l.kind === "contact_change" && (
                       <span className="px-2 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700 border border-sky-200">
                         Contact changed
+                      </span>
+                    )}
+                    {l.kind === "handoff" && (
+                      <span className="px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
+                        Handoff
                       </span>
                     )}
                     {l.kind === "note" && (

@@ -216,6 +216,13 @@ export interface Company {
   whatsapp_group_made: boolean;
   needs_brochure: boolean;
   brochure_note: string | null;
+  /**
+   * Someone else owns this, but I still need to chase it — a buy decision, a
+   * warm lead gone quiet. Independent of `owner`: setting it reassigns nothing,
+   * so the company stays on their sheet AND shows up on mine.
+   */
+  needs_my_followup: boolean;
+  my_followup_note: string | null;
   /** They want leads they haven't been sent yet. */
   needs_leads: boolean;
   leads_note: string | null;
@@ -263,7 +270,7 @@ export interface Contact {
  * - `note`: something they said, feedback, or an action for us. Dated, never
  *   overwritten. The accumulation of these IS the context.
  */
-export type LogKind = "call" | "meet" | "contact_change" | "note";
+export type LogKind = "call" | "meet" | "contact_change" | "note" | "handoff";
 
 /**
  * How the check-in starts. A Meet has no pick-up question, so this replaces
@@ -456,7 +463,35 @@ export function stageForOutcome(
  * free text — typing a name slightly differently would split the Team view.
  * Blank owner means it's yours.
  */
-export const TEAM = ["Hegde", "Jeremy", "Vivaan"] as const;
+export const TEAM = ["Vivaan", "Jeremy", "Hegde", "Ayushi"] as const;
+
+/**
+ * The handoff pipeline, in order:
+ *   Vivaan cold-calls → Me (warm, no-response, buy-decision follow-ups)
+ *   → Jeremy or Hegde → Ayushi closes.
+ *
+ * Order is advisory, never enforced: you can hand a company to anyone. It only
+ * drives the suggested next owner and the order of the team tabs.
+ * "" means me — an unowned company is mine.
+ */
+export const PIPELINE: { owner: string; label: string; does: string }[] = [
+  { owner: "Vivaan", label: "Vivaan", does: "Cold calls" },
+  { owner: "", label: "Me", does: "Warm, no-response, buy decisions" },
+  { owner: "Jeremy", label: "Jeremy", does: "Works the deal" },
+  { owner: "Hegde", label: "Hegde", does: "Works the deal" },
+  { owner: "Ayushi", label: "Ayushi", does: "Closes" },
+];
+
+/** Who normally comes next. Advisory only. */
+export function nextInPipeline(owner: string | null): string | null {
+  const i = PIPELINE.findIndex((p) => p.owner === (owner ?? ""));
+  if (i === -1 || i === PIPELINE.length - 1) return null;
+  return PIPELINE[i + 1].owner;
+}
+
+export function ownerLabel(owner: string | null | undefined): string {
+  return owner && owner.trim() ? owner : "Me";
+}
 
 /** An account that has gone quiet this long needs attention regardless of its next action. */
 export const STALE_ACCOUNT_DAYS = 45;
@@ -519,18 +554,30 @@ export type ViewKey =
   | "blocked"
   | "accounts"
   | "feedback"
-  | "team";
+  | "my_followups";
 
 export const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "today", label: "Today" },
+  { key: "my_followups", label: "My follow-ups" },
   { key: "pre_gtm", label: "Pre-GTM" },
   { key: "working", label: "Working" },
   { key: "blocked", label: "Blocked" },
   { key: "accounts", label: "Accounts (Won)" },
   { key: "feedback", label: "Feedback Loop" },
-  { key: "team", label: "Team Handling" },
 ];
+
+/** One sheet per person, in pipeline order. `owner: ""` is mine. */
+export const TEAM_VIEWS = PIPELINE.map((p) => ({
+  key: `owner:${p.owner}` as const,
+  label: p.label,
+  owner: p.owner,
+  does: p.does,
+}));
+
+export function matchesOwnerView(c: Company, owner: string): boolean {
+  return (c.owner ?? "").trim() === owner;
+}
 
 export function companyMatchesView(c: Company, view: ViewKey, now: Date = new Date()): boolean {
   switch (view) {
@@ -550,8 +597,8 @@ export function companyMatchesView(c: Company, view: ViewKey, now: Date = new Da
       return WON_STAGES.includes(c.stage);
     case "feedback":
       return LOST_STAGES.includes(c.stage);
-    case "team":
-      return !!c.owner;
+    case "my_followups":
+      return c.needs_my_followup;
     default:
       return true;
   }

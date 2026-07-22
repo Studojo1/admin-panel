@@ -27,6 +27,8 @@ async function ensureTables() {
       leads_note TEXT,
       leads_change BOOLEAN NOT NULL DEFAULT FALSE,
       leads_change_note TEXT,
+      needs_my_followup BOOLEAN NOT NULL DEFAULT FALSE,
+      my_followup_note TEXT,
       next_action_at TIMESTAMPTZ,
       next_action_reason TEXT,
       they_reachout_on TEXT,
@@ -89,6 +91,8 @@ async function ensureTables() {
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_note TEXT`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_change BOOLEAN NOT NULL DEFAULT FALSE`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_change_note TEXT`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS needs_my_followup BOOLEAN NOT NULL DEFAULT FALSE`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS my_followup_note TEXT`);
 
   // The seed used to prefix imported notes with "Imported from Excel: ".
   // Strip it in place so the notes read exactly as they were written, without
@@ -829,6 +833,13 @@ export async function action({ request }: Route.ActionArgs) {
     // Field-by-field so a partial edit never blanks the rest of the row.
     const f = body.fields ?? {};
     const sets = [];
+
+    // Read the current owner BEFORE updating, so a handoff can be logged.
+    let previousOwner: string | null = null;
+    if ("owner" in f) {
+      const cur = await db.execute(sql`SELECT owner FROM b2b_companies WHERE id = ${body.id}`);
+      previousOwner = ((cur.rows[0] as any)?.owner ?? null) as string | null;
+    }
     if ("stage" in f) sets.push(sql`stage = ${f.stage}`);
     if ("temperature" in f) sets.push(sql`temperature = ${f.temperature}`);
     if ("status" in f) sets.push(sql`status = ${f.status}`);
@@ -836,6 +847,8 @@ export async function action({ request }: Route.ActionArgs) {
     if ("whatsapp_group_made" in f) sets.push(sql`whatsapp_group_made = ${f.whatsapp_group_made}`);
     if ("needs_brochure" in f) sets.push(sql`needs_brochure = ${f.needs_brochure}`);
     if ("brochure_note" in f) sets.push(sql`brochure_note = ${f.brochure_note || null}`);
+    if ("needs_my_followup" in f) sets.push(sql`needs_my_followup = ${f.needs_my_followup}`);
+    if ("my_followup_note" in f) sets.push(sql`my_followup_note = ${f.my_followup_note || null}`);
     if ("needs_leads" in f) sets.push(sql`needs_leads = ${f.needs_leads}`);
     if ("leads_note" in f) sets.push(sql`leads_note = ${f.leads_note || null}`);
     if ("leads_change" in f) sets.push(sql`leads_change = ${f.leads_change}`);
@@ -859,6 +872,25 @@ export async function action({ request }: Route.ActionArgs) {
     await db.execute(
       sql`UPDATE b2b_companies SET ${sql.join(sets, sql`, `)} WHERE id = ${body.id}`
     );
+
+    // A handoff is part of the story: log it so the timeline shows who held
+    // this and when. Only when the owner actually changed.
+    if ("owner" in f) {
+      const before = (previousOwner ?? "").trim();
+      const after = (f.owner ?? "").trim();
+      if (before !== after) {
+        const name = (o: string) => (o ? o : "Me");
+        await db.execute(sql`
+          INSERT INTO b2b_call_logs (company_id, kind, picked_up, note, logged_by)
+          VALUES (
+            ${body.id}, 'handoff', FALSE,
+            ${`Handed from ${name(before)} to ${name(after)}.`},
+            ${admin.email}
+          )
+        `);
+      }
+    }
+
     return Response.json({ ok: true });
   }
 

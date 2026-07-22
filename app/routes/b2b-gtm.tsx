@@ -22,6 +22,10 @@ import {
   STAGE_LABELS,
   STALE_ACCOUNT_DAYS,
   TEAM,
+  TEAM_VIEWS,
+  matchesOwnerView,
+  nextInPipeline,
+  ownerLabel,
   TEMPERATURES,
   VIEWS,
   WON_STAGES,
@@ -44,6 +48,12 @@ import {
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: "B2B GTM Motion – Admin Panel" }];
+}
+
+/** Tabs are either a ViewKey or a per-person sheet ("owner:Vivaan", "owner:" = mine). */
+function matchesTab(c: Company, tab: string, now: Date): boolean {
+  if (tab.startsWith("owner:")) return matchesOwnerView(c, tab.slice(6));
+  return companyMatchesView(c, tab as ViewKey, now);
 }
 
 interface Stats {
@@ -73,7 +83,8 @@ export default function B2BGtm() {
   const [objectionStats, setObjectionStats] = useState<ObjectionStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<ViewKey>("overview");
+  // Either a ViewKey, or "owner:<name>" for a teammate's sheet ("owner:" = mine).
+  const [view, setView] = useState<string>("overview");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [checkIn, setCheckIn] = useState<Company | null>(null);
@@ -152,7 +163,7 @@ export default function B2BGtm() {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rows = companies.filter((c) => {
-      if (!companyMatchesView(c, view, now)) return false;
+      if (!matchesTab(c, view, now)) return false;
       if (!q) return true;
       const hay = [c.name, c.notes, ...(c.contacts || []).map((x) => x.name)]
         .filter(Boolean)
@@ -264,7 +275,7 @@ export default function B2BGtm() {
         {/* Tabs run horizontally: the table needs the width. */}
         <div className="flex items-center gap-1 mb-4 border-b border-gray-200 overflow-x-auto">
           {VIEWS.map((v) => {
-            const count = companies.filter((c) => companyMatchesView(c, v.key, now)).length;
+            const count = companies.filter((c) => matchesTab(c, v.key, now)).length;
             const active = view === v.key;
             return (
               <button
@@ -281,6 +292,44 @@ export default function B2BGtm() {
                   {count}
                 </span>
               </button>
+            );
+          })}
+        </div>
+
+        {/* One sheet per person, in pipeline order: Vivaan → Me → Jeremy/Hegde → Ayushi. */}
+        <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+          <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mr-1">
+            Sheets
+          </span>
+          {TEAM_VIEWS.map((t, i) => {
+            const count = companies.filter((c) => matchesOwnerView(c, t.owner)).length;
+            const due = companies.filter(
+              (c) => matchesOwnerView(c, t.owner) && isOverdue(c.next_action_at, now)
+            ).length;
+            const active = view === t.key;
+            return (
+              <span key={t.key} className="flex items-center gap-1.5">
+                {i > 0 && <span className="text-gray-300 text-xs">→</span>}
+                <button
+                  onClick={() => setView(t.key)}
+                  title={t.does}
+                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                    active
+                      ? "bg-neutral-900 text-white border-neutral-900 font-medium"
+                      : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                  }`}
+                >
+                  {t.label}
+                  <span className={`ml-1 ${active ? "text-gray-300" : "text-gray-400"}`}>
+                    {count}
+                  </span>
+                  {due > 0 && (
+                    <span className="ml-1 px-1 rounded-full bg-violet-500 text-white text-[10px]">
+                      {due}
+                    </span>
+                  )}
+                </button>
+              </span>
             );
           })}
         </div>
@@ -323,6 +372,11 @@ export default function B2BGtm() {
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="px-3 py-1.5 border-b border-gray-100 text-[11px] text-gray-400">
+              Showing all {visible.length}
+              {visible.length === 1 ? " company" : " companies"}
+              {search.trim() ? " matching your search" : ""} — scroll for more
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
@@ -449,6 +503,14 @@ function Row({
             {stale && (
               <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title={`Quiet ${quiet}d`} />
             )}
+            {c.needs_my_followup && (
+              <span
+                className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700 border border-violet-200 shrink-0"
+                title={c.my_followup_note || "I need to follow up"}
+              >
+                My follow-up
+              </span>
+            )}
           </div>
         </td>
         <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{contact?.name || "—"}</td>
@@ -532,6 +594,8 @@ function ExpandedPanel({
 }) {
   const [stage, setStage] = useState<Stage>(c.stage);
   const [temperature, setTemperature] = useState<Temperature | null>(c.temperature);
+  const [myFollowup, setMyFollowup] = useState(c.needs_my_followup);
+  const [myFollowupNote, setMyFollowupNote] = useState(c.my_followup_note ?? "");
   const [flags, setFlags] = useState<Record<string, boolean>>({
     needs_brochure: c.needs_brochure,
     needs_leads: c.needs_leads,
@@ -570,6 +634,8 @@ function ExpandedPanel({
             next_action_at: nextAt ? new Date(nextAt).toISOString() : null,
             next_action_reason: nextReason,
             deal_value: dealValue === "" ? null : Number(dealValue),
+            needs_my_followup: myFollowup,
+            my_followup_note: myFollowupNote,
             needs_brochure: flags.needs_brochure,
             brochure_note: flagNotes.brochure_note,
             needs_leads: flags.needs_leads,
@@ -741,6 +807,28 @@ function ExpandedPanel({
             >
               Contact changed?
             </button>
+          </div>
+
+          {/* Independent of owner: they keep the company, I still chase it. */}
+          <div className="rounded-lg border border-violet-200 bg-violet-50 p-2">
+            <label className="flex items-center gap-2 text-sm text-gray-800">
+              <input
+                type="checkbox"
+                checked={myFollowup}
+                onChange={(e) => setMyFollowup(e.target.checked)}
+                className="rounded"
+              />
+              I need to follow up
+              {c.owner && <span className="text-xs text-gray-500">({c.owner} is handling it)</span>}
+            </label>
+            {myFollowup && (
+              <input
+                value={myFollowupNote}
+                onChange={(e) => setMyFollowupNote(e.target.value)}
+                placeholder="What do I need to chase?"
+                className={inputCls + " mt-1.5 text-xs"}
+              />
+            )}
           </div>
 
           <div>
@@ -1052,6 +1140,8 @@ function LogEntry({ l }: { l: CallLog }) {
       ? "border-sky-200 bg-sky-50"
       : l.kind === "note"
       ? "border-violet-200 bg-violet-50"
+      : l.kind === "handoff"
+      ? "border-emerald-200 bg-emerald-50"
       : "border-gray-200 bg-white";
   return (
     <div className={`rounded-lg border p-2 ${tone}`}>
@@ -1065,6 +1155,11 @@ function LogEntry({ l }: { l: CallLog }) {
         {l.kind === "contact_change" && (
           <span className="px-1.5 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700 border border-sky-200">
             Contact changed
+          </span>
+        )}
+        {l.kind === "handoff" && (
+          <span className="px-1.5 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
+            Handoff
           </span>
         )}
         {l.kind === "meet" && (
