@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
+import { getToken } from "~/lib/api";
 import type { Route } from "./+types/sensei";
 
 export function meta(_: Route.MetaArgs) {
@@ -83,7 +84,13 @@ export default function Sensei() {
 
   const load = async () => {
     try {
-      const r = await fetch("/api/sensei");
+      // Admin API routes authorize by Bearer token (the cookie/share-token path
+      // is not reliable in prod), same as every other admin page here.
+      const token = await getToken();
+      const r = await fetch("/api/sensei", {
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const d = await r.json().catch(() => ({}));
       if (r.ok) {
         setOrgs(d.orgs || []);
@@ -101,8 +108,13 @@ export default function Sensei() {
     if (!name.trim() || !adminEmail.trim() || busy) return;
     setBusy(true); setMsg("");
     try {
+      const token = await getToken();
       const r = await fetch("/api/sensei", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ org_name: name, admin_email: adminEmail, email_domain: domain }),
       });
       const d = await r.json().catch(() => ({}));
