@@ -347,7 +347,12 @@ function CompanyBody({
           </Panel>
 
           <Panel title={`Timeline (${logs.length})`}>
-            {logs.length === 0 && <p className="text-sm text-gray-400">Nothing logged yet.</p>}
+            <NoteComposer companyId={company.id} onSaved={onReload} />
+            {logs.length === 0 && (
+              <p className="text-sm text-gray-400">
+                Nothing logged yet — add the first note above with what they said and their tone.
+              </p>
+            )}
             <div className="space-y-2">
               {logs.map((l) => (
                 <div
@@ -471,6 +476,54 @@ function CompanyBody({
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Always-available note box on the full page. A plain note never moves the
+ * stage — it's the running record of what they said, their tone, the context.
+ */
+function NoteComposer({ companyId, onSaved }: { companyId: number; onSaved: () => void }) {
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const add = async () => {
+    if (!text.trim()) return;
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=note", {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyId, note: text.trim() }),
+      });
+      setText("");
+      toast.success("Note added");
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 mb-3">
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={2}
+        placeholder="What did they say? Their tone, any context — add as much as you like."
+        className={inputCls}
+      />
+      <div className="flex justify-end mt-2">
+        <button
+          disabled={!text.trim() || saving}
+          onClick={add}
+          className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
+        >
+          {saving ? "Adding…" : "Add note"}
+        </button>
+      </div>
+    </div>
   );
 }
 

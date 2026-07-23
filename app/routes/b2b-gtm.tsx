@@ -8,7 +8,6 @@ import type { Route } from "./+types/b2b-gtm";
 import { CheckInModal, ContactChangeModal } from "~/components/b2b/check-in-modal";
 import {
   Choice,
-  ExitModal,
   Field,
   ReactivateModal,
   Shell,
@@ -120,7 +119,6 @@ export default function B2BGtm() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [checkIn, setCheckIn] = useState<Company | null>(null);
   const [contactChange, setContactChange] = useState<Company | null>(null);
-  const [exitCompany, setExitCompany] = useState<Company | null>(null);
   const [reactivateCompany, setReactivateCompany] = useState<Company | null>(null);
   const [adding, setAdding] = useState(false);
   // Sub-filter for the Working tab. `all` = the whole active pile.
@@ -210,7 +208,11 @@ export default function B2BGtm() {
         .toLowerCase();
       return hay.includes(q);
     });
-    // Soonest first; anything without a date sinks to the bottom.
+    // Overview is a roster — alphabetical, so it's easy to find a company by
+    // name. Every other tab is a worklist, so it stays soonest-action-first.
+    if (view === "overview") {
+      return rows.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+    }
     return rows.sort((a, b) => {
       const at = a.next_action_at ? +new Date(a.next_action_at) : Infinity;
       const bt = b.next_action_at ? +new Date(b.next_action_at) : Infinity;
@@ -445,6 +447,7 @@ export default function B2BGtm() {
                   <tr>
                     {[
                       "",
+                      "#",
                       "Company",
                       "Contact",
                       "Phone",
@@ -465,16 +468,16 @@ export default function B2BGtm() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {visible.map((c) => (
+                  {visible.map((c, i) => (
                     <Row
                       key={c.id}
                       c={c}
+                      serial={i + 1}
                       now={now}
                       expanded={expanded === c.id}
                       onToggle={() => setExpanded(expanded === c.id ? null : c.id)}
                       onCheckIn={() => setCheckIn(c)}
                       onContactChange={() => setContactChange(c)}
-                      onExit={() => setExitCompany(c)}
                       onReactivate={() => setReactivateCompany(c)}
                       onSaved={load}
                     />
@@ -516,16 +519,6 @@ export default function B2BGtm() {
           }}
         />
       )}
-      {exitCompany && (
-        <ExitModal
-          company={exitCompany}
-          onClose={() => setExitCompany(null)}
-          onSaved={() => {
-            setExitCompany(null);
-            load();
-          }}
-        />
-      )}
       {reactivateCompany && (
         <ReactivateModal
           company={reactivateCompany}
@@ -542,28 +535,32 @@ export default function B2BGtm() {
 
 function Row({
   c,
+  serial,
   now,
   expanded,
   onToggle,
   onCheckIn,
   onContactChange,
-  onExit,
   onReactivate,
   onSaved,
 }: {
   c: Company;
+  serial: number;
   now: Date;
   expanded: boolean;
   onToggle: () => void;
   onCheckIn: () => void;
   onContactChange: () => void;
-  onExit: () => void;
   onReactivate: () => void;
   onSaved: () => void;
 }) {
   const overdue = isOverdue(c.next_action_at, now);
   const today = isLaterToday(c.next_action_at, now);
   const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
+  // The active contact may have no number while a past one does (e.g. the person
+  // left and their replacement's phone isn't in yet). Surface any number we hold
+  // so the row is never blank when we can actually reach someone.
+  const phone = contact?.phone || (c.contacts || []).find((x) => x.phone)?.phone || null;
   const isAccount = WON_STAGES.includes(c.stage);
   const exited = EXITED_STAGES.includes(c.stage);
   const quiet = daysSince(c.last_log?.called_at ?? c.updated_at, now);
@@ -579,6 +576,7 @@ function Row({
         }`}
       >
         <td className="px-3 py-2.5 text-gray-400 w-6">{expanded ? "▾" : "▸"}</td>
+        <td className="px-3 py-2.5 text-gray-400 tabular-nums text-xs w-8">{serial}</td>
         <td className="px-3 py-2.5 font-medium text-gray-900 whitespace-nowrap">
           <div className="flex items-center gap-1.5">
             {c.name}
@@ -604,13 +602,13 @@ function Row({
         </td>
         <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{contact?.name || "—"}</td>
         <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs">
-          {contact?.phone ? (
+          {phone ? (
             <a
-              href={`tel:${contact.phone}`}
+              href={`tel:${phone}`}
               onClick={(e) => e.stopPropagation()}
               className="text-violet-600 hover:underline"
             >
-              {contact.phone}
+              {phone}
             </a>
           ) : (
             "—"
@@ -676,13 +674,12 @@ function Row({
 
       {expanded && (
         <tr className="bg-gray-50">
-          <td colSpan={10} className="px-3 pb-4 pt-1">
+          <td colSpan={11} className="px-3 pb-4 pt-1">
             <ExpandedPanel
               c={c}
               now={now}
               onContactChange={onContactChange}
               onCheckIn={onCheckIn}
-              onExit={onExit}
               onReactivate={onReactivate}
               onSaved={onSaved}
             />
@@ -698,7 +695,6 @@ function ExpandedPanel({
   now,
   onContactChange,
   onCheckIn,
-  onExit,
   onReactivate,
   onSaved,
 }: {
@@ -706,7 +702,6 @@ function ExpandedPanel({
   now: Date;
   onContactChange: () => void;
   onCheckIn: () => void;
-  onExit: () => void;
   onReactivate: () => void;
   onSaved: () => void;
 }) {
@@ -780,7 +775,6 @@ function ExpandedPanel({
       <ActionBar
         c={c}
         onCheckIn={onCheckIn}
-        onExit={onExit}
         onReactivate={onReactivate}
         onSaved={onSaved}
       />
@@ -1029,13 +1023,11 @@ function ExpandedPanel({
 function ActionBar({
   c,
   onCheckIn,
-  onExit,
   onReactivate,
   onSaved,
 }: {
   c: Company;
   onCheckIn: () => void;
-  onExit: () => void;
   onReactivate: () => void;
   onSaved: () => void;
 }) {
@@ -1084,10 +1076,13 @@ function ActionBar({
     }
   };
 
+  const logLabel =
+    branch === "buy_decision" ? "Log demo / call" : branch === "account" ? "Log a touch" : "Log a call";
+
   return (
     <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
       <p className="text-[11px] font-semibold text-violet-800 uppercase tracking-wide mb-2">
-        {promptText}
+        {branch === "exited" ? promptText : "What do you want to do?"}
       </p>
 
       {handing ? (
@@ -1105,43 +1100,38 @@ function ActionBar({
             Cancel
           </button>
         </div>
+      ) : branch === "exited" ? (
+        <button
+          onClick={onReactivate}
+          className="px-3 py-1.5 rounded-xl bg-violet-500 text-white text-sm font-medium"
+        >
+          Bring back to pipeline
+        </button>
       ) : (
         <div className="flex flex-wrap gap-2">
-          {branch === "exited" ? (
+          {/* The two primary choices you asked for, first. */}
+          <button
+            onClick={onCheckIn}
+            className="px-3 py-1.5 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700"
+          >
+            {logLabel}
+          </button>
+          <Link
+            to={`/b2b-gtm/${c.id}`}
+            className="px-3 py-1.5 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
+          >
+            Study past interactions →
+          </Link>
+          {/* Role-specific advance stays available; Remove-from-pipeline now
+              lives only on the full page. */}
+          {(branch === "mine_active" || branch === "pre_gtm") && (
             <button
-              onClick={onReactivate}
-              className="px-3 py-1.5 rounded-xl bg-violet-500 text-white text-sm font-medium"
+              disabled={busy}
+              onClick={() => setHanding(true)}
+              className="px-3 py-1.5 rounded-xl bg-white text-violet-700 text-sm font-medium border border-violet-300 hover:border-violet-400 disabled:opacity-40"
             >
-              Bring back to pipeline
+              Push to buy decision →
             </button>
-          ) : (
-            <>
-              {(branch === "mine_active" || branch === "pre_gtm") && (
-                <button
-                  disabled={busy}
-                  onClick={() => setHanding(true)}
-                  className="px-3 py-1.5 rounded-xl bg-neutral-900 text-white text-sm font-medium disabled:opacity-40"
-                >
-                  Push to buy decision →
-                </button>
-              )}
-              <button
-                onClick={onCheckIn}
-                className="px-3 py-1.5 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
-              >
-                {branch === "buy_decision"
-                  ? "Log demo / call"
-                  : branch === "account"
-                  ? "Log a touch"
-                  : "Log a call"}
-              </button>
-              <button
-                onClick={onExit}
-                className="px-3 py-1.5 rounded-xl bg-white text-rose-600 text-sm font-medium border border-rose-200 hover:border-rose-300"
-              >
-                Remove from pipeline
-              </button>
-            </>
           )}
         </div>
       )}
