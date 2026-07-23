@@ -247,6 +247,20 @@ export function CheckInModal({
         </Field>
       )}
 
+      {/* Even a no-answer / no-show deserves a note: their tone, whether they
+          dodged, anything worth remembering before the next try. */}
+      {(method === "no_answer" || method === "no_show") && (
+        <Field label="Notes (optional)">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            placeholder="e.g. rang out twice, seemed to be dodging — try WhatsApp next"
+            className={inputCls}
+          />
+        </Field>
+      )}
+
       {reached && (
         <>
           <Field label="How did it go?">

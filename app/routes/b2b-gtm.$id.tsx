@@ -21,7 +21,6 @@ import {
   EXITED_STAGES,
   FLAGS,
   OBJECTION_LABELS,
-  OUTCOME_LABELS,
   STAGE_LABELS,
   STALE_ACCOUNT_DAYS,
   TEAM,
@@ -31,6 +30,7 @@ import {
   formatDateTime,
   formatValue,
   isOverdue,
+  logSentence,
   toLocalInputValue,
   type CallLog,
   type Company,
@@ -362,51 +362,11 @@ function CompanyBody({
                       : "border-gray-200 bg-gray-50"
                   }`}
                 >
-                  <div className="flex items-center gap-2 flex-wrap text-xs">
-                    <span className="text-gray-500">{formatDateTime(l.called_at)}</span>
-                    {l.kind === "contact_change" && (
-                      <span className="px-2 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700 border border-sky-200">
-                        Contact changed
-                      </span>
-                    )}
-                    {l.kind === "handoff" && (
-                      <span className="px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
-                        Handoff
-                      </span>
-                    )}
-                    {l.kind === "note" && (
-                      <span className="px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700 border border-violet-200">
-                        Note
-                      </span>
-                    )}
-                    {l.kind === "meet" && (
-                      <span
-                        className={`px-2 py-0.5 rounded-full font-medium border ${
-                          l.picked_up
-                            ? "bg-indigo-100 text-indigo-700 border-indigo-200"
-                            : "bg-rose-100 text-rose-700 border-rose-200"
-                        }`}
-                      >
-                        {l.picked_up ? "Google Meet" : "No-showed the meet"}
-                      </span>
-                    )}
-                    {l.kind === "call" && (
-                      <span
-                        className={`px-2 py-0.5 rounded-full font-medium border ${
-                          l.picked_up
-                            ? "bg-green-100 text-green-700 border-green-200"
-                            : "bg-gray-100 text-gray-500 border-gray-200"
-                        }`}
-                      >
-                        {l.picked_up ? "Picked up" : "No answer"}
-                      </span>
-                    )}
+                  {/* The event as a plain sentence, then what they actually said. */}
+                  <p className="text-sm text-gray-800">{logSentence(l)}</p>
+                  {l.note && <p className="text-sm text-gray-600 mt-0.5 italic">“{l.note}”</p>}
+                  <div className="flex items-center gap-2 flex-wrap text-xs mt-1">
                     {l.attendees && <span className="text-gray-500">with {l.attendees}</span>}
-                    {l.outcome && (
-                      <span className="px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700 border border-violet-200">
-                        {OUTCOME_LABELS[l.outcome]}
-                      </span>
-                    )}
                     {l.objection && (
                       <span className="px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200">
                         {l.objection === "other" && l.objection_note
@@ -420,10 +380,8 @@ function CompanyBody({
                         {formatValue(l.value_discussed)}
                       </span>
                     )}
-                    {l.contact_name && <span className="text-gray-400">· {l.contact_name}</span>}
                     {l.logged_by && <span className="text-gray-400 ml-auto">{l.logged_by}</span>}
                   </div>
-                  {l.note && <p className="text-sm text-gray-700 mt-1.5">{l.note}</p>}
                 </div>
               ))}
             </div>

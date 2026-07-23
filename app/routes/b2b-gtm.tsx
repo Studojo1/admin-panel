@@ -41,6 +41,7 @@ import {
   formatValue,
   isLaterToday,
   isOverdue,
+  logSentence,
   toLocalInputValue,
   workingBucket,
   type CallLog,
@@ -62,20 +63,25 @@ function matchesTab(c: Company, tab: string, now: Date): boolean {
   return companyMatchesView(c, tab as ViewKey, now);
 }
 
-/** "overdue 2d" / "today" / "in 3d" — scannable at a glance, exact date on hover. */
+/**
+ * Today / Tomorrow / Day after in words, and the explicit date for anything
+ * further out (and anything in the past). Calendar-day based, so "Tomorrow"
+ * means the next date regardless of the clock time.
+ */
 function relativeWhen(iso: string, now: Date): string {
   const d = new Date(iso);
-  const ms = d.getTime() - now.getTime();
+  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const dateStr = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  // Whole-calendar-day difference between the two dates (ignores time of day).
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const dayMs = 24 * 60 * 60 * 1000;
-  if (ms < 0) {
-    const days = Math.floor(-ms / dayMs);
-    if (days === 0) return "overdue today";
-    return `overdue ${days}d`;
-  }
-  if (isLaterToday(iso, now)) return `today ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
-  const days = Math.ceil(ms / dayMs);
-  if (days === 1) return "tomorrow";
-  return `in ${days}d`;
+  const diffDays = Math.round((startOf(d) - startOf(now)) / dayMs);
+
+  if (diffDays === 0) return `Today ${time}`;
+  if (diffDays === 1) return `Tomorrow ${time}`;
+  if (diffDays === 2) return `Day after ${time}`;
+  // Everything else — past or 3+ days out — shows the actual date.
+  return `${dateStr} ${time}`;
 }
 
 interface Stats {
@@ -1340,7 +1346,7 @@ function NotesFeed({ companyId, onSaved }: { companyId: number; onSaved: () => v
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={2}
-          placeholder="What did they say? What do we need to do?"
+          placeholder="What did they say? Their tone, any context — add as much as you like."
           className="w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
         />
         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
@@ -1374,7 +1380,9 @@ function NotesFeed({ companyId, onSaved }: { companyId: number; onSaved: () => v
       {loading ? (
         <p className="text-xs text-gray-400">Loading notes…</p>
       ) : logs.length === 0 ? (
-        <p className="text-xs text-gray-400">Nothing logged yet.</p>
+        <p className="text-xs text-gray-400">
+          Nothing logged yet — add the first note above with what they said and their tone.
+        </p>
       ) : (
         <>
           <div className="space-y-1.5">
@@ -1407,45 +1415,10 @@ function LogEntry({ l }: { l: CallLog }) {
       : "border-gray-200 bg-white";
   return (
     <div className={`rounded-lg border p-2 ${tone}`}>
-      <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
-        <span className="text-gray-500">{formatDateTime(l.called_at)}</span>
-        {l.kind === "note" && (
-          <span className="px-1.5 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700 border border-violet-200">
-            Note
-          </span>
-        )}
-        {l.kind === "contact_change" && (
-          <span className="px-1.5 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700 border border-sky-200">
-            Contact changed
-          </span>
-        )}
-        {l.kind === "handoff" && (
-          <span className="px-1.5 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
-            Handoff
-          </span>
-        )}
-        {l.kind === "meet" && (
-          <span
-            className={`px-1.5 py-0.5 rounded-full font-medium border ${
-              l.picked_up
-                ? "bg-indigo-100 text-indigo-700 border-indigo-200"
-                : "bg-rose-100 text-rose-700 border-rose-200"
-            }`}
-          >
-            {l.picked_up ? "Google Meet" : "No-showed"}
-          </span>
-        )}
-        {l.kind === "call" && (
-          <span
-            className={`px-1.5 py-0.5 rounded-full font-medium border ${
-              l.picked_up
-                ? "bg-green-100 text-green-700 border-green-200"
-                : "bg-gray-100 text-gray-500 border-gray-200"
-            }`}
-          >
-            {l.picked_up ? "Call" : "No answer"}
-          </span>
-        )}
+      {/* The event as a plain sentence — "Called them on 17th Jul 2026, no answer". */}
+      <p className="text-sm text-gray-800">{logSentence(l)}</p>
+      {l.note && <p className="text-sm text-gray-600 mt-0.5 italic">“{l.note}”</p>}
+      <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-1">
         {l.attendees && <span className="text-gray-500">with {l.attendees}</span>}
         {l.objection && (
           <span className="px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200">
@@ -1461,7 +1434,6 @@ function LogEntry({ l }: { l: CallLog }) {
         )}
         {l.logged_by && <span className="text-gray-400 ml-auto">{l.logged_by.split("@")[0]}</span>}
       </div>
-      {l.note && <p className="text-sm text-gray-700 mt-1">{l.note}</p>}
     </div>
   );
 }

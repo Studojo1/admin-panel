@@ -889,6 +889,58 @@ export function formatDateTime(iso: string | null | undefined): string {
   });
 }
 
+/** Just the day — "17 Jul 2026", with an ordinal ("17th Jul 2026"). No time. */
+export function formatDay(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const day = d.getDate();
+  const ord =
+    day % 10 === 1 && day !== 11
+      ? "st"
+      : day % 10 === 2 && day !== 12
+      ? "nd"
+      : day % 10 === 3 && day !== 13
+      ? "rd"
+      : "th";
+  const month = d.toLocaleDateString("en-GB", { month: "short" });
+  return `${day}${ord} ${month} ${d.getFullYear()}`;
+}
+
+/**
+ * A timeline event as a plain sentence — "Called them on 17th Jul 2026, no
+ * answer" — instead of a stacked date + status badge. Reads like a diary. The
+ * date is the day the event happened; we don't surface the exact log time.
+ */
+export function logSentence(l: {
+  kind: LogKind;
+  picked_up: boolean;
+  called_at: string;
+  contact_name?: string | null;
+  outcome?: Outcome | null;
+}): string {
+  const on = `on ${formatDay(l.called_at)}`;
+  const who = l.contact_name ? l.contact_name : "them";
+
+  switch (l.kind) {
+    case "call":
+      return l.picked_up
+        ? `Called ${who} ${on} — spoke${l.outcome ? `, ${OUTCOME_LABELS[l.outcome].toLowerCase()}` : ""}.`
+        : `Called ${who} ${on} — no answer.`;
+    case "meet":
+      return l.picked_up
+        ? `Met ${who} ${on}${l.outcome ? ` — ${OUTCOME_LABELS[l.outcome].toLowerCase()}` : ""}.`
+        : `${who[0].toUpperCase()}${who.slice(1)} no-showed the meet ${on}.`;
+    case "note":
+      return `Note ${on}.`;
+    case "contact_change":
+      return `Contact changed ${on}.`;
+    case "handoff":
+      return `Handed over ${on}.`;
+    default:
+      return `${on}.`;
+  }
+}
+
 export function toLocalInputValue(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
