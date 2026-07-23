@@ -20,6 +20,7 @@ import {
 import {
   ALL_STAGES,
   BLOCKER_LABELS,
+  BLOCKER_TYPES,
   EXITED_STAGES,
   FLAGS,
   OBJECTION_LABELS,
@@ -44,6 +45,7 @@ import {
   logSentence,
   toLocalInputValue,
   workingBucket,
+  type BlockerType,
   type CallLog,
   type Company,
   type Objection,
@@ -1438,36 +1440,66 @@ function LogEntry({ l }: { l: CallLog }) {
   );
 }
 
+/** Interest read from the cold call — drives the starting temperature. */
+const INTEREST_OPTS = [
+  { key: "interested", label: "Interested", temp: "hot" as Temperature },
+  { key: "some", label: "Some interest", temp: "warm" as Temperature },
+  { key: "too_early", label: "Too early to tell", temp: "neutral" as Temperature },
+  { key: "not_really", label: "Not really", temp: "cold" as Temperature },
+];
+
 /**
- * Add a company to the top of the funnel. This is Vivaan's entry point: new
- * companies always land in Pre-GTM owned by Vivaan, who then hands to Me. Kept
- * deliberately minimal — the detail gets filled in once it's being worked.
+ * Vivaan's intake sheet. He's cold-called and made a WhatsApp group; here he
+ * drops in the company + what he learned, so the handoff to Pranav carries real
+ * context instead of a blank row. The qualification is written as the first
+ * note (a proper handoff brief) — the next owner arrives knowing the situation.
  */
 function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
+  const [interest, setInterest] = useState<string | null>(null);
+  const [hasBlock, setHasBlock] = useState<boolean | null>(null);
+  const [blockType, setBlockType] = useState<BlockerType | null>(null);
+  const [blockNote, setBlockNote] = useState("");
   const [notes, setNotes] = useState("");
+  const [groupMade, setGroupMade] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const interestOpt = INTEREST_OPTS.find((o) => o.key === interest);
+  // Enough to hand over: who it is, and a read on interest.
+  const canSave = !!name.trim() && !!interest && (hasBlock !== true || !!blockType);
 
   const save = async () => {
     setSaving(true);
     try {
+      // Compose the handoff brief — reads back as one note on the timeline.
+      const parts = [
+        `Cold call by Vivaan. Interest: ${interestOpt?.label ?? "—"}.`,
+        hasBlock && blockType
+          ? `Block: ${BLOCKER_LABELS[blockType]}${blockNote.trim() ? ` — ${blockNote.trim()}` : ""}.`
+          : hasBlock === false
+          ? "No block raised."
+          : "",
+        notes.trim() ? `Notes: ${notes.trim()}` : "",
+      ].filter(Boolean);
+
       await authedFetch("/api/b2b-gtm?action=company", {
         method: "POST",
         body: JSON.stringify({
           name,
           stage: "cold_call_done",
           owner: "Vivaan",
-          whatsapp_group_made: false,
-          notes: notes.trim() || null,
+          temperature: interestOpt?.temp ?? null,
+          whatsapp_group_made: groupMade,
+          notes: parts.join(" "),
           next_action_at: addDays(new Date(), 1).toISOString(),
-          next_action_reason: "Cold call / qualify",
+          next_action_reason: "Vivaan to hand to Pranav",
           contact_name: contactName.trim() || null,
           contact_phone: contactPhone.trim() || null,
         }),
       });
-      toast.success("Added to Pre-GTM (Vivaan's)");
+      toast.success("Added to Pre-GTM — briefed for handoff to Pranav");
       onSaved();
     } catch (e: any) {
       toast.error(e.message);
@@ -1477,12 +1509,12 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
   };
 
   return (
-    <Shell title="Add to Pre-GTM" onClose={onClose}>
+    <Shell title="Vivaan — add a company" onClose={onClose}>
       <p className="text-sm text-gray-500 mb-4">
-        New companies start in Pre-GTM as <span className="font-medium">Vivaan's</span> to cold-call
-        and qualify. He hands each one to you once there's a WhatsApp group and they've seen sample
-        leads.
+        Cold-called them and made a WhatsApp group? Drop them in here with what you learned. It lands
+        in Pre-GTM as yours, briefed and ready to hand to Pranav.
       </p>
+
       <Field label="Company">
         <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
       </Field>
@@ -1502,25 +1534,80 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
           />
         </Field>
       </div>
-      <Field label="Anything known so far (optional)">
+
+      <Field label="Were they interested?">
+        <div className="flex flex-wrap gap-2">
+          {INTEREST_OPTS.map((o) => (
+            <Choice key={o.key} active={interest === o.key} onClick={() => setInterest(o.key)}>
+              {o.label}
+            </Choice>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Did you hit any block?">
+        <div className="flex flex-wrap gap-2">
+          <Choice active={hasBlock === true} onClick={() => setHasBlock(true)}>
+            Yes
+          </Choice>
+          <Choice active={hasBlock === false} onClick={() => { setHasBlock(false); setBlockType(null); }}>
+            No
+          </Choice>
+        </div>
+      </Field>
+
+      {hasBlock === true && (
+        <>
+          <Field label="What was the block?">
+            <div className="flex flex-wrap gap-2">
+              {BLOCKER_TYPES.map((b) => (
+                <Choice key={b} active={blockType === b} onClick={() => setBlockType(b)}>
+                  {BLOCKER_LABELS[b]}
+                </Choice>
+              ))}
+            </div>
+          </Field>
+          <Field label="Block detail (optional)">
+            <input
+              value={blockNote}
+              onChange={(e) => setBlockNote(e.target.value)}
+              placeholder="e.g. wants pricing before committing"
+              className={inputCls}
+            />
+          </Field>
+        </>
+      )}
+
+      <Field label="Anything else for Pranav? (optional)">
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          rows={3}
-          placeholder="Where the lead came from, size, who to ask for…"
+          rows={2}
+          placeholder="Their tone, company size, who really decides, what they asked for…"
           className={inputCls}
         />
       </Field>
+
+      <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
+        <input
+          type="checkbox"
+          checked={groupMade}
+          onChange={(e) => setGroupMade(e.target.checked)}
+          className="rounded"
+        />
+        WhatsApp group made
+      </label>
+
       <div className="flex justify-end gap-2 pt-2">
         <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600">
           Cancel
         </button>
         <button
-          disabled={!name.trim() || saving}
+          disabled={!canSave || saving}
           onClick={save}
           className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium disabled:opacity-40"
         >
-          {saving ? "Saving…" : "Add to Pre-GTM"}
+          {saving ? "Saving…" : "Add & brief for handoff"}
         </button>
       </div>
     </Shell>
