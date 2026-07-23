@@ -1019,6 +1019,13 @@ export async function action({ request }: Route.ActionArgs) {
       lost_feedback,
       comeback_at,
       next_purchase_due,
+      // What they asked us for on the call (optional).
+      needs_brochure,
+      brochure_note,
+      needs_leads,
+      leads_note,
+      leads_change,
+      leads_change_note,
     } = body;
 
     // A "no" must always yield a reason and feedback. Enforced server-side too,
@@ -1076,6 +1083,15 @@ export async function action({ request }: Route.ActionArgs) {
       sets.push(sql`next_purchase_due = ${next_purchase_due || null}`);
     if (value_discussed !== undefined && value_discussed !== null)
       sets.push(sql`deal_value = ${value_discussed}`);
+    // Things they asked us for on the call — captured in the wizard so a request
+    // isn't lost. Each flag has a paired note column.
+    if (needs_brochure !== undefined) sets.push(sql`needs_brochure = ${needs_brochure}`);
+    if (brochure_note !== undefined) sets.push(sql`brochure_note = ${brochure_note || null}`);
+    if (needs_leads !== undefined) sets.push(sql`needs_leads = ${needs_leads}`);
+    if (leads_note !== undefined) sets.push(sql`leads_note = ${leads_note || null}`);
+    if (leads_change !== undefined) sets.push(sql`leads_change = ${leads_change}`);
+    if (leads_change_note !== undefined)
+      sets.push(sql`leads_change_note = ${leads_change_note || null}`);
 
     await db.execute(
       sql`UPDATE b2b_companies SET ${sql.join(sets, sql`, `)} WHERE id = ${company_id}`

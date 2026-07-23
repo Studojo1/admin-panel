@@ -4,6 +4,7 @@ import {
   BLOCKER_LABELS,
   BLOCKER_TYPES,
   CONTACT_METHODS,
+  FLAGS,
   LOST_REASONS,
   LOST_REASON_LABELS,
   OBJECTIONS,
@@ -48,6 +49,18 @@ export function CheckInModal({
 }) {
   const [step, setStep] = useState(0);
   const [method, setMethod] = useState<ContactMethod | null>(null);
+  // Things they asked us for on this call. Seeded from the company's current
+  // flags so the wizard shows what's already outstanding.
+  const [flags, setFlags] = useState<Record<string, boolean>>({
+    needs_brochure: company.needs_brochure,
+    needs_leads: company.needs_leads,
+    leads_change: company.leads_change,
+  });
+  const [flagNotes, setFlagNotes] = useState<Record<string, string>>({
+    brochure_note: company.brochure_note ?? "",
+    leads_note: company.leads_note ?? "",
+    leads_change_note: company.leads_change_note ?? "",
+  });
   const [attendees, setAttendees] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [objection, setObjection] = useState<Objection | null>(null);
@@ -156,6 +169,7 @@ export function CheckInModal({
         ]
       : []),
     { key: "context", title: "Anything they said?", canNext: true },
+    ...(reached ? [{ key: "asks", title: "Did they ask for anything?", canNext: true }] : []),
     ...(stageStepNeeded ? [{ key: "stage", title: "Where are they now?", canNext: true }] : []),
     { key: "next", title: "When do you reach back?", canNext: !!nextAt },
   ];
@@ -197,6 +211,13 @@ export function CheckInModal({
             outcome === "closed_won" && nextPurchaseDue
               ? new Date(nextPurchaseDue).toISOString()
               : undefined,
+          // What they asked us for — only sent when we actually reached them.
+          needs_brochure: reached ? flags.needs_brochure : undefined,
+          brochure_note: reached ? flagNotes.brochure_note.trim() || null : undefined,
+          needs_leads: reached ? flags.needs_leads : undefined,
+          leads_note: reached ? flagNotes.leads_note.trim() || null : undefined,
+          leads_change: reached ? flags.leads_change : undefined,
+          leads_change_note: reached ? flagNotes.leads_change_note.trim() || null : undefined,
         }),
       });
       toast.success("Logged");
@@ -414,6 +435,40 @@ export function CheckInModal({
                 </div>
               </div>
             )}
+          </>
+        )}
+
+        {current.key === "asks" && (
+          <>
+            <p className="text-base font-semibold text-gray-900 mb-3">
+              Did they ask us for anything?
+            </p>
+            <p className="text-xs text-gray-500 mb-3">
+              Tap what they want — it flags on the board so it doesn't slip.
+            </p>
+            <div className="space-y-2">
+              {FLAGS.map((f) => (
+                <div key={f.key} className="rounded-xl border border-gray-200 p-2.5">
+                  <label className="flex items-center gap-2 text-sm text-gray-800">
+                    <input
+                      type="checkbox"
+                      checked={!!flags[f.key]}
+                      onChange={(e) => setFlags({ ...flags, [f.key]: e.target.checked })}
+                      className="rounded"
+                    />
+                    {f.label}
+                  </label>
+                  {flags[f.key] && (
+                    <input
+                      value={flagNotes[f.noteKey] ?? ""}
+                      onChange={(e) => setFlagNotes({ ...flagNotes, [f.noteKey]: e.target.value })}
+                      placeholder={f.placeholder}
+                      className={`${inputCls} mt-2 text-xs`}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
           </>
         )}
 
