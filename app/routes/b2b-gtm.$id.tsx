@@ -5,10 +5,20 @@ import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import type { Route } from "./+types/b2b-gtm.$id";
 import { CheckInModal, ContactChangeModal } from "~/components/b2b/check-in-modal";
-import { Choice, Field, StageBadge, TempBadge, authedFetch, inputCls } from "~/components/b2b/shared";
+import {
+  Choice,
+  ExitModal,
+  Field,
+  ReactivateModal,
+  StageBadge,
+  TempBadge,
+  authedFetch,
+  inputCls,
+} from "~/components/b2b/shared";
 import {
   ALL_STAGES,
   BLOCKER_LABELS,
+  EXITED_STAGES,
   FLAGS,
   OBJECTION_LABELS,
   OUTCOME_LABELS,
@@ -42,6 +52,8 @@ export default function B2BCompany() {
   const [error, setError] = useState<string | null>(null);
   const [checkIn, setCheckIn] = useState(false);
   const [contactChange, setContactChange] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -92,6 +104,8 @@ export default function B2BCompany() {
             onReload={load}
             onCheckIn={() => setCheckIn(true)}
             onContactChange={() => setContactChange(true)}
+            onExit={() => setExiting(true)}
+            onReactivate={() => setReactivating(true)}
           />
         )}
       </main>
@@ -116,6 +130,26 @@ export default function B2BCompany() {
           }}
         />
       )}
+      {exiting && company && (
+        <ExitModal
+          company={company}
+          onClose={() => setExiting(false)}
+          onSaved={() => {
+            setExiting(false);
+            load();
+          }}
+        />
+      )}
+      {reactivating && company && (
+        <ReactivateModal
+          company={company}
+          onClose={() => setReactivating(false)}
+          onSaved={() => {
+            setReactivating(false);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -127,6 +161,8 @@ function CompanyBody({
   onReload,
   onCheckIn,
   onContactChange,
+  onExit,
+  onReactivate,
 }: {
   company: Company;
   logs: CallLog[];
@@ -134,9 +170,12 @@ function CompanyBody({
   onReload: () => void;
   onCheckIn: () => void;
   onContactChange: () => void;
+  onExit: () => void;
+  onReactivate: () => void;
 }) {
   const now = new Date();
   const isAccount = WON_STAGES.includes(company.stage);
+  const exited = EXITED_STAGES.includes(company.stage);
   const quiet = daysSince(logs[0]?.called_at ?? company.updated_at, now);
   const stale = isAccount && quiet !== null && quiet > STALE_ACCOUNT_DAYS;
   const overdue = isOverdue(company.next_action_at, now);
@@ -180,23 +219,57 @@ function CompanyBody({
             )}
           </div>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={onContactChange}
-            className="px-4 py-2 rounded-xl bg-white text-gray-700 text-sm font-medium border border-gray-300 hover:bg-gray-50"
-          >
-            Contact changed
-          </button>
-          <button
-            onClick={onCheckIn}
-            className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700"
-          >
-            Log call
-          </button>
+        <div className="flex gap-2 flex-wrap">
+          {exited ? (
+            <button
+              onClick={onReactivate}
+              className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600"
+            >
+              Bring back to pipeline
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={onContactChange}
+                className="px-4 py-2 rounded-xl bg-white text-gray-700 text-sm font-medium border border-gray-300 hover:bg-gray-50"
+              >
+                Contact changed
+              </button>
+              <button
+                onClick={onExit}
+                className="px-4 py-2 rounded-xl bg-white text-rose-600 text-sm font-medium border border-rose-200 hover:border-rose-300"
+              >
+                Remove from pipeline
+              </button>
+              <button
+                onClick={onCheckIn}
+                className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700"
+              >
+                Log call
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Why am I calling them, right at the top. */}
+      {exited ? (
+        <div className="mt-5 rounded-2xl border-2 border-gray-300 bg-gray-100 px-5 py-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+            Parked — out of the active pipeline
+          </p>
+          <p className="text-lg font-bold mt-0.5 text-gray-700">
+            Exited
+            {company.lost_reason ? ` — ${company.lost_reason.replace(/_/g, " ")}` : ""}
+          </p>
+          {company.lost_feedback && (
+            <p className="text-sm mt-0.5 text-gray-600">{company.lost_feedback}</p>
+          )}
+          <p className="text-xs text-gray-500 mt-1">
+            Bring them back any time — they'll return to GTM active as yours.
+          </p>
+        </div>
+      ) : (
+      /* Why am I calling them, right at the top. */
       <div
         className={`mt-5 rounded-2xl border-2 px-5 py-4 ${
           overdue
@@ -230,6 +303,7 @@ function CompanyBody({
           </p>
         )}
       </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-5 mt-5">
         <div className="lg:col-span-2 space-y-5">

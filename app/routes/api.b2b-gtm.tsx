@@ -602,19 +602,24 @@ export async function loader({ request }: Route.LoaderArgs) {
     `),
     db.execute(sql`
       SELECT
-        COUNT(*)::int AS total,
+        -- Exited (parked) companies are out of the active pipeline: they don't
+        -- count as a live company or as due work.
+        COUNT(*) FILTER (WHERE stage <> 'exited')::int AS total,
         -- Overdue OR scheduled later today: a 3pm callback counts at 9am.
         -- Both sides compared in IST, since that's the working day.
         COUNT(*) FILTER (
-          WHERE next_action_at <= NOW()
-             OR (next_action_at AT TIME ZONE 'Asia/Kolkata')::date
-                = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+          WHERE stage <> 'exited' AND (
+            next_action_at <= NOW()
+            OR (next_action_at AT TIME ZONE 'Asia/Kolkata')::date
+               = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+          )
         )::int AS due_now,
-        COUNT(*) FILTER (WHERE temperature = 'hot')::int AS hot,
+        COUNT(*) FILTER (WHERE temperature = 'hot' AND stage <> 'exited')::int AS hot,
         COUNT(*) FILTER (WHERE stage LIKE 'blocked_%')::int AS blocked,
-        COUNT(*) FILTER (WHERE needs_brochure)::int AS brochures,
-        COUNT(*) FILTER (WHERE needs_leads)::int AS leads_wanted,
-        COUNT(*) FILTER (WHERE leads_change)::int AS leads_to_fix,
+        COUNT(*) FILTER (WHERE stage = 'exited')::int AS exited,
+        COUNT(*) FILTER (WHERE needs_brochure AND stage <> 'exited')::int AS brochures,
+        COUNT(*) FILTER (WHERE needs_leads AND stage <> 'exited')::int AS leads_wanted,
+        COUNT(*) FILTER (WHERE leads_change AND stage <> 'exited')::int AS leads_to_fix,
         COUNT(*) FILTER (WHERE stage IN ('closed_won','onboarding','using','renewal_due','expansion_pitch','repeat_buyer'))::int AS accounts,
         COUNT(*) FILTER (WHERE next_purchase_due IS NOT NULL AND next_purchase_due <= NOW() + INTERVAL '7 days')::int AS renewals_due,
         COALESCE(SUM(deal_value) FILTER (WHERE stage IN ('closed_won','onboarding','using','renewal_due','expansion_pitch','repeat_buyer')), 0) AS committed_value
@@ -725,7 +730,10 @@ export async function action({ request }: Route.ActionArgs) {
    * The accumulation of these is the context.
    */
   if (request.method === "POST" && intent === "note") {
-    const { company_id, note, next_action_at, next_action_reason } = body;
+    // `stage` and `new_owner` are OPTIONAL: a plain note never moves the pipeline
+    // (that would let jotting skew things). They're only sent when the user
+    // explicitly flips "this note changes where they are" and confirms the move.
+    const { company_id, note, next_action_at, next_action_reason, stage, new_owner } = body;
 
     if (!note?.trim()) {
       return Response.json({ error: "A note needs something in it." }, { status: 400 });
@@ -736,18 +744,111 @@ export async function action({ request }: Route.ActionArgs) {
       VALUES (${company_id}, 'note', FALSE, ${note.trim()}, ${next_action_at ?? null}, ${admin.email})
     `);
 
-    // Only move the follow-up if the note actually set one.
-    if (next_action_at) {
-      await db.execute(sql`
-        UPDATE b2b_companies
-        SET next_action_at = ${next_action_at},
-            next_action_reason = ${next_action_reason || note.trim().slice(0, 120)},
-            updated_at = NOW()
-        WHERE id = ${company_id}
-      `);
-    } else {
-      await db.execute(sql`UPDATE b2b_companies SET updated_at = NOW() WHERE id = ${company_id}`);
+    // A handoff that comes with the note is part of the story — log it, reading
+    // the old owner first so the comparison means something.
+    if (new_owner !== undefined) {
+      const cur = await db.execute(sql`SELECT owner FROM b2b_companies WHERE id = ${company_id}`);
+      const before = (((cur.rows[0] as any)?.owner ?? "") as string).trim();
+      const after = (new_owner ?? "").trim();
+      if (before !== after) {
+        const name = (o: string) => (o ? o : "Me");
+        await db.execute(sql`
+          INSERT INTO b2b_call_logs (company_id, kind, picked_up, note, logged_by)
+          VALUES (${company_id}, 'handoff', FALSE, ${`Handed from ${name(before)} to ${name(after)}.`}, ${admin.email})
+        `);
+      }
     }
+
+    const sets = [sql`updated_at = NOW()`];
+    if (next_action_at) {
+      sets.push(sql`next_action_at = ${next_action_at}`);
+      sets.push(sql`next_action_reason = ${next_action_reason || note.trim().slice(0, 120)}`);
+    }
+    if (stage) sets.push(sql`stage = ${stage}`);
+    if (new_owner !== undefined) sets.push(sql`owner = ${new_owner || null}`);
+
+    await db.execute(
+      sql`UPDATE b2b_companies SET ${sql.join(sets, sql`, `)} WHERE id = ${company_id}`
+    );
+
+    return Response.json({ ok: true });
+  }
+
+  /**
+   * Park a company out of the active pipeline. NOT the same as closing it lost:
+   * this is "not worth chasing right now". Requires a reason (enforced here, not
+   * just in the form) so the Exit tab is never a bucket of unexplained rows.
+   * Reversible via `reactivate`. Stored in lost_reason/lost_feedback columns,
+   * which the objection stats never read (those group call-log objections).
+   */
+  if (request.method === "POST" && intent === "exit") {
+    const { company_id, exit_reason, exit_feedback } = body;
+
+    if (!exit_reason) {
+      return Response.json(
+        { error: "Say why you're removing them — the Exit tab needs a reason." },
+        { status: 400 }
+      );
+    }
+    if ((exit_reason === "other" || exit_reason === "bad_fit") && !exit_feedback?.trim()) {
+      return Response.json(
+        { error: "That reason needs a line of detail." },
+        { status: 400 }
+      );
+    }
+
+    await db.execute(sql`
+      UPDATE b2b_companies
+      SET stage = 'exited',
+          lost_reason = ${exit_reason},
+          lost_feedback = ${exit_feedback?.trim() || null},
+          needs_my_followup = FALSE,
+          next_action_at = NULL,
+          next_action_reason = NULL,
+          updated_at = NOW()
+      WHERE id = ${company_id}
+    `);
+
+    await db.execute(sql`
+      INSERT INTO b2b_call_logs (company_id, kind, picked_up, note, logged_by)
+      VALUES (
+        ${company_id}, 'note', FALSE,
+        ${"Exited the pipeline — " + exit_reason + (exit_feedback?.trim() ? `: ${exit_feedback.trim()}` : "")},
+        ${admin.email}
+      )
+    `);
+
+    return Response.json({ ok: true });
+  }
+
+  /**
+   * Bring a parked company back into the active pipeline. Lands at gtm_active,
+   * unowned (mine again), and asks for a next action so it never re-enters as a
+   * dead row. Clears the exit reason since it's no longer exited.
+   */
+  if (request.method === "POST" && intent === "reactivate") {
+    const { company_id, next_action_at, next_action_reason } = body;
+
+    await db.execute(sql`
+      UPDATE b2b_companies
+      SET stage = 'gtm_active',
+          owner = NULL,
+          lost_reason = NULL,
+          lost_feedback = NULL,
+          next_action_at = ${next_action_at ?? null},
+          next_action_reason = ${next_action_reason || "Brought back into the pipeline"},
+          updated_at = NOW()
+      WHERE id = ${company_id}
+    `);
+
+    await db.execute(sql`
+      INSERT INTO b2b_call_logs (company_id, kind, picked_up, note, next_action_at, logged_by)
+      VALUES (
+        ${company_id}, 'note', FALSE,
+        'Brought back into the pipeline.',
+        ${next_action_at ?? null}, ${admin.email}
+      )
+    `);
 
     return Response.json({ ok: true });
   }

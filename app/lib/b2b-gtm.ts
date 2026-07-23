@@ -45,7 +45,11 @@ export type Stage =
   // Lost -> feedback loop. comeback_scheduled re-enters gtm_active.
   | "closed_lost"
   | "feedback_pending"
-  | "comeback_scheduled";
+  | "comeback_scheduled"
+  // Parked out of the active pipeline. NOT terminal: an exited company can be
+  // brought back to gtm_active any time. Distinct from closed_lost, which is a
+  // deal we pitched and lost; exited is "not worth chasing right now".
+  | "exited";
 
 export const PRE_GTM_STAGES: Stage[] = ["cold_call_done", "demo_scheduled", "leads_sent"];
 export const OPEN_STAGES: Stage[] = ["whatsapp_group", "gtm_active", "negotiating"];
@@ -67,6 +71,7 @@ export const WON_STAGES: Stage[] = [
   "repeat_buyer",
 ];
 export const LOST_STAGES: Stage[] = ["closed_lost", "feedback_pending", "comeback_scheduled"];
+export const EXITED_STAGES: Stage[] = ["exited"];
 
 export const ALL_STAGES: Stage[] = [
   ...PRE_GTM_STAGES,
@@ -74,6 +79,7 @@ export const ALL_STAGES: Stage[] = [
   ...BLOCKED_STAGES,
   ...WON_STAGES,
   ...LOST_STAGES,
+  ...EXITED_STAGES,
 ];
 
 export const STAGE_LABELS: Record<Stage, string> = {
@@ -99,6 +105,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   closed_lost: "Closed lost",
   feedback_pending: "Feedback pending",
   comeback_scheduled: "Comeback scheduled",
+  exited: "Exited pipeline",
 };
 
 export type Objection =
@@ -158,6 +165,42 @@ export const LOST_REASON_LABELS: Record<LostReason, string> = {
   went_silent: "Went silent",
   other: "Other",
 };
+
+/**
+ * Why a company was pulled out of the active pipeline. Distinct from LostReason:
+ * exiting is "not worth our time chasing right now", not "we pitched and lost".
+ * Stored in the same lost_reason/lost_feedback columns (no schema change), but
+ * with its own vocabulary and its own required-detail rule.
+ */
+export type ExitReason =
+  | "not_interested"
+  | "not_in_space"
+  | "no_response"
+  | "too_small"
+  | "bad_fit"
+  | "other";
+
+export const EXIT_REASONS: ExitReason[] = [
+  "not_interested",
+  "not_in_space",
+  "no_response",
+  "too_small",
+  "bad_fit",
+  "other",
+];
+
+export const EXIT_REASON_LABELS: Record<ExitReason, string> = {
+  not_interested: "Not interested",
+  not_in_space: "Not in this space",
+  no_response: "Never responded",
+  too_small: "Too small to be worth it",
+  bad_fit: "Not a fit for BOB",
+  other: "Other",
+};
+
+export function exitReasonNeedsNote(r: ExitReason | null): boolean {
+  return r === "other" || r === "bad_fit";
+}
 
 export type BlockerType =
   | "pricing"
@@ -484,25 +527,81 @@ export function suggestNextAction(input: {
 }
 
 /**
- * The stage a call outcome moves a company into. Returns null to leave it alone.
+ * The stage a call outcome suggests moving a company into. Returns null to leave
+ * it where it is. This is a SUGGESTION — the UI pre-selects it and the user
+ * confirms with one tap; it is never applied silently.
+ *
+ * `owner` matters: an "interested" result while the deal is being worked by
+ * Jeremy/Hegde/Ayushi means the buy decision is progressing (-> negotiating),
+ * whereas the same result on my own warm lead just keeps it active.
  */
 export function stageForOutcome(
   outcome: Outcome,
   current: Stage,
-  blockerType?: BlockerType | null
+  blockerType?: BlockerType | null,
+  owner?: string | null
 ): Stage | null {
   switch (outcome) {
     case "closed_won":
+      // Already in the won loop: don't reset a using/renewal account to onboarding.
+      if (WON_STAGES.includes(current)) return null;
       return "onboarding";
+
     case "closed_lost":
       return "feedback_pending";
+
     case "blocked":
       return blockerType ? BLOCKER_STAGE[blockerType] : null;
-    case "interested":
-      // Don't drag a won account backwards into the open pipeline.
+
+    case "interested": {
+      // Never drag a won account backwards into the open pipeline.
       if (WON_STAGES.includes(current)) return null;
-      if (current === "whatsapp_group") return "gtm_active";
+      // In someone's hands for the buy decision -> the deal is progressing.
+      if ((owner ?? "").trim() && current !== "negotiating") return "negotiating";
+      // My own early-stage lead warming up -> into the open pipeline.
+      if (PRE_GTM_STAGES.includes(current) || current === "whatsapp_group") return "gtm_active";
       return null;
+    }
+
+    case "asked_callback":
+      // A callback request doesn't itself move the deal — don't regress a stage
+      // just because they asked us to ring back.
+      return null;
+
+    case "neutral":
+      // Non-committal but engaged: bring a brand-new lead into the open pipeline,
+      // otherwise leave it. Never regress.
+      if (PRE_GTM_STAGES.includes(current) || current === "whatsapp_group") return "gtm_active";
+      return null;
+
+    case "not_interested":
+      // A soft "no" doesn't auto-exit or auto-lose — the user decides that
+      // explicitly (Exit or Closed-lost). Leave the stage, let temperature/cadence
+      // reflect the cooling.
+      return null;
+
+    default:
+      return null;
+  }
+}
+
+/**
+ * The temperature a call outcome suggests. Pre-fills the temperature control;
+ * always overridable. Returns null to leave the current reading alone.
+ */
+export function temperatureForOutcome(outcome: Outcome | null): Temperature | null {
+  switch (outcome) {
+    case "closed_won":
+    case "interested":
+      return "hot";
+    case "blocked":
+      // They like it, something external is in the way — still warm.
+      return "warm";
+    case "neutral":
+      return "neutral";
+    case "not_interested":
+    case "closed_lost":
+      return "cold";
     default:
       return null;
   }
@@ -604,8 +703,14 @@ export type ViewKey =
   | "blocked"
   | "accounts"
   | "feedback"
-  | "my_followups";
+  | "my_followups"
+  | "exit";
 
+/**
+ * The main tab strip. `exit` is deliberately NOT in this list — it's rendered
+ * separately, tucked in the corner of the tab strip, so parked companies stay
+ * out of the way of the day-to-day work.
+ */
 export const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "today", label: "Today" },
@@ -630,11 +735,16 @@ export function matchesOwnerView(c: Company, owner: string): boolean {
 }
 
 export function companyMatchesView(c: Company, view: ViewKey, now: Date = new Date()): boolean {
+  const exited = EXITED_STAGES.includes(c.stage);
   switch (view) {
+    case "exit":
+      return exited;
+    // Every active view hides exited (parked) companies — they only live on the
+    // Exit tab until they're brought back.
     case "overview":
-      return true;
+      return !exited;
     case "today":
-      return isOnTodaysList(c.next_action_at, now) || isUpcoming(c.next_action_at, now);
+      return !exited && (isOnTodaysList(c.next_action_at, now) || isUpcoming(c.next_action_at, now));
     case "pre_gtm":
       return !c.whatsapp_group_made && PRE_GTM_STAGES.includes(c.stage);
     // Everything actively in play, including companies sitting at whatsapp_group
@@ -648,10 +758,69 @@ export function companyMatchesView(c: Company, view: ViewKey, now: Date = new Da
     case "feedback":
       return LOST_STAGES.includes(c.stage);
     case "my_followups":
-      return c.needs_my_followup;
+      return !exited && c.needs_my_followup;
     default:
-      return true;
+      return !exited;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* "Working" sub-buckets — what to actually do with an active company  */
+/* ------------------------------------------------------------------ */
+
+export type WorkingBucket = "needs_decision" | "in_buy_decision" | "stale";
+
+export const WORKING_BUCKETS: { key: WorkingBucket; label: string }[] = [
+  { key: "needs_decision", label: "Needs a decision" },
+  { key: "in_buy_decision", label: "In buy decision" },
+  { key: "stale", label: "Stale" },
+];
+
+/**
+ * Which working sub-bucket a company falls in. Only meaningful for companies
+ * that already pass the "working" view filter.
+ *
+ * - in_buy_decision: handed off (owned by someone) and/or negotiating.
+ * - stale: nobody's touched it in STALE_ACCOUNT_DAYS.
+ * - needs_decision: mine, active, waiting on me to push it or exit it.
+ */
+export function workingBucket(c: Company, now: Date = new Date()): WorkingBucket {
+  const owned = (c.owner ?? "").trim() !== "";
+  if (owned || c.stage === "negotiating") return "in_buy_decision";
+  const since = daysSince(c.updated_at, now);
+  if (since !== null && since >= STALE_ACCOUNT_DAYS) return "stale";
+  return "needs_decision";
+}
+
+/* ------------------------------------------------------------------ */
+/* The open-company MCQ — which questions to ask, driven by stage       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The guided flow shown when a company is opened. The branch is chosen from
+ * where the company IS, so we never ask an irrelevant question — a cold Pre-GTM
+ * lead is never asked "what should we send them" or for a fine next-action plan.
+ *
+ * Pure and deterministic: no model, just the stage.
+ */
+export type McqBranch =
+  | "pre_gtm" // Vivaan's early lead: hand to me / log a cold-call outcome / exit
+  | "mine_active" // my warm lead: push to buy decision / log a call / exit
+  | "buy_decision" // Jeremy/Hegde/Ayushi working it: log a demo/call outcome
+  | "blocked" // chase / still blocked / exit
+  | "account" // won: expansion cadence only
+  | "feedback" // lost, in the feedback loop: log feedback / schedule comeback
+  | "exited"; // parked: bring back / leave parked
+
+export function mcqBranchFor(c: Company): McqBranch {
+  if (EXITED_STAGES.includes(c.stage)) return "exited";
+  if (WON_STAGES.includes(c.stage)) return "account";
+  if (LOST_STAGES.includes(c.stage)) return "feedback";
+  if (BLOCKED_STAGES.includes(c.stage)) return "blocked";
+  if (PRE_GTM_STAGES.includes(c.stage)) return "pre_gtm";
+  // Open stages. Once it's in someone's hands it's a buy decision.
+  if ((c.owner ?? "").trim() || c.stage === "negotiating") return "buy_decision";
+  return "mine_active";
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   lostReasonNeedsNote,
   stageForOutcome,
   suggestNextAction,
+  temperatureForOutcome,
   toLocalInputValue,
   type BlockerType,
   type Company,
@@ -28,9 +29,10 @@ import {
   type LostReason,
   type Objection,
   type Outcome,
+  type Stage,
   type Temperature,
 } from "~/lib/b2b-gtm";
-import { Choice, Field, Shell, authedFetch, inputCls } from "./shared";
+import { Choice, ConfirmStage, Field, Shell, authedFetch, inputCls } from "./shared";
 
 export function CheckInModal({
   company,
@@ -57,9 +59,32 @@ export function CheckInModal({
   const [nextPurchaseDue, setNextPurchaseDue] = useState("");
   const [nextAt, setNextAt] = useState("");
   const [nextReason, setNextReason] = useState("");
+  // The stage that will actually be saved. Starts as the rule's suggestion when
+  // an outcome is picked, but the user confirms/declines it — never silent.
+  const [stageChoice, setStageChoice] = useState<Stage>(company.stage);
   const [saving, setSaving] = useState(false);
 
   const activeContact = (company.contacts || []).find((c) => !c.is_inactive) ?? company.contacts?.[0];
+
+  const suggestedStage = outcome
+    ? stageForOutcome(outcome, company.stage, blockerType, company.owner)
+    : null;
+
+  // When the outcome (or blocker) changes the suggestion, adopt it as the
+  // default choice. The user can still flip back to "keep as" in ConfirmStage.
+  useEffect(() => {
+    setStageChoice(suggestedStage ?? company.stage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outcome, blockerType]);
+
+  // Pre-fill temperature from the outcome, but only until the user touches it.
+  const [tempTouched, setTempTouched] = useState(false);
+  useEffect(() => {
+    if (tempTouched) return;
+    const t = temperatureForOutcome(outcome);
+    if (t) setTemperature(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outcome]);
 
   useEffect(() => {
     if (method === null) return;
@@ -105,7 +130,9 @@ export function CheckInModal({
   const save = async () => {
     setSaving(true);
     try {
-      const stage = outcome ? stageForOutcome(outcome, company.stage, blockerType) : null;
+      // Only send a stage if the confirmed choice actually differs — never
+      // rewrite the stage to what it already is.
+      const stage = stageChoice !== company.stage ? stageChoice : null;
       await authedFetch("/api/b2b-gtm?action=log", {
         method: "POST",
         body: JSON.stringify({
@@ -347,10 +374,24 @@ export function CheckInModal({
             </>
           )}
 
+          <ConfirmStage
+            current={company.stage}
+            suggested={suggestedStage}
+            value={stageChoice}
+            onChange={setStageChoice}
+          />
+
           <Field label="Temperature now">
             <div className="flex gap-2">
               {TEMPERATURES.map((t) => (
-                <Choice key={t} active={temperature === t} onClick={() => setTemperature(t)}>
+                <Choice
+                  key={t}
+                  active={temperature === t}
+                  onClick={() => {
+                    setTempTouched(true);
+                    setTemperature(t);
+                  }}
+                >
                   {t}
                 </Choice>
               ))}

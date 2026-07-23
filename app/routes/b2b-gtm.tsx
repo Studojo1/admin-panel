@@ -8,7 +8,9 @@ import type { Route } from "./+types/b2b-gtm";
 import { CheckInModal, ContactChangeModal } from "~/components/b2b/check-in-modal";
 import {
   Choice,
+  ExitModal,
   Field,
+  ReactivateModal,
   Shell,
   StageBadge,
   TempBadge,
@@ -18,15 +20,16 @@ import {
 import {
   ALL_STAGES,
   BLOCKER_LABELS,
+  EXITED_STAGES,
   FLAGS,
   OBJECTION_LABELS,
   STAGE_LABELS,
   STALE_ACCOUNT_DAYS,
   TEAM,
   TEAM_VIEWS,
+  WORKING_BUCKETS,
   matchesOwnerView,
-  nextInPipeline,
-  ownerLabel,
+  mcqBranchFor,
   TEMPERATURES,
   VIEWS,
   WON_STAGES,
@@ -39,12 +42,14 @@ import {
   isLaterToday,
   isOverdue,
   toLocalInputValue,
+  workingBucket,
   type CallLog,
   type Company,
   type Objection,
   type Stage,
   type Temperature,
   type ViewKey,
+  type WorkingBucket,
 } from "~/lib/b2b-gtm";
 
 export function meta({}: Route.MetaArgs) {
@@ -57,11 +62,28 @@ function matchesTab(c: Company, tab: string, now: Date): boolean {
   return companyMatchesView(c, tab as ViewKey, now);
 }
 
+/** "overdue 2d" / "today" / "in 3d" — scannable at a glance, exact date on hover. */
+function relativeWhen(iso: string, now: Date): string {
+  const d = new Date(iso);
+  const ms = d.getTime() - now.getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (ms < 0) {
+    const days = Math.floor(-ms / dayMs);
+    if (days === 0) return "overdue today";
+    return `overdue ${days}d`;
+  }
+  if (isLaterToday(iso, now)) return `today ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+  const days = Math.ceil(ms / dayMs);
+  if (days === 1) return "tomorrow";
+  return `in ${days}d`;
+}
+
 interface Stats {
   total: number;
   due_now: number;
   hot: number;
   blocked: number;
+  exited: number;
   brochures: number;
   leads_wanted: number;
   leads_to_fix: number;
@@ -90,7 +112,11 @@ export default function B2BGtm() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [checkIn, setCheckIn] = useState<Company | null>(null);
   const [contactChange, setContactChange] = useState<Company | null>(null);
+  const [exitCompany, setExitCompany] = useState<Company | null>(null);
+  const [reactivateCompany, setReactivateCompany] = useState<Company | null>(null);
   const [adding, setAdding] = useState(false);
+  // Sub-filter for the Working tab. `all` = the whole active pile.
+  const [workingSub, setWorkingSub] = useState<WorkingBucket | "all">("all");
   const notifiedRef = useRef<Set<number>>(new Set());
 
   /**
@@ -165,6 +191,10 @@ export default function B2BGtm() {
     const q = search.trim().toLowerCase();
     const rows = companies.filter((c) => {
       if (!matchesTab(c, view, now)) return false;
+      // Working sub-buckets: needs-decision / in-buy-decision / stale.
+      if (view === "working" && workingSub !== "all" && workingBucket(c, now) !== workingSub) {
+        return false;
+      }
       if (!q) return true;
       const hay = [c.name, c.notes, ...(c.contacts || []).map((x) => x.name)]
         .filter(Boolean)
@@ -178,33 +208,9 @@ export default function B2BGtm() {
       const bt = b.next_action_at ? +new Date(b.next_action_at) : Infinity;
       return at - bt;
     });
-  }, [companies, view, search, now]);
+  }, [companies, view, search, now, workingSub]);
 
   if (isPending) return null;
-
-  /** Pull phone numbers and late additions from the updated sheet. Safe to re-run. */
-  const backfill = async () => {
-    const ok = await showConfirm(
-      "Pull phone numbers and any new companies from the latest sheet? Existing notes, stages and edits are left alone, and phone numbers you've already set won't be overwritten.",
-      "Sync"
-    );
-    if (!ok) return;
-    try {
-      const r = await authedFetch("/api/b2b-gtm?action=backfill", {
-        method: "POST",
-        body: "{}",
-      });
-      const parts = [
-        r.phonesSet ? `${r.phonesSet} phone${r.phonesSet === 1 ? "" : "s"}` : null,
-        r.companiesAdded ? `${r.companiesAdded} new compan${r.companiesAdded === 1 ? "y" : "ies"}` : null,
-        r.contactsAdded ? `${r.contactsAdded} contact${r.contactsAdded === 1 ? "" : "s"}` : null,
-      ].filter(Boolean);
-      toast.success(parts.length ? `Synced: ${parts.join(", ")}` : "Already up to date");
-      load();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
-  };
 
   const seed = async () => {
     const ok = await showConfirm(
@@ -250,18 +256,11 @@ export default function B2BGtm() {
           <div className="flex gap-2 shrink-0">
             <button
               onClick={() => setAdding(true)}
+              title="New companies enter Pre-GTM as Vivaan's, then get handed to you"
               className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium border-2 border-neutral-900 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all"
             >
-              + Add company
+              + Add to Pre-GTM
             </button>
-            {companies.length > 0 && !loading && (
-              <button
-                onClick={backfill}
-                className="px-4 py-2 rounded-xl bg-white text-gray-700 text-sm font-medium border border-gray-300 hover:bg-gray-50"
-              >
-                Sync sheet
-              </button>
-            )}
             {companies.length === 0 && !loading && (
               <button
                 onClick={seed}
@@ -281,7 +280,10 @@ export default function B2BGtm() {
             return (
               <button
                 key={v.key}
-                onClick={() => setView(v.key)}
+                onClick={() => {
+                  setView(v.key);
+                  if (v.key !== "working") setWorkingSub("all");
+                }}
                 className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
                   active
                     ? "border-violet-500 text-gray-900 font-semibold"
@@ -295,7 +297,58 @@ export default function B2BGtm() {
               </button>
             );
           })}
+
+          {/* Exit tab, tucked in the corner — parked companies, out of the way. */}
+          <button
+            onClick={() => {
+              setView("exit");
+              setWorkingSub("all");
+            }}
+            className={`ml-auto px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
+              view === "exit"
+                ? "border-gray-500 text-gray-900 font-semibold"
+                : "border-transparent text-gray-400 hover:text-gray-700"
+            }`}
+          >
+            Exited
+            <span className="ml-1.5 text-xs text-gray-400">
+              {companies.filter((c) => EXITED_STAGES.includes(c.stage)).length}
+            </span>
+          </button>
         </div>
+
+        {/* Working sub-buckets: tells you what to actually do with the active pile. */}
+        {view === "working" && (
+          <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+            {(["all", ...WORKING_BUCKETS.map((b) => b.key)] as const).map((k) => {
+              const label =
+                k === "all" ? "All" : WORKING_BUCKETS.find((b) => b.key === k)!.label;
+              const count =
+                k === "all"
+                  ? companies.filter((c) => matchesTab(c, "working", now)).length
+                  : companies.filter(
+                      (c) => matchesTab(c, "working", now) && workingBucket(c, now) === k
+                    ).length;
+              const active = workingSub === k;
+              return (
+                <button
+                  key={k}
+                  onClick={() => setWorkingSub(k as WorkingBucket | "all")}
+                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                    active
+                      ? "bg-violet-500 text-white border-violet-500 font-medium"
+                      : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                  }`}
+                >
+                  {label}
+                  <span className={`ml-1 ${active ? "text-violet-100" : "text-gray-400"}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* One sheet per person, in pipeline order: Vivaan → Me → Jeremy/Hegde → Ayushi. */}
         <div className="flex items-center gap-1.5 mb-4 flex-wrap">
@@ -413,6 +466,8 @@ export default function B2BGtm() {
                       onToggle={() => setExpanded(expanded === c.id ? null : c.id)}
                       onCheckIn={() => setCheckIn(c)}
                       onContactChange={() => setContactChange(c)}
+                      onExit={() => setExitCompany(c)}
+                      onReactivate={() => setReactivateCompany(c)}
                       onSaved={load}
                     />
                   ))}
@@ -453,6 +508,26 @@ export default function B2BGtm() {
           }}
         />
       )}
+      {exitCompany && (
+        <ExitModal
+          company={exitCompany}
+          onClose={() => setExitCompany(null)}
+          onSaved={() => {
+            setExitCompany(null);
+            load();
+          }}
+        />
+      )}
+      {reactivateCompany && (
+        <ReactivateModal
+          company={reactivateCompany}
+          onClose={() => setReactivateCompany(null)}
+          onSaved={() => {
+            setReactivateCompany(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -464,6 +539,8 @@ function Row({
   onToggle,
   onCheckIn,
   onContactChange,
+  onExit,
+  onReactivate,
   onSaved,
 }: {
   c: Company;
@@ -472,14 +549,17 @@ function Row({
   onToggle: () => void;
   onCheckIn: () => void;
   onContactChange: () => void;
+  onExit: () => void;
+  onReactivate: () => void;
   onSaved: () => void;
 }) {
   const overdue = isOverdue(c.next_action_at, now);
   const today = isLaterToday(c.next_action_at, now);
   const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
   const isAccount = WON_STAGES.includes(c.stage);
+  const exited = EXITED_STAGES.includes(c.stage);
   const quiet = daysSince(c.last_log?.called_at ?? c.updated_at, now);
-  const stale = isAccount && quiet !== null && quiet > STALE_ACCOUNT_DAYS;
+  const stale = (isAccount || c.stage === "gtm_active") && quiet !== null && quiet > STALE_ACCOUNT_DAYS;
   const context = c.last_log?.note || c.notes;
 
   return (
@@ -538,31 +618,51 @@ function Row({
           <OwnerPicker c={c} onSaved={onSaved} />
         </td>
         <td className="px-3 py-2.5 whitespace-nowrap text-xs">
-          {c.next_action_at ? (
+          {exited ? (
+            <span className="text-gray-400">Parked</span>
+          ) : c.next_action_at ? (
             <span
               className={
                 overdue ? "text-violet-700 font-semibold" : today ? "text-gray-900" : "text-gray-500"
               }
+              title={formatDateTime(c.next_action_at)}
             >
-              {formatDateTime(c.next_action_at)}
+              {relativeWhen(c.next_action_at, now)}
             </span>
           ) : (
             <span className="text-rose-600 font-medium">Not set</span>
+          )}
+          {!exited && quiet !== null && quiet > 0 && (
+            <span className="block text-[10px] text-gray-400">
+              quiet {quiet}d{stale ? " · stale" : ""}
+            </span>
           )}
         </td>
         <td className="px-3 py-2.5 text-gray-600 text-xs max-w-md">
           <span className="line-clamp-1">{context || "—"}</span>
         </td>
         <td className="px-3 py-2.5 whitespace-nowrap">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onCheckIn();
-            }}
-            className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700"
-          >
-            Log call
-          </button>
+          {exited ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onReactivate();
+              }}
+              className="px-2.5 py-1 rounded-lg bg-violet-500 text-white text-xs font-medium hover:bg-violet-600"
+            >
+              Bring back
+            </button>
+          ) : (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCheckIn();
+              }}
+              className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700"
+            >
+              Log call
+            </button>
+          )}
         </td>
       </tr>
 
@@ -573,6 +673,9 @@ function Row({
               c={c}
               now={now}
               onContactChange={onContactChange}
+              onCheckIn={onCheckIn}
+              onExit={onExit}
+              onReactivate={onReactivate}
               onSaved={onSaved}
             />
           </td>
@@ -586,13 +689,20 @@ function ExpandedPanel({
   c,
   now,
   onContactChange,
+  onCheckIn,
+  onExit,
+  onReactivate,
   onSaved,
 }: {
   c: Company;
   now: Date;
   onContactChange: () => void;
+  onCheckIn: () => void;
+  onExit: () => void;
+  onReactivate: () => void;
   onSaved: () => void;
 }) {
+  const [showDetails, setShowDetails] = useState(false);
   const [stage, setStage] = useState<Stage>(c.stage);
   const [temperature, setTemperature] = useState<Temperature | null>(c.temperature);
   const [myFollowup, setMyFollowup] = useState(c.needs_my_followup);
@@ -657,23 +767,20 @@ function ExpandedPanel({
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
-      <div className="grid lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-3">
-          {/* The company as a whole: stable background, edited rarely. */}
-          <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-              About this company
-            </p>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              placeholder="Background that stays true: size, what they do, how their BD team works…"
-              className={inputCls}
-            />
-          </div>
+      {/* Guided next-action, chosen from where this company is. Leads the panel
+          so the common move is one tap; the rest is collapsed below. */}
+      <ActionBar
+        c={c}
+        onCheckIn={onCheckIn}
+        onExit={onExit}
+        onReactivate={onReactivate}
+        onSaved={onSaved}
+      />
 
-          {/* The running record. Every call, every bit of feedback, dated. */}
+      <div className="grid lg:grid-cols-3 gap-5 mt-4">
+        <div className="lg:col-span-2 space-y-3">
+          {/* The running record. Every call, every bit of feedback, dated —
+              the single most useful thing, so it stays open. */}
           <NotesFeed companyId={c.id} onSaved={onSaved} />
 
           {c.blocker_note && (
@@ -727,10 +834,32 @@ function ExpandedPanel({
               />
             </div>
           </div>
+
+          <button
+            onClick={() => setShowDetails((v) => !v)}
+            className="text-xs text-gray-500 hover:text-gray-800 font-medium"
+          >
+            {showDetails ? "▾ Hide details & edit" : "▸ Details, background & edit"}
+          </button>
+
+          {showDetails && (
+            <div>
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                About this company
+              </p>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                placeholder="Background that stays true: size, what they do, how their BD team works…"
+                className={inputCls}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Editable fields + contacts. */}
-        <div className="space-y-3">
+        {/* Editable fields + contacts — collapsed by default (progressive disclosure). */}
+        <div className={`space-y-3 ${showDetails ? "" : "hidden"}`}>
           <div>
             <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
               Stage
@@ -876,6 +1005,138 @@ function ExpandedPanel({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The guided next-action bar — the MCQ. Which buttons show is decided purely by
+ * where the company IS (mcqBranchFor), so a cold Pre-GTM lead is never offered
+ * "push to buy decision" and a won account isn't asked to log a cold call.
+ *
+ * The headline action for each branch matches the owner's real job: on my own
+ * warm leads that's Push to buy decision / Exit; Vivaan's early leads it's
+ * Hand to me; parked companies it's Bring back.
+ */
+function ActionBar({
+  c,
+  onCheckIn,
+  onExit,
+  onReactivate,
+  onSaved,
+}: {
+  c: Company;
+  onCheckIn: () => void;
+  onExit: () => void;
+  onReactivate: () => void;
+  onSaved: () => void;
+}) {
+  const branch = mcqBranchFor(c);
+  const [handing, setHanding] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const promptText =
+    branch === "pre_gtm"
+      ? "Vivaan's lead — what's the move?"
+      : branch === "mine_active"
+      ? "Your call: push it forward or let it go?"
+      : branch === "buy_decision"
+      ? "In the buy decision — log how it's going."
+      : branch === "blocked"
+      ? "Blocked — chase it or park it?"
+      : branch === "account"
+      ? "Won account — keep it growing."
+      : branch === "feedback"
+      ? "Lost — capture feedback or schedule the comeback."
+      : "Parked out of the pipeline.";
+
+  // Hand a company to whoever works the buy decision. Reassigns owner, moves the
+  // stage to negotiating, logs the handoff — all in one tap, via the note path.
+  const handTo = async (owner: string) => {
+    setBusy(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=note", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: c.id,
+          note: `Pushed to buy decision — handed to ${owner}.`,
+          stage: "negotiating",
+          new_owner: owner,
+          next_action_at: addDays(new Date(), 2).toISOString(),
+          next_action_reason: `${owner} to work the buy decision`,
+        }),
+      });
+      toast.success(`Handed to ${owner}`);
+      setHanding(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
+      <p className="text-[11px] font-semibold text-violet-800 uppercase tracking-wide mb-2">
+        {promptText}
+      </p>
+
+      {handing ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-gray-700">Hand to whom?</span>
+          {TEAM.filter((t) => t !== "Vivaan").map((t) => (
+            <Choice key={t} onClick={() => handTo(t)}>
+              {t}
+            </Choice>
+          ))}
+          <button
+            onClick={() => setHanding(false)}
+            className="text-xs text-gray-500 hover:text-gray-800"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {branch === "exited" ? (
+            <button
+              onClick={onReactivate}
+              className="px-3 py-1.5 rounded-xl bg-violet-500 text-white text-sm font-medium"
+            >
+              Bring back to pipeline
+            </button>
+          ) : (
+            <>
+              {(branch === "mine_active" || branch === "pre_gtm") && (
+                <button
+                  disabled={busy}
+                  onClick={() => setHanding(true)}
+                  className="px-3 py-1.5 rounded-xl bg-neutral-900 text-white text-sm font-medium disabled:opacity-40"
+                >
+                  Push to buy decision →
+                </button>
+              )}
+              <button
+                onClick={onCheckIn}
+                className="px-3 py-1.5 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
+              >
+                {branch === "buy_decision"
+                  ? "Log demo / call"
+                  : branch === "account"
+                  ? "Log a touch"
+                  : "Log a call"}
+              </button>
+              <button
+                onClick={onExit}
+                className="px-3 py-1.5 rounded-xl bg-white text-rose-600 text-sm font-medium border border-rose-200 hover:border-rose-300"
+              >
+                Remove from pipeline
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1205,15 +1466,16 @@ function LogEntry({ l }: { l: CallLog }) {
   );
 }
 
+/**
+ * Add a company to the top of the funnel. This is Vivaan's entry point: new
+ * companies always land in Pre-GTM owned by Vivaan, who then hands to Me. Kept
+ * deliberately minimal — the detail gets filled in once it's being worked.
+ */
 function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
-  const [stage, setStage] = useState<Stage>("cold_call_done");
-  const [temperature, setTemperature] = useState<Temperature | null>(null);
-  const [whatsapp, setWhatsapp] = useState(false);
   const [notes, setNotes] = useState("");
-  const [nextAt, setNextAt] = useState(toLocalInputValue(addDays(new Date(), 1)));
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -1223,17 +1485,17 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
         method: "POST",
         body: JSON.stringify({
           name,
-          stage,
-          temperature,
-          whatsapp_group_made: whatsapp,
+          stage: "cold_call_done",
+          owner: "Vivaan",
+          whatsapp_group_made: false,
           notes: notes.trim() || null,
-          next_action_at: nextAt ? new Date(nextAt).toISOString() : null,
-          next_action_reason: "First follow-up",
+          next_action_at: addDays(new Date(), 1).toISOString(),
+          next_action_reason: "Cold call / qualify",
           contact_name: contactName.trim() || null,
           contact_phone: contactPhone.trim() || null,
         }),
       });
-      toast.success("Added");
+      toast.success("Added to Pre-GTM (Vivaan's)");
       onSaved();
     } catch (e: any) {
       toast.error(e.message);
@@ -1243,7 +1505,12 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
   };
 
   return (
-    <Shell title="Add company" onClose={onClose}>
+    <Shell title="Add to Pre-GTM" onClose={onClose}>
+      <p className="text-sm text-gray-500 mb-4">
+        New companies start in Pre-GTM as <span className="font-medium">Vivaan's</span> to cold-call
+        and qualify. He hands each one to you once there's a WhatsApp group and they've seen sample
+        leads.
+      </p>
       <Field label="Company">
         <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
       </Field>
@@ -1263,50 +1530,12 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
           />
         </Field>
       </div>
-      <Field label="Stage">
-        <select
-          value={stage}
-          onChange={(e) => setStage(e.target.value as Stage)}
-          className={inputCls}
-        >
-          {ALL_STAGES.map((s) => (
-            <option key={s} value={s}>
-              {STAGE_LABELS[s]}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Temperature">
-        <div className="flex gap-2">
-          {TEMPERATURES.map((t) => (
-            <Choice key={t} active={temperature === t} onClick={() => setTemperature(t)}>
-              {t}
-            </Choice>
-          ))}
-        </div>
-      </Field>
-      <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
-        <input
-          type="checkbox"
-          checked={whatsapp}
-          onChange={(e) => setWhatsapp(e.target.checked)}
-          className="rounded"
-        />
-        WhatsApp group made (moves them into GTM)
-      </label>
-      <Field label="Context">
+      <Field label="Anything known so far (optional)">
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
-          className={inputCls}
-        />
-      </Field>
-      <Field label="First follow-up">
-        <input
-          type="datetime-local"
-          value={nextAt}
-          onChange={(e) => setNextAt(e.target.value)}
+          placeholder="Where the lead came from, size, who to ask for…"
           className={inputCls}
         />
       </Field>
@@ -1319,7 +1548,7 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
           onClick={save}
           className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium disabled:opacity-40"
         >
-          {saving ? "Saving…" : "Add"}
+          {saving ? "Saving…" : "Add to Pre-GTM"}
         </button>
       </div>
     </Shell>
