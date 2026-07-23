@@ -117,7 +117,6 @@ export default function B2BGtm() {
   const [view, setView] = useState<string>("overview");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [checkIn, setCheckIn] = useState<Company | null>(null);
   const [contactChange, setContactChange] = useState<Company | null>(null);
   const [reactivateCompany, setReactivateCompany] = useState<Company | null>(null);
   const [adding, setAdding] = useState(false);
@@ -455,8 +454,6 @@ export default function B2BGtm() {
                       "Temp",
                       "Handled by",
                       "Next action",
-                      "Context",
-                      "",
                     ].map((h, i) => (
                       <th
                         key={i}
@@ -476,7 +473,6 @@ export default function B2BGtm() {
                       now={now}
                       expanded={expanded === c.id}
                       onToggle={() => setExpanded(expanded === c.id ? null : c.id)}
-                      onCheckIn={() => setCheckIn(c)}
                       onContactChange={() => setContactChange(c)}
                       onReactivate={() => setReactivateCompany(c)}
                       onSaved={load}
@@ -489,17 +485,6 @@ export default function B2BGtm() {
         )}
       </main>
 
-      {checkIn && (
-        <CheckInModal
-          company={checkIn}
-          onClose={() => setCheckIn(null)}
-          onSaved={() => {
-            notifiedRef.current.delete(checkIn.id);
-            setCheckIn(null);
-            load();
-          }}
-        />
-      )}
       {contactChange && (
         <ContactChangeModal
           company={contactChange}
@@ -539,7 +524,6 @@ function Row({
   now,
   expanded,
   onToggle,
-  onCheckIn,
   onContactChange,
   onReactivate,
   onSaved,
@@ -549,7 +533,6 @@ function Row({
   now: Date;
   expanded: boolean;
   onToggle: () => void;
-  onCheckIn: () => void;
   onContactChange: () => void;
   onReactivate: () => void;
   onSaved: () => void;
@@ -565,7 +548,6 @@ function Row({
   const exited = EXITED_STAGES.includes(c.stage);
   const quiet = daysSince(c.last_log?.called_at ?? c.updated_at, now);
   const stale = (isAccount || c.stage === "gtm_active") && quiet !== null && quiet > STALE_ACCOUNT_DAYS;
-  const context = c.last_log?.note || c.notes;
 
   return (
     <>
@@ -644,42 +626,14 @@ function Row({
             </span>
           )}
         </td>
-        <td className="px-3 py-2.5 text-gray-600 text-xs max-w-md">
-          <span className="line-clamp-1">{context || "—"}</span>
-        </td>
-        <td className="px-3 py-2.5 whitespace-nowrap">
-          {exited ? (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onReactivate();
-              }}
-              className="px-2.5 py-1 rounded-lg bg-violet-500 text-white text-xs font-medium hover:bg-violet-600"
-            >
-              Bring back
-            </button>
-          ) : (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onCheckIn();
-              }}
-              className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700"
-            >
-              Log call
-            </button>
-          )}
-        </td>
       </tr>
 
       {expanded && (
         <tr className="bg-gray-50">
-          <td colSpan={11} className="px-3 pb-4 pt-1">
+          <td colSpan={9} className="px-3 pb-4 pt-1">
             <ExpandedPanel
               c={c}
-              now={now}
               onContactChange={onContactChange}
-              onCheckIn={onCheckIn}
               onReactivate={onReactivate}
               onSaved={onSaved}
             />
@@ -692,322 +646,42 @@ function Row({
 
 function ExpandedPanel({
   c,
-  now,
   onContactChange,
-  onCheckIn,
   onReactivate,
   onSaved,
 }: {
   c: Company;
-  now: Date;
   onContactChange: () => void;
-  onCheckIn: () => void;
   onReactivate: () => void;
   onSaved: () => void;
 }) {
-  const [showDetails, setShowDetails] = useState(false);
-  const [stage, setStage] = useState<Stage>(c.stage);
-  const [temperature, setTemperature] = useState<Temperature | null>(c.temperature);
-  const [myFollowup, setMyFollowup] = useState(c.needs_my_followup);
-  const [myFollowupNote, setMyFollowupNote] = useState(c.my_followup_note ?? "");
-  const [flags, setFlags] = useState<Record<string, boolean>>({
-    needs_brochure: c.needs_brochure,
-    needs_leads: c.needs_leads,
-    leads_change: c.leads_change,
-  });
-  const [flagNotes, setFlagNotes] = useState<Record<string, string>>({
-    brochure_note: c.brochure_note ?? "",
-    leads_note: c.leads_note ?? "",
-    leads_change_note: c.leads_change_note ?? "",
-  });
-  const [notes, setNotes] = useState(c.notes ?? "");
-  const [nextAt, setNextAt] = useState(
-    c.next_action_at ? toLocalInputValue(new Date(c.next_action_at)) : ""
-  );
-  const [nextReason, setNextReason] = useState(c.next_action_reason ?? "");
-  const [dealValue, setDealValue] = useState(c.deal_value ?? "");
-  const [saving, setSaving] = useState(false);
+  // The expanded row is the guided flow and nothing else. Notes, history and
+  // editing all live on the full page, reached only via "Study past
+  // interactions". Clicking "Log a call" opens the wizard inline right here.
+  const [logging, setLogging] = useState(false);
 
-  const isAccount = WON_STAGES.includes(c.stage);
-  const activeContacts = (c.contacts || []).filter((x) => !x.is_inactive);
-  const pastContacts = (c.contacts || []).filter((x) => x.is_inactive);
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await authedFetch("/api/b2b-gtm?action=company", {
-        method: "PATCH",
-        body: JSON.stringify({
-          id: c.id,
-          fields: {
-            // owner is handled by the row picker; sending a stale copy here
-            // would silently revert it.
-            stage,
-            temperature,
-            notes,
-            next_action_at: nextAt ? new Date(nextAt).toISOString() : null,
-            next_action_reason: nextReason,
-            deal_value: dealValue === "" ? null : Number(dealValue),
-            needs_my_followup: myFollowup,
-            my_followup_note: myFollowupNote,
-            needs_brochure: flags.needs_brochure,
-            brochure_note: flagNotes.brochure_note,
-            needs_leads: flags.needs_leads,
-            leads_note: flagNotes.leads_note,
-            leads_change: flags.leads_change,
-            leads_change_note: flagNotes.leads_change_note,
-          },
-        }),
-      });
-      toast.success("Saved");
-      onSaved();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
+  if (logging) {
+    return (
+      <CheckInModal
+        company={c}
+        variant="inline"
+        onClose={() => setLogging(false)}
+        onSaved={() => {
+          setLogging(false);
+          onSaved();
+        }}
+      />
+    );
+  }
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
-      {/* Guided next-action, chosen from where this company is. Leads the panel
-          so the common move is one tap; the rest is collapsed below. */}
-      <ActionBar
-        c={c}
-        onCheckIn={onCheckIn}
-        onReactivate={onReactivate}
-        onSaved={onSaved}
-      />
-
-      <div className="grid lg:grid-cols-3 gap-5 mt-4">
-        <div className="lg:col-span-2 space-y-3">
-          {/* The running record. Every call, every bit of feedback, dated —
-              the single most useful thing, so it stays open. */}
-          <NotesFeed companyId={c.id} onSaved={onSaved} />
-
-          {c.blocker_note && (
-            <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5">
-              <p className="text-[10px] font-semibold text-amber-800 uppercase tracking-wide">
-                Blocker{c.blocker_type ? ` — ${BLOCKER_LABELS[c.blocker_type] ?? c.blocker_type}` : ""}
-              </p>
-              <p className="text-sm text-amber-900 mt-0.5">{c.blocker_note}</p>
-            </div>
-          )}
-
-          {c.lost_feedback && (
-            <div className="rounded-lg bg-rose-50 border border-rose-200 p-2.5">
-              <p className="text-[10px] font-semibold text-rose-800 uppercase tracking-wide">
-                Why we lost{c.lost_reason ? ` — ${c.lost_reason.replace(/_/g, " ")}` : ""}
-              </p>
-              <p className="text-sm text-rose-900 mt-0.5">{c.lost_feedback}</p>
-              {c.comeback_at && (
-                <p className="text-xs text-rose-700 mt-1">
-                  Comeback {formatDateTime(c.comeback_at)}
-                </p>
-              )}
-            </div>
-          )}
-
-          {c.they_reachout_on && (
-            <p className="text-xs text-gray-500">They said they'd reach out: {c.they_reachout_on}</p>
-          )}
-
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                Next action
-              </p>
-              <input
-                type="datetime-local"
-                value={nextAt}
-                onChange={(e) => setNextAt(e.target.value)}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                Why
-              </p>
-              <input
-                value={nextReason}
-                onChange={(e) => setNextReason(e.target.value)}
-                placeholder="Why are we calling them then?"
-                className={inputCls}
-              />
-            </div>
-          </div>
-
-          <button
-            onClick={() => setShowDetails((v) => !v)}
-            className="text-xs text-gray-500 hover:text-gray-800 font-medium"
-          >
-            {showDetails ? "▾ Hide details & edit" : "▸ Details, background & edit"}
-          </button>
-
-          {showDetails && (
-            <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                About this company
-              </p>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                placeholder="Background that stays true: size, what they do, how their BD team works…"
-                className={inputCls}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Editable fields + contacts — collapsed by default (progressive disclosure). */}
-        <div className={`space-y-3 ${showDetails ? "" : "hidden"}`}>
-          <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-              Stage
-            </p>
-            <select
-              value={stage}
-              onChange={(e) => setStage(e.target.value as Stage)}
-              className={inputCls}
-            >
-              {ALL_STAGES.map((s) => (
-                <option key={s} value={s}>
-                  {STAGE_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-              Temperature
-            </p>
-            <div className="flex gap-1.5">
-              {TEMPERATURES.map((t) => (
-                <Choice key={t} active={temperature === t} onClick={() => setTemperature(t)}>
-                  {t}
-                </Choice>
-              ))}
-            </div>
-          </div>
-
-          {isAccount && (
-            <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                Committed value (₹)
-              </p>
-              <input
-                type="number"
-                value={dealValue}
-                onChange={(e) => setDealValue(e.target.value)}
-                className={inputCls}
-              />
-              {c.next_purchase_due ? (
-                <p className="text-xs text-gray-500 mt-1">
-                  Next purchase {formatDateTime(c.next_purchase_due)}
-                </p>
-              ) : (
-                <p className="text-xs text-rose-600 mt-1">
-                  No next purchase date — a win without one goes quiet.
-                </p>
-              )}
-            </div>
-          )}
-
-          <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-              Contacts
-            </p>
-            {activeContacts.map((x) => (
-              <p key={x.id} className="text-sm text-gray-700">
-                {x.name || "Unnamed"}
-                {x.role ? ` · ${x.role}` : ""}
-                {x.phone ? ` · ${x.phone}` : ""}
-              </p>
-            ))}
-            {pastContacts.map((x) => (
-              <p key={x.id} className="text-xs text-gray-400 line-through">
-                {x.name || x.phone}
-                {x.left_note ? ` — ${x.left_note}` : ""}
-              </p>
-            ))}
-            <AddContact companyId={c.id} onSaved={onSaved} />
-            <button
-              onClick={onContactChange}
-              className="mt-1.5 text-xs text-sky-700 hover:underline font-medium"
-            >
-              Contact changed?
-            </button>
-          </div>
-
-          {/* Independent of owner: they keep the company, I still chase it. */}
-          <div className="rounded-lg border border-violet-200 bg-violet-50 p-2">
-            <label className="flex items-center gap-2 text-sm text-gray-800">
-              <input
-                type="checkbox"
-                checked={myFollowup}
-                onChange={(e) => setMyFollowup(e.target.checked)}
-                className="rounded"
-              />
-              I need to follow up
-              {c.owner && <span className="text-xs text-gray-500">({c.owner} is handling it)</span>}
-            </label>
-            {myFollowup && (
-              <input
-                value={myFollowupNote}
-                onChange={(e) => setMyFollowupNote(e.target.value)}
-                placeholder="What do I need to chase?"
-                className={inputCls + " mt-1.5 text-xs"}
-              />
-            )}
-          </div>
-
-          <div>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-              What we owe them
-            </p>
-            {FLAGS.map((f) => (
-              <div key={f.key} className="mb-1.5">
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={!!flags[f.key]}
-                    onChange={(e) => setFlags({ ...flags, [f.key]: e.target.checked })}
-                    className="rounded"
-                  />
-                  {f.label}
-                </label>
-                {flags[f.key] && (
-                  <input
-                    value={flagNotes[f.noteKey] ?? ""}
-                    onChange={(e) => setFlagNotes({ ...flagNotes, [f.noteKey]: e.target.value })}
-                    placeholder={f.placeholder}
-                    className={inputCls + " mt-1 text-xs"}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="flex gap-2 pt-1">
-            <button
-              disabled={saving}
-              onClick={save}
-              className="flex-1 px-3 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium disabled:opacity-40"
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
-            <Link
-              to={`/b2b-gtm/${c.id}`}
-              className="px-3 py-2 rounded-xl bg-white text-gray-600 text-sm font-medium border border-gray-300 hover:bg-gray-50"
-            >
-              Full page
-            </Link>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ActionBar
+      c={c}
+      onLog={() => setLogging(true)}
+      onContactChange={onContactChange}
+      onReactivate={onReactivate}
+      onSaved={onSaved}
+    />
   );
 }
 
@@ -1022,12 +696,14 @@ function ExpandedPanel({
  */
 function ActionBar({
   c,
-  onCheckIn,
+  onLog,
+  onContactChange,
   onReactivate,
   onSaved,
 }: {
   c: Company;
-  onCheckIn: () => void;
+  onLog: () => void;
+  onContactChange: () => void;
   onReactivate: () => void;
   onSaved: () => void;
 }) {
@@ -1108,119 +784,41 @@ function ActionBar({
           Bring back to pipeline
         </button>
       ) : (
-        <div className="flex flex-wrap gap-2">
-          {/* The two primary choices you asked for, first. */}
-          <button
-            onClick={onCheckIn}
-            className="px-3 py-1.5 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700"
-          >
-            {logLabel}
-          </button>
-          <Link
-            to={`/b2b-gtm/${c.id}`}
-            className="px-3 py-1.5 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
-          >
-            Study past interactions →
-          </Link>
-          {/* Role-specific advance stays available; Remove-from-pipeline now
-              lives only on the full page. */}
-          {(branch === "mine_active" || branch === "pre_gtm") && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {/* Log an interaction — the common move — first and boldest. */}
             <button
-              disabled={busy}
-              onClick={() => setHanding(true)}
-              className="px-3 py-1.5 rounded-xl bg-white text-violet-700 text-sm font-medium border border-violet-300 hover:border-violet-400 disabled:opacity-40"
+              onClick={onLog}
+              className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700"
             >
-              Push to buy decision →
+              {logLabel}
             </button>
-          )}
-        </div>
+            {/* The only way to the full page. */}
+            <Link
+              to={`/b2b-gtm/${c.id}`}
+              className="px-4 py-2 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
+            >
+              Study past interactions →
+            </Link>
+            {/* Role-specific advance; Remove-from-pipeline lives on the full page. */}
+            {(branch === "mine_active" || branch === "pre_gtm") && (
+              <button
+                disabled={busy}
+                onClick={() => setHanding(true)}
+                className="px-4 py-2 rounded-xl bg-white text-violet-700 text-sm font-medium border border-violet-300 hover:border-violet-400 disabled:opacity-40"
+              >
+                Push to buy decision →
+              </button>
+            )}
+          </div>
+          <button
+            onClick={onContactChange}
+            className="mt-2 text-xs text-sky-700 hover:underline font-medium"
+          >
+            Contact changed?
+          </button>
+        </>
       )}
-    </div>
-  );
-}
-
-/**
- * Add another person at a company that already exists — a second stakeholder,
- * not a replacement. Distinct from "Contact changed", which retires the old
- * contact; this one just adds alongside.
- */
-function AddContact({ companyId, onSaved }: { companyId: number; onSaved: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [role, setRole] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await authedFetch("/api/b2b-gtm?action=contact", {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: companyId,
-          name: name.trim() || null,
-          phone: phone.trim() || null,
-          role: role.trim() || null,
-        }),
-      });
-      toast.success("Contact added");
-      setName("");
-      setPhone("");
-      setRole("");
-      setOpen(false);
-      onSaved();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="mt-1.5 mr-3 text-xs text-violet-600 hover:underline font-medium"
-      >
-        + Add contact
-      </button>
-    );
-  }
-
-  return (
-    <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
-      <div className="grid grid-cols-2 gap-1.5">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Name"
-          className="px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
-        />
-        <input
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          placeholder="Phone"
-          className="px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
-        />
-      </div>
-      <input
-        value={role}
-        onChange={(e) => setRole(e.target.value)}
-        placeholder="Role (optional)"
-        className="w-full mt-1.5 px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
-      />
-      <div className="flex justify-end gap-2 mt-1.5">
-        <button onClick={() => setOpen(false)} className="text-xs text-gray-500">
-          Cancel
-        </button>
-        <button
-          disabled={saving || (!name.trim() && !phone.trim())}
-          onClick={save}
-          className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
-        >
-          {saving ? "Adding…" : "Add"}
-        </button>
-      </div>
     </div>
   );
 }
@@ -1269,164 +867,6 @@ function OwnerPicker({ c, onSaved }: { c: Company; onSaved: () => void }) {
         </option>
       ))}
     </select>
-  );
-}
-
-/**
- * The running record. Every call, note and contact change, newest first, with
- * a box to add another. Notes are dated entries that never overwrite each
- * other — the accumulation is the context.
- */
-function NotesFeed({ companyId, onSaved }: { companyId: number; onSaved: () => void }) {
-  const [logs, setLogs] = useState<CallLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [text, setText] = useState("");
-  const [withDate, setWithDate] = useState(false);
-  const [nextAt, setNextAt] = useState(toLocalInputValue(addDays(new Date(), 1)));
-  const [saving, setSaving] = useState(false);
-  const [showAll, setShowAll] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const d = await authedFetch(`/api/b2b-gtm?company_id=${companyId}`);
-      setLogs(d.logs || []);
-    } catch {
-      // The panel is still usable without the feed.
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const add = async () => {
-    if (!text.trim()) return;
-    setSaving(true);
-    try {
-      await authedFetch("/api/b2b-gtm?action=note", {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: companyId,
-          note: text.trim(),
-          next_action_at: withDate && nextAt ? new Date(nextAt).toISOString() : null,
-        }),
-      });
-      setText("");
-      setWithDate(false);
-      toast.success("Note added");
-      await load();
-      onSaved();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const shown = showAll ? logs : logs.slice(0, 4);
-
-  return (
-    <div>
-      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-        Notes &amp; history {logs.length > 0 && <span className="text-gray-400">({logs.length})</span>}
-      </p>
-
-      <div className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={2}
-          placeholder="What did they say? Their tone, any context — add as much as you like."
-          className="w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
-        />
-        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          <label className="flex items-center gap-1.5 text-xs text-gray-600">
-            <input
-              type="checkbox"
-              checked={withDate}
-              onChange={(e) => setWithDate(e.target.checked)}
-              className="rounded"
-            />
-            Set a follow-up
-          </label>
-          {withDate && (
-            <input
-              type="datetime-local"
-              value={nextAt}
-              onChange={(e) => setNextAt(e.target.value)}
-              className="px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white"
-            />
-          )}
-          <button
-            disabled={!text.trim() || saving}
-            onClick={add}
-            className="ml-auto px-3 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
-          >
-            {saving ? "Adding…" : "Add note"}
-          </button>
-        </div>
-      </div>
-
-      {loading ? (
-        <p className="text-xs text-gray-400">Loading notes…</p>
-      ) : logs.length === 0 ? (
-        <p className="text-xs text-gray-400">
-          Nothing logged yet — add the first note above with what they said and their tone.
-        </p>
-      ) : (
-        <>
-          <div className="space-y-1.5">
-            {shown.map((l) => (
-              <LogEntry key={l.id} l={l} />
-            ))}
-          </div>
-          {logs.length > 4 && (
-            <button
-              onClick={() => setShowAll(!showAll)}
-              className="text-xs text-violet-600 hover:underline mt-1.5"
-            >
-              {showAll ? "Show less" : `Show all ${logs.length}`}
-            </button>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function LogEntry({ l }: { l: CallLog }) {
-  const tone =
-    l.kind === "contact_change"
-      ? "border-sky-200 bg-sky-50"
-      : l.kind === "note"
-      ? "border-violet-200 bg-violet-50"
-      : l.kind === "handoff"
-      ? "border-emerald-200 bg-emerald-50"
-      : "border-gray-200 bg-white";
-  return (
-    <div className={`rounded-lg border p-2 ${tone}`}>
-      {/* The event as a plain sentence — "Called them on 17th Jul 2026, no answer". */}
-      <p className="text-sm text-gray-800">{logSentence(l)}</p>
-      {l.note && <p className="text-sm text-gray-600 mt-0.5 italic">“{l.note}”</p>}
-      <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-1">
-        {l.attendees && <span className="text-gray-500">with {l.attendees}</span>}
-        {l.objection && (
-          <span className="px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200">
-            {l.objection === "other" && l.objection_note
-              ? l.objection_note
-              : OBJECTION_LABELS[l.objection]}
-          </span>
-        )}
-        {l.value_discussed && (
-          <span className="px-1.5 py-0.5 rounded-full font-medium bg-green-100 text-green-700 border border-green-200">
-            {formatValue(l.value_discussed)}
-          </span>
-        )}
-        {l.logged_by && <span className="text-gray-400 ml-auto">{l.logged_by.split("@")[0]}</span>}
-      </div>
-    </div>
   );
 }
 

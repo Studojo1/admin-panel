@@ -32,17 +32,21 @@ import {
   type Stage,
   type Temperature,
 } from "~/lib/b2b-gtm";
-import { Choice, ConfirmStage, Field, Shell, authedFetch, inputCls } from "./shared";
+import { Choice, ConfirmStage, Field, Shell, Stepper, authedFetch, inputCls } from "./shared";
 
 export function CheckInModal({
   company,
   onClose,
   onSaved,
+  variant = "modal",
 }: {
   company: Company;
   onClose: () => void;
   onSaved: () => void;
+  /** "modal" = overlay + card (full page); "inline" = bare card (expanded row). */
+  variant?: "modal" | "inline";
 }) {
+  const [step, setStep] = useState(0);
   const [method, setMethod] = useState<ContactMethod | null>(null);
   const [attendees, setAttendees] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -127,6 +131,40 @@ export function CheckInModal({
     (!reached ||
       (!!outcome && (!needsObjection || !!objection) && !objectionNoteMissing && !lostIncomplete));
 
+  /**
+   * The wizard steps, one question at a time. Which steps exist depends on the
+   * answers: a no-answer / no-show skips the outcome step, and the stage step
+   * only appears when the rule actually suggests a move.
+   *
+   * Each step declares its key, title, and whether you can advance from it yet.
+   */
+  const stageStepNeeded = reached && !!suggestedStage && suggestedStage !== company.stage;
+  const steps: {
+    key: string;
+    title: string;
+    canNext: boolean;
+  }[] = [
+    { key: "method", title: "How did you reach them?", canNext: method !== null },
+    ...(reached
+      ? [
+          {
+            key: "outcome",
+            title: "How did it go?",
+            canNext:
+              !!outcome && (!needsObjection || !!objection) && !objectionNoteMissing && !lostIncomplete,
+          },
+        ]
+      : []),
+    { key: "context", title: "Anything they said?", canNext: true },
+    ...(stageStepNeeded ? [{ key: "stage", title: "Where are they now?", canNext: true }] : []),
+    { key: "next", title: "When do you reach back?", canNext: !!nextAt },
+  ];
+
+  const clampedStep = Math.min(step, steps.length - 1);
+  const current = steps[clampedStep];
+  const isLast = clampedStep === steps.length - 1;
+  const stepLabels = steps.map((s) => s.title);
+
   const save = async () => {
     setSaving(true);
     try {
@@ -170,100 +208,52 @@ export function CheckInModal({
     }
   };
 
-  return (
-    <Shell
-      title={`${method === "meet" ? "Log meet" : method === "no_show" ? "Log no-show" : "Log call"} — ${
-        company.name
-      }`}
-      onClose={onClose}
-    >
-      {(company.last_log?.note || company.notes) && (
+  const body = (
+    <>
+      <Stepper labels={stepLabels} current={clampedStep} />
+
+      {/* Where we left off — a quiet reminder while logging. */}
+      {(company.last_log?.note || company.notes) && clampedStep === 0 && (
         <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 mb-4">
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
             Where we left things off
           </p>
-          <p className="text-sm text-gray-700">{company.last_log?.note || company.notes}</p>
+          <p className="text-sm text-gray-700 line-clamp-3">
+            {company.last_log?.note || company.notes}
+          </p>
         </div>
       )}
 
-      <Field label="How did we reach them?">
-        <div className="flex flex-wrap gap-2">
-          {CONTACT_METHODS.map((m) => (
-            <Choice key={m.key} active={method === m.key} onClick={() => setMethod(m.key)}>
-              {m.label}
-            </Choice>
-          ))}
-        </div>
-      </Field>
-
-      {method === "meet" && (
-        <Field label="Who joined from their side? (optional)">
-          <input
-            value={attendees}
-            onChange={(e) => setAttendees(e.target.value)}
-            placeholder="e.g. Himanshu + 2 from their tech team"
-            className={inputCls}
-          />
-        </Field>
-      )}
-
-      {(method === "no_answer" || method === "no_show") && (
-        <Field label="When should we try again?">
-          <div className="flex flex-wrap gap-2">
-            {method === "no_answer" && (
-              <>
-                <Choice onClick={() => quick(addMinutes(new Date(), 30), "Retry — no answer")}>
-                  30 min
+      <div className="min-h-[7rem]">
+        {current.key === "method" && (
+          <>
+            <p className="text-base font-semibold text-gray-900 mb-3">How did you reach them?</p>
+            <div className="grid grid-cols-2 gap-2">
+              {CONTACT_METHODS.map((m) => (
+                <Choice key={m.key} active={method === m.key} onClick={() => setMethod(m.key)}>
+                  {m.label}
                 </Choice>
-                <Choice onClick={() => quick(addHours(new Date(), 1), "Retry — no answer")}>
-                  1 hr
-                </Choice>
-                <Choice onClick={() => quick(addHours(new Date(), 2), "Retry — no answer")}>
-                  2 hrs
-                </Choice>
-              </>
+              ))}
+            </div>
+            {method === "meet" && (
+              <div className="mt-3">
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  Who joined from their side? (optional)
+                </label>
+                <input
+                  value={attendees}
+                  onChange={(e) => setAttendees(e.target.value)}
+                  placeholder="e.g. Himanshu + 2 from their tech team"
+                  className={inputCls}
+                />
+              </div>
             )}
-            <Choice
-              onClick={() =>
-                quick(
-                  addDays(new Date(), 1),
-                  method === "no_show" ? "No-showed the meet — reschedule" : "Retry — no answer"
-                )
-              }
-            >
-              Tomorrow
-            </Choice>
-            <Choice
-              onClick={() =>
-                quick(
-                  addDays(new Date(), 3),
-                  method === "no_show" ? "No-showed the meet — reschedule" : "Retry — no answer"
-                )
-              }
-            >
-              In 3 days
-            </Choice>
-          </div>
-        </Field>
-      )}
+          </>
+        )}
 
-      {/* Even a no-answer / no-show deserves a note: their tone, whether they
-          dodged, anything worth remembering before the next try. */}
-      {(method === "no_answer" || method === "no_show") && (
-        <Field label="Notes (optional)">
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={2}
-            placeholder="e.g. rang out twice, seemed to be dodging — try WhatsApp next"
-            className={inputCls}
-          />
-        </Field>
-      )}
-
-      {reached && (
-        <>
-          <Field label="How did it go?">
+        {current.key === "outcome" && (
+          <>
+            <p className="text-base font-semibold text-gray-900 mb-3">How did it go?</p>
             <div className="grid grid-cols-2 gap-2">
               {OUTCOMES.map((o) => (
                 <Choice key={o} active={outcome === o} onClick={() => setOutcome(o)}>
@@ -271,42 +261,46 @@ export function CheckInModal({
                 </Choice>
               ))}
             </div>
-          </Field>
 
-          {needsObjection && (
-            <Field label="What's the objection? (required)">
-              <div className="grid grid-cols-2 gap-2">
-                {OBJECTIONS.map((o) => (
-                  <Choice key={o} active={objection === o} onClick={() => setObjection(o)}>
-                    {OBJECTION_LABELS[o]}
-                  </Choice>
-                ))}
+            {needsObjection && (
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  What's the objection? (required)
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {OBJECTIONS.map((o) => (
+                    <Choice key={o} active={objection === o} onClick={() => setObjection(o)}>
+                      {OBJECTION_LABELS[o]}
+                    </Choice>
+                  ))}
+                </div>
+                {objection && (
+                  <input
+                    value={objectionNote}
+                    onChange={(e) => setObjectionNote(e.target.value)}
+                    placeholder={
+                      objectionNeedsNote(objection)
+                        ? "Required — what was it, in their words?"
+                        : "Detail (optional) — what exactly did they say?"
+                    }
+                    className={`${inputCls} mt-2 ${
+                      objectionNoteMissing ? "border-rose-400 ring-1 ring-rose-300" : ""
+                    }`}
+                  />
+                )}
+                {objectionNoteMissing && (
+                  <p className="text-xs text-rose-600 mt-1">
+                    "Other" on its own tells you nothing later. Say what it was.
+                  </p>
+                )}
               </div>
-              {objection && (
-                <input
-                  value={objectionNote}
-                  onChange={(e) => setObjectionNote(e.target.value)}
-                  placeholder={
-                    objectionNeedsNote(objection)
-                      ? "Required — what was it, in their words?"
-                      : "Detail (optional) — what exactly did they say?"
-                  }
-                  className={`${inputCls} mt-2 ${
-                    objectionNoteMissing ? "border-rose-400 ring-1 ring-rose-300" : ""
-                  }`}
-                />
-              )}
-              {objectionNoteMissing && (
-                <p className="text-xs text-rose-600 mt-1">
-                  "Other" on its own tells you nothing later. Say what it was.
-                </p>
-              )}
-            </Field>
-          )}
+            )}
 
-          {outcome === "blocked" && (
-            <>
-              <Field label="What's blocking them?">
+            {outcome === "blocked" && (
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  What's blocking them?
+                </label>
                 <div className="flex flex-wrap gap-2">
                   {BLOCKER_TYPES.map((b) => (
                     <Choice key={b} active={blockerType === b} onClick={() => setBlockerType(b)}>
@@ -314,42 +308,47 @@ export function CheckInModal({
                     </Choice>
                   ))}
                 </div>
-              </Field>
-              <Field label="Blocker detail">
                 <input
                   value={blockerNote}
                   onChange={(e) => setBlockerNote(e.target.value)}
-                  placeholder="e.g. waiting on their tech team to sign off"
-                  className={inputCls}
+                  placeholder="Detail — e.g. waiting on their tech team to sign off"
+                  className={`${inputCls} mt-2`}
                 />
-              </Field>
-            </>
-          )}
+              </div>
+            )}
 
-          {outcome === "closed_won" && (
-            <>
-              <Field label="Deal value (₹) — this is the floor, not the finish line">
-                <input
-                  type="number"
-                  value={dealValue}
-                  onChange={(e) => setDealValue(e.target.value)}
-                  className={inputCls}
-                />
-              </Field>
-              <Field label="When should they buy again?">
-                <input
-                  type="datetime-local"
-                  value={nextPurchaseDue}
-                  onChange={(e) => setNextPurchaseDue(e.target.value)}
-                  className={inputCls}
-                />
-              </Field>
-            </>
-          )}
+            {outcome === "closed_won" && (
+              <div className="mt-4 grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                    Deal value (₹) — the floor, not the finish
+                  </label>
+                  <input
+                    type="number"
+                    value={dealValue}
+                    onChange={(e) => setDealValue(e.target.value)}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                    When should they buy again?
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={nextPurchaseDue}
+                    onChange={(e) => setNextPurchaseDue(e.target.value)}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+            )}
 
-          {outcome === "closed_lost" && (
-            <>
-              <Field label="Why? (required)">
+            {outcome === "closed_lost" && (
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  Why? (required)
+                </label>
                 <div className="grid grid-cols-2 gap-2">
                   {LOST_REASONS.map((r) => (
                     <Choice key={r} active={lostReason === r} onClick={() => setLostReason(r)}>
@@ -357,109 +356,172 @@ export function CheckInModal({
                     </Choice>
                   ))}
                 </div>
-              </Field>
-              {lostReason === "competitor_contract" && (
-                <Field label="When does their contract expire? The window reopens then.">
+                {lostReason === "competitor_contract" && (
                   <input
                     type="datetime-local"
                     value={competitorExpiry}
                     onChange={(e) => setCompetitorExpiry(e.target.value)}
-                    className={inputCls}
+                    className={`${inputCls} mt-2`}
+                    placeholder="When does their contract expire?"
                   />
-                </Field>
-              )}
-              <Field
-                label={
-                  lostReasonNeedsNote(lostReason)
-                    ? lostReason === "tool_gap"
-                      ? "What was missing from the tool? (required)"
-                      : "What was the reason, in their words? (required)"
-                    : "Their feedback — what would have changed this? (required)"
-                }
-              >
+                )}
                 <textarea
                   value={lostFeedback}
                   onChange={(e) => setLostFeedback(e.target.value)}
                   rows={2}
-                  placeholder="This is the only thing that tells you how to win the next one."
-                  className={inputCls}
+                  placeholder={
+                    lostReasonNeedsNote(lostReason)
+                      ? "Required — what was it, in their words?"
+                      : "Their feedback — what would have changed this? (required)"
+                  }
+                  className={`${inputCls} mt-2`}
                 />
-              </Field>
-            </>
-          )}
+              </div>
+            )}
+          </>
+        )}
 
-          <ConfirmStage
-            current={company.stage}
-            suggested={suggestedStage}
-            value={stageChoice}
-            onChange={setStageChoice}
-          />
-
-          <Field label="Temperature now">
-            <div className="flex gap-2">
-              {TEMPERATURES.map((t) => (
-                <Choice
-                  key={t}
-                  active={temperature === t}
-                  onClick={() => {
-                    setTempTouched(true);
-                    setTemperature(t);
-                  }}
-                >
-                  {t}
-                </Choice>
-              ))}
-            </div>
-          </Field>
-
-          <Field label="Notes">
+        {current.key === "context" && (
+          <>
+            <p className="text-base font-semibold text-gray-900 mb-3">
+              What did they say? How did it feel?
+            </p>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              placeholder="What did they actually say?"
+              rows={4}
+              placeholder="Their tone, exactly what they asked for, anything worth remembering next time…"
               className={inputCls}
             />
-          </Field>
-        </>
-      )}
+            {reached && (
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  Temperature now
+                </label>
+                <div className="flex gap-2">
+                  {TEMPERATURES.map((t) => (
+                    <Choice
+                      key={t}
+                      active={temperature === t}
+                      onClick={() => {
+                        setTempTouched(true);
+                        setTemperature(t);
+                      }}
+                    >
+                      {t}
+                    </Choice>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
 
-      {method !== null && (
-        <Field label="Next action">
-          <input
-            type="datetime-local"
-            value={nextAt}
-            onChange={(e) => setNextAt(e.target.value)}
-            className={inputCls}
-          />
-          <input
-            value={nextReason}
-            onChange={(e) => setNextReason(e.target.value)}
-            placeholder="Why are we calling them then?"
-            className={inputCls + " mt-2"}
-          />
-          <p className="text-xs text-gray-400 mt-1">Suggested by rule — change it freely.</p>
-        </Field>
-      )}
+        {current.key === "stage" && (
+          <>
+            <p className="text-base font-semibold text-gray-900 mb-3">Where are they now?</p>
+            <ConfirmStage
+              current={company.stage}
+              suggested={suggestedStage}
+              value={stageChoice}
+              onChange={setStageChoice}
+            />
+          </>
+        )}
 
-      {lostIncomplete && (
-        <p className="text-xs text-rose-600 mb-3">
-          A no needs a reason and feedback. That's the whole point of asking.
-        </p>
-      )}
-
-      <div className="flex justify-end gap-2 pt-2">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
-          Cancel
-        </button>
-        <button
-          disabled={!canSave || saving}
-          onClick={save}
-          className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium disabled:opacity-40"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+        {current.key === "next" && (
+          <>
+            <p className="text-base font-semibold text-gray-900 mb-3">When do you reach back?</p>
+            {!reached && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {method === "no_answer" && (
+                  <>
+                    <Choice onClick={() => quick(addMinutes(new Date(), 30), "Retry — no answer")}>
+                      30 min
+                    </Choice>
+                    <Choice onClick={() => quick(addHours(new Date(), 1), "Retry — no answer")}>
+                      1 hr
+                    </Choice>
+                  </>
+                )}
+                <Choice
+                  onClick={() =>
+                    quick(
+                      addDays(new Date(), 1),
+                      method === "no_show" ? "No-showed the meet — reschedule" : "Retry — no answer"
+                    )
+                  }
+                >
+                  Tomorrow
+                </Choice>
+                <Choice
+                  onClick={() =>
+                    quick(
+                      addDays(new Date(), 3),
+                      method === "no_show" ? "No-showed the meet — reschedule" : "Retry — no answer"
+                    )
+                  }
+                >
+                  In 3 days
+                </Choice>
+              </div>
+            )}
+            <input
+              type="datetime-local"
+              value={nextAt}
+              onChange={(e) => setNextAt(e.target.value)}
+              className={inputCls}
+            />
+            <input
+              value={nextReason}
+              onChange={(e) => setNextReason(e.target.value)}
+              placeholder="Why then? (suggested from the call — change freely)"
+              className={inputCls + " mt-2"}
+            />
+          </>
+        )}
       </div>
+
+      <div className="flex items-center justify-between gap-2 pt-4 mt-2 border-t border-gray-100">
+        <button
+          onClick={clampedStep === 0 ? onClose : () => setStep(clampedStep - 1)}
+          className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
+        >
+          {clampedStep === 0 ? "Cancel" : "← Back"}
+        </button>
+        {isLast ? (
+          <button
+            disabled={!canSave || saving}
+            onClick={save}
+            className="px-5 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium disabled:opacity-40"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        ) : (
+          <button
+            disabled={!current.canNext}
+            onClick={() => setStep(clampedStep + 1)}
+            className="px-5 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium disabled:opacity-40"
+          >
+            Next →
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  if (variant === "inline") {
+    return <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">{body}</div>;
+  }
+
+  return (
+    <Shell
+      title={`${method === "meet" ? "Log meet" : method === "no_show" ? "Log no-show" : "Log call"} — ${
+        company.name
+      }`}
+      onClose={onClose}
+    >
+      {body}
     </Shell>
   );
 }

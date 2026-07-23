@@ -149,6 +149,37 @@ export function Choice({
 }
 
 /**
+ * A slim progress row for the guided log wizard: filled pills for done/current
+ * steps, hollow for the ones ahead, and a "Step N of M — label" line. Purely
+ * visual; the parent owns which step is active.
+ */
+export function Stepper({
+  labels,
+  current,
+}: {
+  labels: string[];
+  current: number;
+}) {
+  return (
+    <div className="mb-4">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        {labels.map((_, i) => (
+          <span
+            key={i}
+            className={`h-1.5 rounded-full flex-1 transition-colors ${
+              i <= current ? "bg-violet-500" : "bg-gray-200"
+            }`}
+          />
+        ))}
+      </div>
+      <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
+        Step {current + 1} of {labels.length} — {labels[current]}
+      </p>
+    </div>
+  );
+}
+
+/**
  * The suggest-and-confirm stage control. A rule proposes a stage; this shows it
  * as a one-tap confirm ("Move to X") sitting next to "Keep as Y". Nothing moves
  * until the user picks. `value` is what will be saved: `suggested` while the
