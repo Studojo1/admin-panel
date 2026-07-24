@@ -47,6 +47,7 @@ import {
   formatDateTime,
   formatValue,
   isLaterToday,
+  isOnTodaysList,
   isOverdue,
   logSentence,
   toLocalInputValue,
@@ -311,7 +312,7 @@ export default function B2BGtm() {
           <div className="flex gap-2 shrink-0">
             <button
               onClick={() => setAdding(true)}
-              title="New companies enter Pre-GTM as Vivaan's, then get handed to you"
+              title="New companies enter Pre-GTM as Vivaan's, then get handed to Pranav"
               className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium border-2 border-neutral-900 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all"
             >
               + Add to Pre-GTM
@@ -709,7 +710,7 @@ function PersonHeader({
       {inbox.length > 0 && (
         <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
           <p className="text-[11px] font-semibold text-violet-800 uppercase tracking-wide mb-2">
-            Just handed to you ({inbox.length}) — pick these up first
+            Just handed to {label} ({inbox.length}) — pick these up first
           </p>
           <div className="flex flex-wrap gap-2">
             {inbox.map((c) => (
@@ -783,20 +784,37 @@ function Row({
   const exited = EXITED_STAGES.includes(c.stage);
   const quiet = daysSince(c.last_log?.called_at ?? c.updated_at, now);
   const stale = (isAccount || c.stage === "gtm_active") && quiet !== null && quiet > STALE_ACCOUNT_DAYS;
+  // They asked us to call them back — a promise to keep, flag it loudly.
+  const callback = !exited && c.last_log?.outcome === "asked_callback";
+  // Due today (overdue or scheduled later today).
+  const dueToday = !exited && isOnTodaysList(c.next_action_at, now);
+
+  // Row accent: callback (amber) is the loudest, then today (violet).
+  const rowAccent = callback
+    ? "border-l-4 border-l-amber-500 bg-amber-50/40"
+    : dueToday
+    ? "border-l-4 border-l-violet-500 bg-violet-50/30"
+    : "";
 
   return (
     <>
       <tr
         onClick={onToggle}
-        className={`cursor-pointer hover:bg-gray-50 ${expanded ? "bg-gray-50" : ""} ${
-          overdue ? "border-l-4 border-l-violet-500" : ""
-        }`}
+        className={`cursor-pointer hover:bg-gray-50 ${expanded ? "bg-gray-50" : ""} ${rowAccent}`}
       >
         <td className="px-3 py-2.5 text-gray-400 w-6">{expanded ? "▾" : "▸"}</td>
         <td className="px-3 py-2.5 text-gray-400 tabular-nums text-xs w-8">{serial}</td>
         <td className="px-3 py-2.5 font-medium text-gray-900 whitespace-nowrap">
           <div className="flex items-center gap-1.5">
             {c.name}
+            {callback && (
+              <span
+                className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shrink-0"
+                title="They asked us to call them back"
+              >
+                ⏱ Callback
+              </span>
+            )}
             {activeFlags(c).map((f) => (
               <span
                 key={f.key}
@@ -810,9 +828,9 @@ function Row({
             {c.needs_my_followup && (
               <span
                 className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700 border border-violet-200 shrink-0"
-                title={c.my_followup_note || "I need to follow up"}
+                title={c.my_followup_note || "Needs a follow-up"}
               >
-                My follow-up
+                Follow-up
               </span>
             )}
           </div>
@@ -953,7 +971,7 @@ function ActionBar({
     branch === "pre_gtm"
       ? "Vivaan's lead — what's the move?"
       : branch === "mine_active"
-      ? "Your call: push it forward or let it go?"
+      ? "Push it forward or let it go?"
       : branch === "buy_decision"
       ? "In the buy decision — log how it's going."
       : branch === "blocked"
@@ -1070,7 +1088,7 @@ function ActionBar({
                   {roleForCompany(c) === "Deal"
                     ? "Hand to Ayushi to close →"
                     : roleForCompany(c) === "Vivaan"
-                    ? "Hand to me →"
+                    ? "Hand to Pranav →"
                     : "Push to buy decision →"}
                 </button>
               )}
@@ -1102,9 +1120,96 @@ function ActionBar({
                 No notes yet — log a call to start the history.
               </p>
             )}
+
+            <NextActionEditor c={c} onSaved={onSaved} />
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Edit the next action straight from the expanded row — change the date/reason
+ * or clear it entirely (for companies where the ball's in their court and no
+ * date makes sense). Saves via PATCH without needing to log a full call.
+ */
+function NextActionEditor({ c, onSaved }: { c: Company; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState(c.next_action_at ? toLocalInputValue(new Date(c.next_action_at)) : "");
+  const [reason, setReason] = useState(c.next_action_reason ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async (clear = false) => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=company", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: c.id,
+          fields: {
+            next_action_at: clear || !at ? null : new Date(at).toISOString(),
+            next_action_reason: clear ? reason || "Waiting on them — no date set" : reason,
+          },
+        }),
+      });
+      toast.success(clear || !at ? "Next action cleared" : "Next action updated");
+      setOpen(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-2 text-xs text-violet-600 hover:underline font-medium"
+      >
+        {c.next_action_at ? "Edit next action" : "Set next action"}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
+      <input
+        type="datetime-local"
+        value={at}
+        onChange={(e) => setAt(e.target.value)}
+        className={inputCls}
+      />
+      <input
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Why? (or why there's no date)"
+        className={`${inputCls} mt-1.5`}
+      />
+      <div className="flex items-center justify-between mt-1.5">
+        <button
+          onClick={() => save(true)}
+          disabled={saving}
+          className="text-xs text-rose-600 hover:underline"
+          title="Waiting on them — no follow-up date"
+        >
+          Clear date
+        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setOpen(false)} className="text-xs text-gray-500">
+            Cancel
+          </button>
+          <button
+            onClick={() => save(false)}
+            disabled={saving}
+            className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1126,7 +1231,7 @@ function OwnerPicker({ c, onSaved }: { c: Company; onSaved: () => void }) {
         method: "PATCH",
         body: JSON.stringify({ id: c.id, fields: { owner: value } }),
       });
-      toast.success(value ? `Assigned to ${value}` : "Assigned to you");
+      toast.success(`Assigned to ${value || "Pranav"}`);
       onSaved();
     } catch (e: any) {
       toast.error(e.message);
@@ -1146,7 +1251,7 @@ function OwnerPicker({ c, onSaved }: { c: Company; onSaved: () => void }) {
           : "bg-white text-gray-400 border-gray-200"
       }`}
     >
-      <option value="">Me</option>
+      <option value="">Pranav</option>
       {TEAM.map((t) => (
         <option key={t} value={t}>
           {t}
@@ -1228,7 +1333,7 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
     <Shell title="Vivaan — add a company" onClose={onClose}>
       <p className="text-sm text-gray-500 mb-4">
         Cold-called them and made a WhatsApp group? Drop them in here with what you learned. It lands
-        in Pre-GTM as yours, briefed and ready to hand to Pranav.
+        in Pre-GTM as Vivaan's, briefed and ready to hand to Pranav.
       </p>
 
       <Field label="Company">

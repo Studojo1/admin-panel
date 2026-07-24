@@ -642,7 +642,7 @@ export const TEAM = ["Vivaan", "Jeremy", "Hegde", "Ayushi"] as const;
  */
 export const PIPELINE: { owner: string; label: string; does: string }[] = [
   { owner: "Vivaan", label: "Vivaan", does: "Cold calls" },
-  { owner: "", label: "Me", does: "Warm, no-response, buy decisions" },
+  { owner: "", label: "Pranav", does: "Warm, no-response, buy decisions" },
   { owner: "Jeremy", label: "Jeremy", does: "Works the deal" },
   { owner: "Hegde", label: "Hegde", does: "Works the deal" },
   { owner: "Ayushi", label: "Ayushi", does: "Closes" },
@@ -680,7 +680,7 @@ export type Role = "Vivaan" | "Me" | "Deal" | "Ayushi";
  */
 export const TEAM_SLUGS: { slug: string; owner: string; label: string }[] = [
   { slug: "vivaan", owner: "Vivaan", label: "Vivaan" },
-  { slug: "me", owner: "", label: "Me" },
+  { slug: "me", owner: "", label: "Pranav" },
   { slug: "jeremy", owner: "Jeremy", label: "Jeremy" },
   { slug: "hegde", owner: "Hegde", label: "Hegde" },
   { slug: "ayushi", owner: "Ayushi", label: "Ayushi" },
@@ -701,7 +701,7 @@ export function slugForOwner(owner: string | null | undefined): string {
 
 export const ROLES: { role: Role; owners: string[]; label: string; does: string }[] = [
   { role: "Vivaan", owners: ["Vivaan"], label: "Vivaan", does: "Cold calls & qualifies" },
-  { role: "Me", owners: [""], label: "Me", does: "Force a decision or exit" },
+  { role: "Me", owners: [""], label: "Pranav", does: "Force a decision or exit" },
   { role: "Deal", owners: ["Jeremy", "Hegde"], label: "Jeremy / Hegde", does: "Demo & work the deal" },
   { role: "Ayushi", owners: ["Ayushi"], label: "Ayushi", does: "Closing & all follow-ups" },
 ];
@@ -746,10 +746,10 @@ export function nextRelayStep(c: Company): { owner: string; stage: Stage; reason
   const role = roleForCompany(c);
   switch (role) {
     case "Vivaan":
-      // Qualified → hand to me to force the decision.
-      return { owner: "", stage: "gtm_active", reason: "Qualified — over to me to push or exit" };
+      // Qualified → hand to Pranav to force the decision.
+      return { owner: "", stage: "gtm_active", reason: "Qualified — over to Pranav to push or exit" };
     case "Me":
-      // I push it into the deal team for the demo.
+      // Pranav pushes it into the deal team for the demo.
       return { owner: "Jeremy", stage: "negotiating", reason: "Push to buy decision — demo it" };
     case "Deal":
       // After the demo, closing + follow-ups are Ayushi's.
@@ -769,8 +769,13 @@ export function followupOwnerFor(c: Company): string {
   return demoHasHappened(c) ? "Ayushi" : "";
 }
 
+/**
+ * The display name for an owner. The empty-owner slot belongs to Pranav — this
+ * is a shared team board, so "Me" would be ambiguous to everyone else. Only the
+ * label changes; the stored value stays "" (empty) for Pranav-owned rows.
+ */
 export function ownerLabel(owner: string | null | undefined): string {
-  return owner && owner.trim() ? owner : "Me";
+  return owner && owner.trim() ? owner : "Pranav";
 }
 
 /** An account that has gone quiet this long needs attention regardless of its next action. */
@@ -845,7 +850,7 @@ export type ViewKey =
 export const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "today", label: "Today" },
-  { key: "my_followups", label: "My follow-ups" },
+  { key: "my_followups", label: "Follow-ups" },
   { key: "pre_gtm", label: "Pre-GTM" },
   { key: "working", label: "Working" },
   { key: "blocked", label: "Blocked" },

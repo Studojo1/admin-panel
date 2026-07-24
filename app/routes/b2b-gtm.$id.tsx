@@ -274,7 +274,7 @@ function CompanyBody({
             <p className="text-sm mt-0.5 text-gray-600">{company.lost_feedback}</p>
           )}
           <p className="text-xs text-gray-500 mt-1">
-            Bring them back any time — they'll return to GTM active as yours.
+            Bring them back any time — they'll return to GTM active as Pranav's.
           </p>
         </div>
       ) : (
@@ -842,7 +842,7 @@ function EditPanel({
       <Field label="Who's handling it">
         <div className="flex flex-wrap gap-1.5">
           <Choice active={!owner} onClick={() => setOwner("")}>
-            Me
+            Pranav
           </Choice>
           {TEAM.map((t) => (
             <Choice key={t} active={owner === t} onClick={() => setOwner(t)}>

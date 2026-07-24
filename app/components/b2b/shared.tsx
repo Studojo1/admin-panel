@@ -343,7 +343,7 @@ export function ReactivateModal({
   return (
     <Shell title={`Bring back — ${company.name}`} onClose={onClose}>
       <p className="text-sm text-gray-500 mb-4">
-        They'll return to GTM active, unowned (yours again). Set the first thing to do so they don't
+        They'll return to GTM active, unowned (Pranav's again). Set the first thing to do so they don't
         stall.
       </p>
       <Field label="When do we pick this up?">
