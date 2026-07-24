@@ -867,6 +867,11 @@ function ActionBar({
   const logLabel =
     branch === "buy_decision" ? "Log demo / call" : branch === "account" ? "Log a touch" : "Log a call";
 
+  // Where we left off — the most recent note, shown next to the actions so the
+  // otherwise-empty space carries context.
+  const lastNote = c.last_log?.note || c.notes;
+  const lastWhen = c.last_log?.called_at;
+
   return (
     <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
       <p className="text-[11px] font-semibold text-violet-800 uppercase tracking-wide mb-2">
@@ -896,50 +901,72 @@ function ActionBar({
           Bring back to pipeline
         </button>
       ) : (
-        <>
-          <div className="flex flex-wrap gap-2">
-            {/* Log an interaction — the common move — first and boldest. */}
-            <button
-              onClick={onLog}
-              className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700"
-            >
-              {logLabel}
-            </button>
-            {/* The only way to the full page. */}
-            <Link
-              to={`/b2b-gtm/${c.id}`}
-              className="px-4 py-2 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
-            >
-              Study past interactions →
-            </Link>
-            {/* Relay advance — hand to the next person. Confirmed by tapping,
-                never automatic. Remove-from-pipeline lives on the full page. */}
-            {relay && (
+        <div className="flex gap-4 items-start">
+          {/* Actions on the left. */}
+          <div className="shrink-0">
+            <div className="flex flex-wrap gap-2">
+              {/* Log an interaction — the common move — first and boldest. */}
               <button
-                disabled={busy}
-                onClick={() =>
-                  relayNeedsChoice
-                    ? setHanding(true)
-                    : advance(relay.owner, relay.stage, relay.reason)
-                }
-                className="px-4 py-2 rounded-xl bg-white text-violet-700 text-sm font-medium border border-violet-300 hover:border-violet-400 disabled:opacity-40"
-                title={relay.reason}
+                onClick={onLog}
+                className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700"
               >
-                {roleForCompany(c) === "Deal"
-                  ? "Hand to Ayushi to close →"
-                  : roleForCompany(c) === "Vivaan"
-                  ? "Hand to me →"
-                  : "Push to buy decision →"}
+                {logLabel}
               </button>
+              {/* The only way to the full page. */}
+              <Link
+                to={`/b2b-gtm/${c.id}`}
+                className="px-4 py-2 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
+              >
+                Study past interactions →
+              </Link>
+              {/* Relay advance — hand to the next person. Confirmed by tapping,
+                  never automatic. Remove-from-pipeline lives on the full page. */}
+              {relay && (
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    relayNeedsChoice
+                      ? setHanding(true)
+                      : advance(relay.owner, relay.stage, relay.reason)
+                  }
+                  className="px-4 py-2 rounded-xl bg-white text-violet-700 text-sm font-medium border border-violet-300 hover:border-violet-400 disabled:opacity-40"
+                  title={relay.reason}
+                >
+                  {roleForCompany(c) === "Deal"
+                    ? "Hand to Ayushi to close →"
+                    : roleForCompany(c) === "Vivaan"
+                    ? "Hand to me →"
+                    : "Push to buy decision →"}
+                </button>
+              )}
+            </div>
+            <button
+              onClick={onContactChange}
+              className="mt-2 text-xs text-sky-700 hover:underline font-medium"
+            >
+              Contact changed?
+            </button>
+          </div>
+
+          {/* Where we left off — fills the space next to the actions. */}
+          <div className="flex-1 min-w-0 border-l border-violet-200 pl-4">
+            <p className="text-[11px] font-semibold text-violet-800 uppercase tracking-wide mb-1">
+              Where we left off
+              {lastWhen && (
+                <span className="ml-1.5 font-normal text-violet-500 normal-case">
+                  · {formatDateTime(lastWhen)}
+                </span>
+              )}
+            </p>
+            {lastNote ? (
+              <p className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-4">{lastNote}</p>
+            ) : (
+              <p className="text-sm text-gray-400">
+                No notes yet — log a call to start the history.
+              </p>
             )}
           </div>
-          <button
-            onClick={onContactChange}
-            className="mt-2 text-xs text-sky-700 hover:underline font-medium"
-          >
-            Contact changed?
-          </button>
-        </>
+        </div>
       )}
     </div>
   );
