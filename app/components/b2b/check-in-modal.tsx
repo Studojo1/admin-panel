@@ -168,7 +168,7 @@ export function CheckInModal({
           },
         ]
       : []),
-    { key: "context", title: "Anything they said?", canNext: true },
+    { key: "context", title: reached ? "Anything they said?" : "Note for next time?", canNext: true },
     ...(reached ? [{ key: "asks", title: "Did they ask for anything?", canNext: true }] : []),
     ...(stageStepNeeded ? [{ key: "stage", title: "Where are they now?", canNext: true }] : []),
     { key: "next", title: "When do you reach back?", canNext: !!nextAt },
@@ -405,13 +405,17 @@ export function CheckInModal({
         {current.key === "context" && (
           <>
             <p className="text-base font-semibold text-gray-900 mb-3">
-              What did they say? How did it feel?
+              {reached ? "What did they say? How did it feel?" : "Any note for next time? (optional)"}
             </p>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              rows={4}
-              placeholder="Their tone, exactly what they asked for, anything worth remembering next time…"
+              rows={reached ? 4 : 2}
+              placeholder={
+                reached
+                  ? "Their tone, exactly what they asked for, anything worth remembering next time…"
+                  : "e.g. rang out twice — try WhatsApp, or call after 6pm"
+              }
               className={inputCls}
             />
             {reached && (
