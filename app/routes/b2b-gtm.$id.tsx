@@ -35,6 +35,7 @@ import {
   toLocalInputValue,
   type CallLog,
   type Company,
+  type Contact,
   type Stage,
 } from "~/lib/b2b-gtm";
 
@@ -179,6 +180,8 @@ function CompanyBody({
   const exited = EXITED_STAGES.includes(company.stage);
   const quiet = daysSince(logs[0]?.called_at ?? company.updated_at, now);
   const stale = isAccount && quiet !== null && quiet > STALE_ACCOUNT_DAYS;
+  // Last time we actually reached out — most recent call/meet (not a note).
+  const lastReached = logs.find((l) => l.kind === "call" || l.kind === "meet")?.called_at ?? null;
   const overdue = isOverdue(company.next_action_at, now);
   const activeContacts = (company.contacts || []).filter((c) => !c.is_inactive);
   const pastContacts = (company.contacts || []).filter((c) => c.is_inactive);
@@ -218,6 +221,11 @@ function CompanyBody({
                 Quiet {quiet}d
               </span>
             )}
+            <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+              {lastReached
+                ? `Last reached ${formatDateTime(lastReached)}`
+                : "Not reached yet"}
+            </span>
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -395,42 +403,12 @@ function CompanyBody({
         </div>
 
         <div className="space-y-5">
-          <Panel title="Contacts">
-            {activeContacts.length === 0 && (
-              <p className="text-sm text-gray-400">No active contact.</p>
-            )}
-            {activeContacts.map((c) => (
-              <div key={c.id} className="mb-2 last:mb-0">
-                <p className="text-sm font-medium text-gray-900">
-                  {c.name || "Unnamed"}
-                  {c.is_primary && (
-                    <span className="ml-2 text-[10px] uppercase tracking-wide text-violet-600">
-                      primary
-                    </span>
-                  )}
-                </p>
-                {c.role && <p className="text-xs text-gray-500">{c.role}</p>}
-                {c.phone && (
-                  <a href={`tel:${c.phone}`} className="text-xs text-violet-600 hover:underline">
-                    {c.phone}
-                  </a>
-                )}
-              </div>
-            ))}
-            {pastContacts.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-gray-200">
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">
-                  Past contacts
-                </p>
-                {pastContacts.map((c) => (
-                  <div key={c.id} className="mb-1.5">
-                    <p className="text-sm text-gray-400 line-through">{c.name || c.phone}</p>
-                    {c.left_note && <p className="text-xs text-gray-400">{c.left_note}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Panel>
+          <ContactsPanel
+            companyId={company.id}
+            activeContacts={activeContacts}
+            pastContacts={pastContacts}
+            onSaved={onReload}
+          />
 
           {isAccount && (
             <Panel title="Account">
@@ -524,6 +502,177 @@ function NoteComposer({ companyId, onSaved }: { companyId: number; onSaved: () =
           className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
         >
           {saving ? "Adding…" : "Add note"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Contacts, editable. Each active contact's name / phone / role can be fixed
+ * inline, and "+ Add person" adds another stakeholder alongside (distinct from
+ * "Contact changed", which retires the old one). Past contacts stay for history.
+ */
+function ContactsPanel({
+  companyId,
+  activeContacts,
+  pastContacts,
+  onSaved,
+}: {
+  companyId: number;
+  activeContacts: Contact[];
+  pastContacts: Contact[];
+  onSaved: () => void;
+}) {
+  return (
+    <Panel title="Contacts">
+      {activeContacts.length === 0 && <p className="text-sm text-gray-400 mb-2">No active contact.</p>}
+      {activeContacts.map((c) => (
+        <ContactRow key={c.id} contact={c} onSaved={onSaved} />
+      ))}
+
+      <AddPerson companyId={companyId} onSaved={onSaved} />
+
+      {pastContacts.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-200">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">
+            Past contacts
+          </p>
+          {pastContacts.map((c) => (
+            <div key={c.id} className="mb-1.5">
+              <p className="text-sm text-gray-400 line-through">{c.name || c.phone}</p>
+              {c.left_note && <p className="text-xs text-gray-400">{c.left_note}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/** One contact, view mode by default, inline edit on tap. */
+function ContactRow({ contact, onSaved }: { contact: Contact; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(contact.name ?? "");
+  const [phone, setPhone] = useState(contact.phone ?? "");
+  const [role, setRole] = useState(contact.role ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=contact", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: contact.id,
+          fields: { name: name.trim(), phone: phone.trim(), role: role.trim() },
+        }),
+      });
+      toast.success("Contact updated");
+      setEditing(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
+        <div className="grid grid-cols-2 gap-1.5">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={inputCls} />
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" className={inputCls} />
+        </div>
+        <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role (optional)" className={`${inputCls} mt-1.5`} />
+        <div className="flex justify-end gap-2 mt-1.5">
+          <button onClick={() => setEditing(false)} className="text-xs text-gray-500">Cancel</button>
+          <button disabled={saving} onClick={save} className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40">
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-2 last:mb-0 flex items-start justify-between gap-2 group">
+      <div>
+        <p className="text-sm font-medium text-gray-900">
+          {contact.name || "Unnamed"}
+          {contact.is_primary && (
+            <span className="ml-2 text-[10px] uppercase tracking-wide text-violet-600">primary</span>
+          )}
+        </p>
+        {contact.role && <p className="text-xs text-gray-500">{contact.role}</p>}
+        {contact.phone ? (
+          <a href={`tel:${contact.phone}`} className="text-xs text-violet-600 hover:underline">
+            {contact.phone}
+          </a>
+        ) : (
+          <span className="text-xs text-rose-500">No phone</span>
+        )}
+      </div>
+      <button
+        onClick={() => setEditing(true)}
+        className="text-xs text-gray-400 hover:text-gray-700 shrink-0"
+      >
+        Edit
+      </button>
+    </div>
+  );
+}
+
+/** Add another stakeholder at this company. */
+function AddPerson({ companyId, onSaved }: { companyId: number; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [role, setRole] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=contact", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyId,
+          name: name.trim() || null,
+          phone: phone.trim() || null,
+          role: role.trim() || null,
+        }),
+      });
+      toast.success("Person added");
+      setName(""); setPhone(""); setRole(""); setOpen(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="mt-1 text-xs text-violet-600 hover:underline font-medium">
+        + Add person
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
+      <div className="grid grid-cols-2 gap-1.5">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={inputCls} />
+        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" className={inputCls} />
+      </div>
+      <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role (optional)" className={`${inputCls} mt-1.5`} />
+      <div className="flex justify-end gap-2 mt-1.5">
+        <button onClick={() => setOpen(false)} className="text-xs text-gray-500">Cancel</button>
+        <button disabled={saving || (!name.trim() && !phone.trim())} onClick={save} className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40">
+          {saving ? "Adding…" : "Add"}
         </button>
       </div>
     </div>

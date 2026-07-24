@@ -333,6 +333,8 @@ export interface Company {
   updated_at: string;
   contacts?: Contact[];
   last_log?: CallLog | null;
+  /** Last time we actually reached out — a call/meet/WhatsApp, not a note. */
+  last_reached_at?: string | null;
 }
 
 export interface Contact {
