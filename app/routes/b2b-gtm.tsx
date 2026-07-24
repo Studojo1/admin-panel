@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { AdminHeader } from "~/components";
 import { useModal } from "~/components/common/modal-context";
@@ -32,8 +32,10 @@ import {
   matchesOwnerView,
   mcqBranchFor,
   nextRelayStep,
+  ownerForSlug,
   ownerLabel,
   roleForCompany,
+  slugForOwner,
   TEMPERATURES,
   VIEWS,
   WON_STAGES,
@@ -112,13 +114,17 @@ interface ObjectionStat {
 export default function B2BGtm() {
   const { isAuthorized, isPending } = useAdminGuard();
   const { showConfirm } = useModal();
+  const params = useParams();
+  // On /b2b-gtm/team/:who this is that person's owner string; null on the board.
+  const pageOwner = ownerForSlug(params.who);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [objectionStats, setObjectionStats] = useState<ObjectionStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Either a ViewKey, or "owner:<name>" for a teammate's sheet ("owner:" = mine).
-  const [view, setView] = useState<string>("overview");
+  // A per-person page opens straight onto that person's sheet.
+  const [view, setView] = useState<string>(pageOwner !== null ? `owner:${pageOwner}` : "overview");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [contactChange, setContactChange] = useState<Company | null>(null);
@@ -140,6 +146,11 @@ export default function B2BGtm() {
     return () => clearInterval(id);
   }, []);
   const now = useMemo(() => new Date(nowMs), [nowMs]);
+
+  // Follow the URL: navigating to another person's page switches the sheet.
+  useEffect(() => {
+    if (pageOwner !== null) setView(`owner:${pageOwner}`);
+  }, [pageOwner]);
 
   const load = useCallback(async () => {
     try {
@@ -377,8 +388,9 @@ export default function B2BGtm() {
             return (
               <span key={t.key} className="flex items-center gap-1.5">
                 {i > 0 && <span className="text-gray-300 text-xs">→</span>}
-                <button
-                  onClick={() => setView(t.key)}
+                {/* Each sheet is a real page you can bookmark / link to. */}
+                <Link
+                  to={`/b2b-gtm/team/${slugForOwner(t.owner)}`}
                   title={t.does}
                   className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
                     active
@@ -395,7 +407,7 @@ export default function B2BGtm() {
                       {due}
                     </span>
                   )}
-                </button>
+                </Link>
               </span>
             );
           })}
@@ -568,6 +580,9 @@ function PersonHeader({
             {label}'s pipeline
           </h2>
           {role && <p className="text-xs text-gray-500 mt-0.5">{role.does}</p>}
+          <Link to="/b2b-gtm" className="text-[11px] text-violet-600 hover:underline">
+            ← Whole board
+          </Link>
         </div>
         <div className="flex items-center gap-4 text-sm">
           <div className="text-center">

@@ -47,6 +47,7 @@ export default [
   route("webinar-registrations", "routes/webinar-registrations.tsx"),
   route("api/webinar-registrations", "routes/api.webinar-registrations.tsx"),
   route("b2b-gtm", "routes/b2b-gtm.tsx"),
+  route("b2b-gtm/team/:who", "routes/b2b-gtm.team.$who.tsx"),
   route("b2b-gtm/:id", "routes/b2b-gtm.$id.tsx"),
   route("api/b2b-gtm", "routes/api.b2b-gtm.tsx"),
 ] satisfies RouteConfig;

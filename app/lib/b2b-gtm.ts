@@ -663,6 +663,31 @@ export function nextInPipeline(owner: string | null): string | null {
  */
 export type Role = "Vivaan" | "Me" | "Deal" | "Ayushi";
 
+/**
+ * URL slug ↔ owner string, for the per-person pages (/b2b-gtm/team/:who).
+ * "me" maps to the empty owner. Case-insensitive on the way in.
+ */
+export const TEAM_SLUGS: { slug: string; owner: string; label: string }[] = [
+  { slug: "vivaan", owner: "Vivaan", label: "Vivaan" },
+  { slug: "me", owner: "", label: "Me" },
+  { slug: "jeremy", owner: "Jeremy", label: "Jeremy" },
+  { slug: "hegde", owner: "Hegde", label: "Hegde" },
+  { slug: "ayushi", owner: "Ayushi", label: "Ayushi" },
+];
+
+/** Resolve a URL slug to an owner string. Returns null for an unknown slug. */
+export function ownerForSlug(slug: string | undefined): string | null {
+  if (!slug) return null;
+  const m = TEAM_SLUGS.find((t) => t.slug === slug.toLowerCase());
+  return m ? m.owner : null;
+}
+
+/** The slug for an owner string ("" = me → "me"). */
+export function slugForOwner(owner: string | null | undefined): string {
+  const o = (owner ?? "").trim();
+  return TEAM_SLUGS.find((t) => t.owner === o)?.slug ?? "me";
+}
+
 export const ROLES: { role: Role; owners: string[]; label: string; does: string }[] = [
   { role: "Vivaan", owners: ["Vivaan"], label: "Vivaan", does: "Cold calls & qualifies" },
   { role: "Me", owners: [""], label: "Me", does: "Force a decision or exit" },
