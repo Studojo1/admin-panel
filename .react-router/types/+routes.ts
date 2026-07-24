@@ -148,12 +148,23 @@ type Pages = {
   "/api/webinar-registrations": {
     params: {};
   };
+  "/b2b-gtm": {
+    params: {};
+  };
+  "/b2b-gtm/:id": {
+    params: {
+      "id": string;
+    };
+  };
+  "/api/b2b-gtm": {
+    params: {};
+  };
 };
 
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/login" | "/users" | "/funnel" | "/journeys" | "/daily" | "/api/dashboard" | "/api/overview" | "/api/paid-emails" | "/assignments" | "/dissertations" | "/outreach-orders" | "/campaign-health" | "/paid-users" | "/outreach-campaign" | "/outreach" | "/careers" | "/settings" | "/api/settings" | "/email-sequences" | "/chat-logs" | "/api/chat-logs" | "/ops-alerts" | "/api/ops-alerts" | "/api/ops-alerts/:id" | "/tickets" | "/tickets/:id" | "/api/tickets" | "/api/tickets/:id" | "/api/tickets/:id/messages" | "/consultation-signups" | "/api/consultation-signups" | "/analytics" | "/utm-builder" | "/api/utm-campaigns" | "/coupons" | "/api/coupons" | "/api/posthog" | "/api/analytics" | "/api/outreach" | "/career-coach" | "/webinar-registrations" | "/api/webinar-registrations";
+    page: "/" | "/login" | "/users" | "/funnel" | "/journeys" | "/daily" | "/api/dashboard" | "/api/overview" | "/api/paid-emails" | "/assignments" | "/dissertations" | "/outreach-orders" | "/campaign-health" | "/paid-users" | "/outreach-campaign" | "/outreach" | "/careers" | "/settings" | "/api/settings" | "/email-sequences" | "/chat-logs" | "/api/chat-logs" | "/ops-alerts" | "/api/ops-alerts" | "/api/ops-alerts/:id" | "/tickets" | "/tickets/:id" | "/api/tickets" | "/api/tickets/:id" | "/api/tickets/:id/messages" | "/consultation-signups" | "/api/consultation-signups" | "/analytics" | "/utm-builder" | "/api/utm-campaigns" | "/coupons" | "/api/coupons" | "/api/posthog" | "/api/analytics" | "/api/outreach" | "/career-coach" | "/webinar-registrations" | "/api/webinar-registrations" | "/b2b-gtm" | "/b2b-gtm/:id" | "/api/b2b-gtm";
   };
   "routes/dashboard.tsx": {
     id: "routes/dashboard";
@@ -327,6 +338,18 @@ type RouteFiles = {
     id: "routes/api.webinar-registrations";
     page: "/api/webinar-registrations";
   };
+  "routes/b2b-gtm.tsx": {
+    id: "routes/b2b-gtm";
+    page: "/b2b-gtm";
+  };
+  "routes/b2b-gtm.$id.tsx": {
+    id: "routes/b2b-gtm.$id";
+    page: "/b2b-gtm/:id";
+  };
+  "routes/api.b2b-gtm.tsx": {
+    id: "routes/api.b2b-gtm";
+    page: "/api/b2b-gtm";
+  };
 };
 
 type RouteModules = {
@@ -374,4 +397,7 @@ type RouteModules = {
   "routes/career-coach": typeof import("./app/routes/career-coach.tsx");
   "routes/webinar-registrations": typeof import("./app/routes/webinar-registrations.tsx");
   "routes/api.webinar-registrations": typeof import("./app/routes/api.webinar-registrations.tsx");
+  "routes/b2b-gtm": typeof import("./app/routes/b2b-gtm.tsx");
+  "routes/b2b-gtm.$id": typeof import("./app/routes/b2b-gtm.$id.tsx");
+  "routes/api.b2b-gtm": typeof import("./app/routes/api.b2b-gtm.tsx");
 };
