@@ -92,6 +92,18 @@ function relativeWhen(iso: string, now: Date): string {
   return `${dateStr} ${time}`;
 }
 
+/** "today" / "3d ago" / "on 12 Feb" — how long since we last reached out. */
+function agoLabel(iso: string | null | undefined, now: Date): string | null {
+  if (!iso) return null;
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const days = Math.round((startOf(now) - startOf(new Date(iso))) / dayMs);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days <= 30) return `${days}d ago`;
+  return "on " + new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+}
+
 interface Stats {
   total: number;
   due_now: number;
@@ -843,9 +855,12 @@ function Row({
           ) : (
             <span className="text-rose-600 font-medium">Not set</span>
           )}
-          {!exited && quiet !== null && quiet > 0 && (
-            <span className="block text-[10px] text-gray-400">
-              quiet {quiet}d{stale ? " · stale" : ""}
+          {!exited && (
+            <span className="block text-[10px] text-gray-400" title="When we last called / met / WhatsApp'd">
+              {c.last_reached_at
+                ? `last reached ${agoLabel(c.last_reached_at, now)}`
+                : "not reached yet"}
+              {stale ? " · stale" : ""}
             </span>
           )}
         </td>

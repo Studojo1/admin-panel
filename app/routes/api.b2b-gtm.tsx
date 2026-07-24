@@ -602,7 +602,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
-  const [companies, contacts, lastLogs, stats, objectionStats, activity] = await Promise.all([
+  const [companies, contacts, lastLogs, lastReached, stats, objectionStats, activity] =
+    await Promise.all([
     db.execute(sql`SELECT * FROM b2b_companies ORDER BY next_action_at ASC NULLS LAST, name ASC`),
     // Inactive contacts must never win the primary slot the cards read from.
     db.execute(sql`SELECT * FROM b2b_contacts ORDER BY is_inactive ASC, is_primary DESC, id ASC`),
@@ -611,6 +612,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       SELECT DISTINCT ON (company_id) *
       FROM b2b_call_logs
       ORDER BY company_id, called_at DESC
+    `),
+    // Last time we ACTUALLY reached out — a call, meet or WhatsApp (all logged
+    // as kind call/meet). Notes and handoffs don't count as reaching out.
+    db.execute(sql`
+      SELECT company_id, MAX(called_at) AS last_reached_at
+      FROM b2b_call_logs
+      WHERE kind IN ('call', 'meet')
+      GROUP BY company_id
     `),
     db.execute(sql`
       SELECT
@@ -689,10 +698,16 @@ export async function loader({ request }: Route.LoaderArgs) {
     lastLogByCompany.set(l.company_id, l);
   }
 
+  const lastReachedByCompany = new Map<number, string>();
+  for (const r of lastReached.rows as any[]) {
+    lastReachedByCompany.set(r.company_id, r.last_reached_at);
+  }
+
   const enriched = (companies.rows as any[]).map((c) => ({
     ...c,
     contacts: contactsByCompany.get(c.id) ?? [],
     last_log: lastLogByCompany.get(c.id) ?? null,
+    last_reached_at: lastReachedByCompany.get(c.id) ?? null,
   }));
 
   return Response.json({
@@ -965,6 +980,21 @@ export async function action({ request }: Route.ActionArgs) {
       body.role ?? null
     }, FALSE)
     `);
+    return Response.json({ ok: true });
+  }
+
+  // Edit an existing contact — fix a phone number, a name, a role. Field-by-field
+  // so a partial edit never blanks the rest.
+  if (request.method === "PATCH" && intent === "contact") {
+    const f = body.fields ?? {};
+    const sets = [];
+    if ("name" in f) sets.push(sql`name = ${f.name || null}`);
+    if ("phone" in f) sets.push(sql`phone = ${f.phone || null}`);
+    if ("role" in f) sets.push(sql`role = ${f.role || null}`);
+    if (sets.length === 0) return Response.json({ ok: true });
+    await db.execute(
+      sql`UPDATE b2b_contacts SET ${sql.join(sets, sql`, `)} WHERE id = ${body.id}`
+    );
     return Response.json({ ok: true });
   }
 
