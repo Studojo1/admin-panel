@@ -28,8 +28,12 @@ import {
   TEAM,
   TEAM_VIEWS,
   WORKING_BUCKETS,
+  ROLES,
   matchesOwnerView,
   mcqBranchFor,
+  nextRelayStep,
+  ownerLabel,
+  roleForCompany,
   TEMPERATURES,
   VIEWS,
   WON_STAGES,
@@ -397,6 +401,17 @@ export default function B2BGtm() {
           })}
         </div>
 
+        {/* A real page for the selected teammate: who they are, their load, and an
+            inbox of companies just handed to them (last event is a handoff). */}
+        {view.startsWith("owner:") && (
+          <PersonHeader
+            owner={view.slice(6)}
+            companies={companies}
+            now={now}
+            onOpen={(id) => setExpanded(id)}
+          />
+        )}
+
         <div className="flex items-center gap-3 mb-3">
           <input
             value={search}
@@ -513,6 +528,79 @@ export default function B2BGtm() {
             load();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The header for a teammate's page: who they are, what they do, their load, and
+ * an inbox of companies just handed to them — a company whose most recent event
+ * is a handoff (so it was passed to them and nothing's been logged since). Gives
+ * the relay a visible "new in your queue" surface.
+ */
+function PersonHeader({
+  owner,
+  companies,
+  now,
+  onOpen,
+}: {
+  owner: string;
+  companies: Company[];
+  now: Date;
+  onOpen: (id: number) => void;
+}) {
+  const label = ownerLabel(owner);
+  const role = ROLES.find((r) => r.owners.includes(owner));
+  const mine = companies.filter((c) => matchesOwnerView(c, owner));
+  const overdue = mine.filter((c) => isOverdue(c.next_action_at, now));
+  // Freshly handed to them: the latest event on the company is a handoff.
+  const inbox = mine.filter((c) => c.last_log?.kind === "handoff");
+
+  return (
+    <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2
+            className="text-lg font-bold text-gray-900"
+            style={{ fontFamily: "Clash Display, sans-serif" }}
+          >
+            {label}'s pipeline
+          </h2>
+          {role && <p className="text-xs text-gray-500 mt-0.5">{role.does}</p>}
+        </div>
+        <div className="flex items-center gap-4 text-sm">
+          <div className="text-center">
+            <p className="text-lg font-bold text-gray-900">{mine.length}</p>
+            <p className="text-[10px] uppercase tracking-wide text-gray-400">In queue</p>
+          </div>
+          <div className="text-center">
+            <p className={`text-lg font-bold ${overdue.length ? "text-violet-600" : "text-gray-900"}`}>
+              {overdue.length}
+            </p>
+            <p className="text-[10px] uppercase tracking-wide text-gray-400">Overdue</p>
+          </div>
+        </div>
+      </div>
+
+      {inbox.length > 0 && (
+        <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+          <p className="text-[11px] font-semibold text-violet-800 uppercase tracking-wide mb-2">
+            Just handed to you ({inbox.length}) — pick these up first
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {inbox.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => onOpen(c.id)}
+                className="px-2.5 py-1 rounded-lg bg-white border border-violet-300 text-sm text-violet-800 hover:border-violet-400"
+                title={c.last_log?.note || undefined}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -726,23 +814,28 @@ function ActionBar({
       ? "Lost — capture feedback or schedule the comeback."
       : "Parked out of the pipeline.";
 
-  // Hand a company to whoever works the buy decision. Reassigns owner, moves the
-  // stage to negotiating, logs the handoff — all in one tap, via the note path.
-  const handTo = async (owner: string) => {
+  // The next relay hand for this company: who it goes to, the stage it lands in,
+  // and why. Null when there's no obvious next hand (already with Ayushi, won,
+  // lost, parked).
+  const relay = nextRelayStep(c);
+
+  // Advance down the relay: reassign owner, move the stage, log the handoff —
+  // one tap, via the note path. `owner` lets the Me→Deal step pick Jeremy/Hegde.
+  const advance = async (owner: string, stage: Stage, reason: string) => {
     setBusy(true);
     try {
       await authedFetch("/api/b2b-gtm?action=note", {
         method: "POST",
         body: JSON.stringify({
           company_id: c.id,
-          note: `Pushed to buy decision — handed to ${owner}.`,
-          stage: "negotiating",
+          note: `Advanced — ${reason}.`,
+          stage,
           new_owner: owner,
           next_action_at: addDays(new Date(), 2).toISOString(),
-          next_action_reason: `${owner} to work the buy decision`,
+          next_action_reason: reason,
         }),
       });
-      toast.success(`Handed to ${owner}`);
+      toast.success(`Handed to ${ownerLabel(owner)}`);
       setHanding(false);
       onSaved();
     } catch (e: any) {
@@ -751,6 +844,10 @@ function ActionBar({
       setBusy(false);
     }
   };
+
+  // The Me→Deal hand needs a person choice (Jeremy or Hegde); every other relay
+  // step has a single fixed destination.
+  const relayNeedsChoice = relay?.owner === "Jeremy" && roleForCompany(c) === "Me";
 
   const logLabel =
     branch === "buy_decision" ? "Log demo / call" : branch === "account" ? "Log a touch" : "Log a call";
@@ -764,8 +861,8 @@ function ActionBar({
       {handing ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-gray-700">Hand to whom?</span>
-          {TEAM.filter((t) => t !== "Vivaan").map((t) => (
-            <Choice key={t} onClick={() => handTo(t)}>
+          {["Jeremy", "Hegde"].map((t) => (
+            <Choice key={t} onClick={() => advance(t, "negotiating", `${t} to demo & work the deal`)}>
               {t}
             </Choice>
           ))}
@@ -800,14 +897,24 @@ function ActionBar({
             >
               Study past interactions →
             </Link>
-            {/* Role-specific advance; Remove-from-pipeline lives on the full page. */}
-            {(branch === "mine_active" || branch === "pre_gtm") && (
+            {/* Relay advance — hand to the next person. Confirmed by tapping,
+                never automatic. Remove-from-pipeline lives on the full page. */}
+            {relay && (
               <button
                 disabled={busy}
-                onClick={() => setHanding(true)}
+                onClick={() =>
+                  relayNeedsChoice
+                    ? setHanding(true)
+                    : advance(relay.owner, relay.stage, relay.reason)
+                }
                 className="px-4 py-2 rounded-xl bg-white text-violet-700 text-sm font-medium border border-violet-300 hover:border-violet-400 disabled:opacity-40"
+                title={relay.reason}
               >
-                Push to buy decision →
+                {roleForCompany(c) === "Deal"
+                  ? "Hand to Ayushi to close →"
+                  : roleForCompany(c) === "Vivaan"
+                  ? "Hand to me →"
+                  : "Push to buy decision →"}
               </button>
             )}
           </div>

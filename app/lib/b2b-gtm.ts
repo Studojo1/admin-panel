@@ -26,6 +26,8 @@ export type Stage =
   | "whatsapp_group"
   | "gtm_active"
   | "negotiating"
+  // Closing: post-demo, chasing the signature / payment / final yes. Ayushi's.
+  | "closing"
   // Blocked-but-warm: the product won, the circumstance did not.
   | "blocked_pricing"
   | "blocked_timing"
@@ -52,7 +54,7 @@ export type Stage =
   | "exited";
 
 export const PRE_GTM_STAGES: Stage[] = ["cold_call_done", "demo_scheduled", "leads_sent"];
-export const OPEN_STAGES: Stage[] = ["whatsapp_group", "gtm_active", "negotiating"];
+export const OPEN_STAGES: Stage[] = ["whatsapp_group", "gtm_active", "negotiating", "closing"];
 export const BLOCKED_STAGES: Stage[] = [
   "blocked_pricing",
   "blocked_timing",
@@ -89,6 +91,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   whatsapp_group: "WhatsApp group",
   gtm_active: "GTM active",
   negotiating: "Negotiating",
+  closing: "Closing",
   blocked_pricing: "Blocked: pricing",
   blocked_timing: "Blocked: timing",
   blocked_approval: "Blocked: approval",
@@ -557,7 +560,10 @@ export function stageForOutcome(
       // Never drag a won account backwards into the open pipeline.
       if (WON_STAGES.includes(current)) return null;
       // In someone's hands for the buy decision -> the deal is progressing.
-      if ((owner ?? "").trim() && current !== "negotiating") return "negotiating";
+      // Don't regress out of closing back into negotiating.
+      if ((owner ?? "").trim() && current !== "negotiating" && current !== "closing") {
+        return "negotiating";
+      }
       // My own early-stage lead warming up -> into the open pipeline.
       if (PRE_GTM_STAGES.includes(current) || current === "whatsapp_group") return "gtm_active";
       return null;
@@ -636,6 +642,95 @@ export function nextInPipeline(owner: string | null): string | null {
   const i = PIPELINE.findIndex((p) => p.owner === (owner ?? ""));
   if (i === -1 || i === PIPELINE.length - 1) return null;
   return PIPELINE[i + 1].owner;
+}
+
+/* ------------------------------------------------------------------ */
+/* The relay — a company flows down one owner's page to the next        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The pipeline as an explicit relay of roles. A company lives on exactly one
+ * person's page at a time — its owner's — and advancing it hands it to the next.
+ *
+ *   Vivaan (Pre-GTM: cold-call, qualify, make the group)
+ *     → Me (force a buy decision, or exit; ALL pre-demo chasing is mine)
+ *     → Jeremy / Hegde (run the demo, work the deal)
+ *     → Ayushi (closing + ALL post-demo follow-ups: chase the signature/payment,
+ *               "why aren't you responding")
+ *
+ * Locked with the user: pre-demo first-response chasing is mine; once a demo has
+ * happened, follow-ups and closing are Ayushi's.
+ */
+export type Role = "Vivaan" | "Me" | "Deal" | "Ayushi";
+
+export const ROLES: { role: Role; owners: string[]; label: string; does: string }[] = [
+  { role: "Vivaan", owners: ["Vivaan"], label: "Vivaan", does: "Cold calls & qualifies" },
+  { role: "Me", owners: [""], label: "Me", does: "Force a decision or exit" },
+  { role: "Deal", owners: ["Jeremy", "Hegde"], label: "Jeremy / Hegde", does: "Demo & work the deal" },
+  { role: "Ayushi", owners: ["Ayushi"], label: "Ayushi", does: "Closing & all follow-ups" },
+];
+
+/**
+ * A demo counts as "happened" once the deal is being worked by Jeremy/Hegde or
+ * the company has reached negotiating/closing. Post that point, follow-ups route
+ * to Ayushi; before it, chasing is mine. (Kept as a stage/owner heuristic so it
+ * needs no extra column; a logged `meet` also moves the stage, so this tracks.)
+ */
+export function demoHasHappened(c: Company): boolean {
+  return (
+    c.stage === "negotiating" ||
+    c.stage === "closing" ||
+    ["Jeremy", "Hegde"].includes((c.owner ?? "").trim())
+  );
+}
+
+/** Whose page a company currently belongs on — derived from owner, not stored twice. */
+export function roleForCompany(c: Company): Role {
+  const owner = (c.owner ?? "").trim();
+  if (owner === "Vivaan") return "Vivaan";
+  if (owner === "Jeremy" || owner === "Hegde") return "Deal";
+  if (owner === "Ayushi") return "Ayushi";
+  return "Me";
+}
+
+/**
+ * The suggested next relay move for a company: the owner it should hand to and
+ * why. Advisory — surfaced as a one-tap "advance" the user confirms, never
+ * automatic. Returns null when there's no obvious next hand (e.g. it's already
+ * with Ayushi, or it's parked/won/lost).
+ */
+export function nextRelayStep(c: Company): { owner: string; stage: Stage; reason: string } | null {
+  if (
+    EXITED_STAGES.includes(c.stage) ||
+    WON_STAGES.includes(c.stage) ||
+    LOST_STAGES.includes(c.stage)
+  ) {
+    return null;
+  }
+  const role = roleForCompany(c);
+  switch (role) {
+    case "Vivaan":
+      // Qualified → hand to me to force the decision.
+      return { owner: "", stage: "gtm_active", reason: "Qualified — over to me to push or exit" };
+    case "Me":
+      // I push it into the deal team for the demo.
+      return { owner: "Jeremy", stage: "negotiating", reason: "Push to buy decision — demo it" };
+    case "Deal":
+      // After the demo, closing + follow-ups are Ayushi's.
+      return { owner: "Ayushi", stage: "closing", reason: "Demo done — Ayushi to close & follow up" };
+    case "Ayushi":
+      // End of the relay — she closes it won, or it exits/loses. No further hand.
+      return null;
+  }
+}
+
+/**
+ * Who a follow-up ("why aren't they responding/paying") should sit with.
+ * Pre-demo that's me; post-demo it's Ayushi. Used to route the needs-follow-up
+ * flag to the right person's page.
+ */
+export function followupOwnerFor(c: Company): string {
+  return demoHasHappened(c) ? "Ayushi" : "";
 }
 
 export function ownerLabel(owner: string | null | undefined): string {
@@ -818,8 +913,11 @@ export function mcqBranchFor(c: Company): McqBranch {
   if (LOST_STAGES.includes(c.stage)) return "feedback";
   if (BLOCKED_STAGES.includes(c.stage)) return "blocked";
   if (PRE_GTM_STAGES.includes(c.stage)) return "pre_gtm";
-  // Open stages. Once it's in someone's hands it's a buy decision.
-  if ((c.owner ?? "").trim() || c.stage === "negotiating") return "buy_decision";
+  // Open stages. Once it's in someone's hands, or in negotiating/closing, it's
+  // a buy decision being worked.
+  if ((c.owner ?? "").trim() || c.stage === "negotiating" || c.stage === "closing") {
+    return "buy_decision";
+  }
   return "mine_active";
 }
 
