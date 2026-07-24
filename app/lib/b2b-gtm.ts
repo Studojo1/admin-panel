@@ -365,18 +365,22 @@ export type LogKind = "call" | "meet" | "contact_change" | "note" | "handoff";
  * How the check-in starts. A Meet has no pick-up question, so this replaces
  * the old yes/no rather than nesting under it.
  */
-export type ContactMethod = "call" | "meet" | "no_answer" | "no_show";
+export type ContactMethod = "call" | "whatsapp" | "meet" | "no_answer" | "no_show";
 
 export const CONTACT_METHODS: { key: ContactMethod; label: string }[] = [
   { key: "call", label: "Phone call" },
+  { key: "whatsapp", label: "WhatsApp" },
   { key: "meet", label: "Google Meet" },
   { key: "no_answer", label: "No answer" },
   { key: "no_show", label: "Meet no-show" },
 ];
 
-/** Did we actually speak to them? Drives whether the outcome questions show. */
+/**
+ * Did we actually get a response? Drives whether the outcome questions show.
+ * WhatsApp counts — a reply is a real exchange with a read on interest.
+ */
 export function methodReachedThem(m: ContactMethod): boolean {
-  return m === "call" || m === "meet";
+  return m === "call" || m === "meet" || m === "whatsapp";
 }
 
 export function methodToKind(m: ContactMethod): LogKind {
