@@ -1035,6 +1035,92 @@ export function cashSummary(c: Company): CashSummary {
   return { committed, collected, refunded, net: collected - refunded, outstanding, pctCollected, daysToCollect };
 }
 
+/* ------------------------------------------------------------------ */
+/* Forecast — deterministic, stage-weighted. No model.                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How likely a deal at each stage is to close, as a probability. Used to weight
+ * open-pipeline value into an "expected" forecast. These are sensible defaults —
+ * tune them once real close rates are known. Stages not listed contribute 0 to
+ * the weighted forecast (won is already money, not a forecast).
+ *
+ * NOTE: at ~50 deals a weighted forecast is directional, not precise — one big
+ * deal slipping moves it a lot. The renewals side (below) is the reliable part.
+ */
+export const STAGE_WEIGHTS: Partial<Record<Stage, number>> = {
+  whatsapp_group: 0.1,
+  gtm_active: 0.2,
+  negotiating: 0.4,
+  closing: 0.7,
+  // Blocked-but-warm: they liked it, something external is in the way.
+  blocked_pricing: 0.2,
+  blocked_timing: 0.2,
+  blocked_approval: 0.2,
+  blocked_budget: 0.15,
+  blocked_no_response: 0.1,
+  blocked_no_show: 0.1,
+  blocked_no_show_ghosted: 0.05,
+};
+
+export interface Forecast {
+  // New-deal pipeline (directional).
+  worst: number; // only what's in `closing`
+  expected: number; // every open deal × its stage weight
+  best: number; // all open pipeline at full value
+  openCount: number; // how many open deals feed it
+  // Renewals from won accounts due within the window (the trustworthy part).
+  renewalsExpected: number;
+  renewalsCount: number;
+}
+
+/**
+ * Project revenue over the next `windowDays`. Open deals are stage-weighted;
+ * renewals are won accounts whose next_purchase_due falls in the window. Pure —
+ * derived from the companies already on screen, no extra query.
+ */
+export function forecast(companies: Company[], windowDays = 30, now: Date = new Date()): Forecast {
+  const horizon = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+  let worst = 0;
+  let expected = 0;
+  let best = 0;
+  let openCount = 0;
+  let renewalsExpected = 0;
+  let renewalsCount = 0;
+
+  for (const c of companies) {
+    const value = num(c.deal_value);
+
+    // Open pipeline (not won/lost/exited): stage-weighted.
+    const weight = STAGE_WEIGHTS[c.stage];
+    if (weight !== undefined && value > 0) {
+      openCount++;
+      best += value;
+      expected += value * weight;
+      if (c.stage === "closing") worst += value;
+    }
+
+    // Renewals: a won account with a purchase due inside the window. Repeat
+    // revenue is the closest thing to guaranteed money here.
+    if (WON_STAGES.includes(c.stage) && c.next_purchase_due) {
+      const due = new Date(c.next_purchase_due);
+      if (due >= now && due <= horizon) {
+        renewalsExpected += value;
+        renewalsCount++;
+      }
+    }
+  }
+
+  return {
+    worst: Math.round(worst),
+    expected: Math.round(expected),
+    best: Math.round(best),
+    openCount,
+    renewalsExpected: Math.round(renewalsExpected),
+    renewalsCount,
+  };
+}
+
 export function formatValue(v: string | number | null | undefined): string {
   if (v === null || v === undefined || v === "") return "—";
   const n = typeof v === "string" ? parseFloat(v) : v;

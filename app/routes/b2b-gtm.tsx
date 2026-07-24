@@ -43,6 +43,7 @@ import {
   addDays,
   companyMatchesView,
   daysSince,
+  forecast,
   formatDateTime,
   formatValue,
   isLaterToday,
@@ -221,6 +222,9 @@ export default function B2BGtm() {
     () => companies.filter((c) => isOverdue(c.next_action_at, now)),
     [companies, now]
   );
+
+  // 30-day revenue forecast — stage-weighted open pipeline + due renewals.
+  const fc = useMemo(() => forecast(companies, 30, now), [companies, now]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -478,6 +482,55 @@ export default function B2BGtm() {
                 <p className={`text-lg font-bold ${s.tone}`}>{formatValue(s.value)}</p>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* 30-day forecast — only on the Accounts view. Renewals first (reliable),
+            then the stage-weighted new-deal range (directional). */}
+        {view === "accounts" && (
+          <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4">
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Next 30 days — forecast
+            </p>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              {/* Renewals — the trustworthy part. */}
+              <div className="rounded-xl border border-green-200 bg-green-50 p-3">
+                <p className="text-[10px] uppercase tracking-wide text-green-700">
+                  Expected renewals ({fc.renewalsCount})
+                </p>
+                <p className="text-2xl font-bold text-green-800">
+                  {formatValue(fc.renewalsExpected)}
+                </p>
+                <p className="text-[11px] text-green-700 mt-0.5">
+                  Won accounts due to buy again this window.
+                </p>
+              </div>
+
+              {/* New-deal pipeline — directional. */}
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">
+                  New-deal pipeline ({fc.openCount} open) — directional
+                </p>
+                <div className="flex items-end justify-between mt-1 gap-2">
+                  <div>
+                    <p className="text-[10px] text-gray-400">Worst</p>
+                    <p className="text-sm font-bold text-gray-700">{formatValue(fc.worst)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-violet-500">Expected</p>
+                    <p className="text-xl font-bold text-violet-700">{formatValue(fc.expected)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-400">Best</p>
+                    <p className="text-sm font-bold text-gray-700">{formatValue(fc.best)}</p>
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Stage-weighted — a guide, not a promise, at this pipeline size.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
