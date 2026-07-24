@@ -26,6 +26,7 @@ import {
   TEAM,
   WON_STAGES,
   activeFlags,
+  cashSummary,
   daysSince,
   formatDateTime,
   formatValue,
@@ -472,6 +473,8 @@ function CompanyBody({
             </Panel>
           )}
 
+          {isAccount && <CashPanel company={company} />}
+
           <EditPanel company={company} me={me} onSaved={onReload} />
         </div>
       </div>
@@ -547,6 +550,59 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * The cash reality for a won account: committed vs. collected, a collection bar,
+ * net revenue after refunds, what's still outstanding, and days-to-collect. This
+ * is the money model — deal_value alone only ever showed committed value.
+ */
+function CashPanel({ company }: { company: Company }) {
+  const s = cashSummary(company);
+  return (
+    <Panel title="Cash">
+      <div className="space-y-2 text-sm">
+        <Row label="Committed" value={formatValue(s.committed)} />
+        <Row label="Collected" value={formatValue(s.collected)} />
+        {s.refunded > 0 && <Row label="Refunded" value={"−" + formatValue(s.refunded)} />}
+        <Row label="Net revenue" value={formatValue(s.net)} />
+      </div>
+
+      {/* Collection progress. */}
+      <div className="mt-3">
+        <div className="flex justify-between text-[11px] text-gray-500 mb-1">
+          <span>{s.pctCollected}% collected</span>
+          <span>{s.outstanding > 0 ? `${formatValue(s.outstanding)} outstanding` : "Paid in full"}</span>
+        </div>
+        <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+          <div
+            className={`h-full rounded-full ${s.outstanding > 0 ? "bg-amber-400" : "bg-green-500"}`}
+            style={{ width: `${s.pctCollected}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-1 text-xs text-gray-500">
+        {company.deposit && Number(company.deposit) > 0 && (
+          <div className="flex justify-between">
+            <span>Deposit</span>
+            <span className="text-gray-700">{formatValue(company.deposit)}</span>
+          </div>
+        )}
+        {company.collected_at ? (
+          <div className="flex justify-between">
+            <span>Paid in full</span>
+            <span className="text-gray-700">
+              {formatDateTime(company.collected_at)}
+              {s.daysToCollect !== null ? ` · ${s.daysToCollect}d to collect` : ""}
+            </span>
+          </div>
+        ) : s.outstanding > 0 ? (
+          <p className="text-amber-700">Not yet paid in full — {formatValue(s.outstanding)} to go.</p>
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
+
 function EditPanel({
   company,
   me,
@@ -573,8 +629,15 @@ function EditPanel({
   const [nextPurchaseDue, setNextPurchaseDue] = useState(
     company.next_purchase_due ? toLocalInputValue(new Date(company.next_purchase_due)) : ""
   );
+  const [cashCollected, setCashCollected] = useState(company.cash_collected ?? "");
+  const [deposit, setDeposit] = useState(company.deposit ?? "");
+  const [refunded, setRefunded] = useState(company.refunded ?? "");
+  const [collectedAt, setCollectedAt] = useState(
+    company.collected_at ? toLocalInputValue(new Date(company.collected_at)) : ""
+  );
   const [notes, setNotes] = useState(company.notes ?? "");
   const [saving, setSaving] = useState(false);
+  const isAccount = WON_STAGES.includes(company.stage);
 
   const save = async () => {
     setSaving(true);
@@ -589,6 +652,10 @@ function EditPanel({
             whatsapp_group_made: whatsapp,
             deal_value: dealValue === "" ? null : Number(dealValue),
             next_purchase_due: nextPurchaseDue ? new Date(nextPurchaseDue).toISOString() : null,
+            cash_collected: cashCollected === "" ? null : Number(cashCollected),
+            deposit: deposit === "" ? null : Number(deposit),
+            refunded: refunded === "" ? null : Number(refunded),
+            collected_at: collectedAt ? new Date(collectedAt).toISOString() : null,
             notes,
             needs_brochure: flags.needs_brochure,
             brochure_note: flagNotes.brochure_note,
@@ -651,6 +718,34 @@ function EditPanel({
           className={inputCls}
         />
       </Field>
+
+      {/* Cash reality — only worth surfacing once it's a won account. */}
+      {isAccount && (
+        <div className="rounded-xl border border-gray-200 p-3 mb-4">
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            Cash
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Deposit (₹)</label>
+              <input type="number" value={deposit} onChange={(e) => setDeposit(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Cash collected (₹)</label>
+              <input type="number" value={cashCollected} onChange={(e) => setCashCollected(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Refunded (₹)</label>
+              <input type="number" value={refunded} onChange={(e) => setRefunded(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Paid in full on</label>
+              <input type="datetime-local" value={collectedAt} onChange={(e) => setCollectedAt(e.target.value)} className={inputCls} />
+            </div>
+          </div>
+        </div>
+      )}
+
       <Field label="Context">
         <textarea
           value={notes}

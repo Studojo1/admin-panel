@@ -103,12 +103,25 @@ interface Stats {
   accounts: number;
   renewals_due: number;
   committed_value: string;
+  cash_collected: string;
+  net_revenue: string;
+  outstanding: string;
 }
 
 interface ObjectionStat {
   objection: string;
   detail: string | null;
   n: number;
+}
+
+/** Cold-call activity over the last 30 days, derived from the call logs. */
+interface Activity {
+  dials: number;
+  connects: number;
+  meets: number;
+  no_shows: number;
+  interested: number;
+  companies_touched: number;
 }
 
 export default function B2BGtm() {
@@ -120,6 +133,7 @@ export default function B2BGtm() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [objectionStats, setObjectionStats] = useState<ObjectionStat[]>([]);
+  const [activity, setActivity] = useState<Activity | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Either a ViewKey, or "owner:<name>" for a teammate's sheet ("owner:" = mine).
@@ -158,6 +172,7 @@ export default function B2BGtm() {
       setCompanies(data.companies || []);
       setStats(data.stats || null);
       setObjectionStats(data.objection_stats || []);
+      setActivity(data.activity || null);
       setError(null);
     } catch (e: any) {
       setError(e.message || "Failed to load");
@@ -419,6 +434,7 @@ export default function B2BGtm() {
           <PersonHeader
             owner={view.slice(6)}
             companies={companies}
+            activity={activity}
             now={now}
             onOpen={(id) => setExpanded(id)}
           />
@@ -447,6 +463,23 @@ export default function B2BGtm() {
             </div>
           )}
         </div>
+
+        {/* Cash reality across all won accounts — only on the Accounts view. */}
+        {view === "accounts" && stats && (
+          <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Committed", value: stats.committed_value, tone: "text-gray-900" },
+              { label: "Collected", value: stats.cash_collected, tone: "text-green-700" },
+              { label: "Outstanding", value: stats.outstanding, tone: "text-amber-700" },
+              { label: "Net revenue", value: stats.net_revenue, tone: "text-gray-900" },
+            ].map((s) => (
+              <div key={s.label} className="rounded-2xl border border-gray-200 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">{s.label}</p>
+                <p className={`text-lg font-bold ${s.tone}`}>{formatValue(s.value)}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
@@ -554,11 +587,13 @@ export default function B2BGtm() {
 function PersonHeader({
   owner,
   companies,
+  activity,
   now,
   onOpen,
 }: {
   owner: string;
   companies: Company[];
+  activity: Activity | null;
   now: Date;
   onOpen: (id: number) => void;
 }) {
@@ -568,6 +603,14 @@ function PersonHeader({
   const overdue = mine.filter((c) => isOverdue(c.next_action_at, now));
   // Freshly handed to them: the latest event on the company is a handoff.
   const inbox = mine.filter((c) => c.last_log?.kind === "handoff");
+  // Cold-call activity metrics live only on Vivaan's page — that's his motion.
+  const showActivity = owner === "Vivaan" && activity;
+  const connectRate = activity && activity.dials > 0
+    ? Math.round((activity.connects / activity.dials) * 100)
+    : 0;
+  const showUpRate = activity && activity.meets > 0
+    ? Math.round(((activity.meets - activity.no_shows) / activity.meets) * 100)
+    : 0;
 
   return (
     <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4">
@@ -613,6 +656,30 @@ function PersonHeader({
               >
                 {c.name}
               </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Vivaan's cold-call activity — last 30 days, straight from the logs. */}
+      {showActivity && activity && (
+        <div className="mt-3 pt-3 border-t border-gray-200">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            Cold-call activity · last 30 days
+          </p>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+            {[
+              { label: "Dials", value: activity.dials },
+              { label: "Connects", value: activity.connects },
+              { label: "Connect rate", value: `${connectRate}%` },
+              { label: "Meetings", value: activity.meets },
+              { label: "Show-up rate", value: activity.meets ? `${showUpRate}%` : "—" },
+              { label: "Interested", value: activity.interested },
+            ].map((m) => (
+              <div key={m.label} className="rounded-xl border border-gray-100 bg-gray-50 p-2 text-center">
+                <p className="text-lg font-bold text-gray-900">{m.value}</p>
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">{m.label}</p>
+              </div>
             ))}
           </div>
         </div>
@@ -959,7 +1026,9 @@ function ActionBar({
               )}
             </p>
             {lastNote ? (
-              <p className="text-sm text-gray-700 whitespace-pre-wrap line-clamp-4">{lastNote}</p>
+              <p className="text-sm font-semibold text-gray-900 whitespace-pre-wrap line-clamp-4">
+                {lastNote}
+              </p>
             ) : (
               <p className="text-sm text-gray-400">
                 No notes yet — log a call to start the history.

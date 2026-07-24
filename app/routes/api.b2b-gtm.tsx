@@ -40,6 +40,13 @@ async function ensureTables() {
       lost_feedback TEXT,
       comeback_at TIMESTAMPTZ,
       notes TEXT,
+      -- Cash reality (distinct from deal_value, which is committed value only):
+      -- what's actually been collected, the deposit, when it was paid in full,
+      -- and any refund/clawback. Net = cash_collected - refunded.
+      cash_collected NUMERIC,
+      deposit NUMERIC,
+      collected_at TIMESTAMPTZ,
+      refunded NUMERIC,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -93,6 +100,11 @@ async function ensureTables() {
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_change_note TEXT`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS needs_my_followup BOOLEAN NOT NULL DEFAULT FALSE`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS my_followup_note TEXT`);
+  // Cash model (see CREATE TABLE for the why).
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS cash_collected NUMERIC`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS deposit NUMERIC`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS collected_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS refunded NUMERIC`);
 
   // The seed used to prefix imported notes with "Imported from Excel: ".
   // Strip it in place so the notes read exactly as they were written, without
@@ -590,7 +602,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
-  const [companies, contacts, lastLogs, stats, objectionStats] = await Promise.all([
+  const [companies, contacts, lastLogs, stats, objectionStats, activity] = await Promise.all([
     db.execute(sql`SELECT * FROM b2b_companies ORDER BY next_action_at ASC NULLS LAST, name ASC`),
     // Inactive contacts must never win the primary slot the cards read from.
     db.execute(sql`SELECT * FROM b2b_contacts ORDER BY is_inactive ASC, is_primary DESC, id ASC`),
@@ -622,7 +634,17 @@ export async function loader({ request }: Route.LoaderArgs) {
         COUNT(*) FILTER (WHERE leads_change AND stage <> 'exited')::int AS leads_to_fix,
         COUNT(*) FILTER (WHERE stage IN ('closed_won','onboarding','using','renewal_due','expansion_pitch','repeat_buyer'))::int AS accounts,
         COUNT(*) FILTER (WHERE next_purchase_due IS NOT NULL AND next_purchase_due <= NOW() + INTERVAL '7 days')::int AS renewals_due,
-        COALESCE(SUM(deal_value) FILTER (WHERE stage IN ('closed_won','onboarding','using','renewal_due','expansion_pitch','repeat_buyer')), 0) AS committed_value
+        COALESCE(SUM(deal_value) FILTER (WHERE stage IN ('closed_won','onboarding','using','renewal_due','expansion_pitch','repeat_buyer')), 0) AS committed_value,
+        -- Cash reality across the whole board. Coalesce each SUM before doing
+        -- arithmetic — a bare SUM is NULL when every value is NULL, and NULL
+        -- would then poison the subtraction.
+        COALESCE(SUM(cash_collected), 0) AS cash_collected,
+        COALESCE(SUM(refunded), 0) AS refunded,
+        COALESCE(SUM(cash_collected), 0) - COALESCE(SUM(refunded), 0) AS net_revenue,
+        -- Outstanding = committed on won deals minus what's been collected.
+        COALESCE(
+          SUM(deal_value) FILTER (WHERE stage IN ('closed_won','onboarding','using','renewal_due','expansion_pitch','repeat_buyer')), 0
+        ) - COALESCE(SUM(cash_collected), 0) AS outstanding
       FROM b2b_companies
     `),
     // Why isn't BOB closing — a GROUP BY, not a guess.
@@ -637,6 +659,21 @@ export async function loader({ request }: Route.LoaderArgs) {
       WHERE objection IS NOT NULL
       GROUP BY objection, CASE WHEN objection = 'other' THEN objection_note ELSE NULL END
       ORDER BY n DESC
+    `),
+    // Cold-call activity, derived from the call logs — for Vivaan's page. No
+    // manual entry: dials/connects/meets fall out of what's already logged.
+    // Windowed to the last 30 days so it reflects recent throughput.
+    db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE kind = 'call')::int AS dials,
+        COUNT(*) FILTER (WHERE kind = 'call' AND picked_up)::int AS connects,
+        COUNT(*) FILTER (WHERE kind = 'meet')::int AS meets,
+        COUNT(*) FILTER (WHERE kind = 'meet' AND NOT picked_up)::int AS no_shows,
+        COUNT(*) FILTER (WHERE outcome = 'interested')::int AS interested,
+        COUNT(DISTINCT company_id) FILTER (WHERE called_at >= NOW() - INTERVAL '30 days')::int AS companies_touched
+      FROM b2b_call_logs
+      WHERE called_at >= NOW() - INTERVAL '30 days'
+        AND kind IN ('call','meet')
     `),
   ]);
 
@@ -662,6 +699,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     companies: enriched,
     stats: stats.rows[0],
     objection_stats: objectionStats.rows,
+    activity: activity.rows[0],
     me: admin.email,
   });
 }
@@ -959,6 +997,10 @@ export async function action({ request }: Route.ActionArgs) {
     if ("they_reachout_on" in f) sets.push(sql`they_reachout_on = ${f.they_reachout_on || null}`);
     if ("deal_value" in f) sets.push(sql`deal_value = ${f.deal_value ?? null}`);
     if ("next_purchase_due" in f) sets.push(sql`next_purchase_due = ${f.next_purchase_due || null}`);
+    if ("cash_collected" in f) sets.push(sql`cash_collected = ${f.cash_collected ?? null}`);
+    if ("deposit" in f) sets.push(sql`deposit = ${f.deposit ?? null}`);
+    if ("collected_at" in f) sets.push(sql`collected_at = ${f.collected_at || null}`);
+    if ("refunded" in f) sets.push(sql`refunded = ${f.refunded ?? null}`);
     if ("blocker_type" in f) sets.push(sql`blocker_type = ${f.blocker_type || null}`);
     if ("blocker_note" in f) sets.push(sql`blocker_note = ${f.blocker_note || null}`);
     if ("lost_reason" in f) sets.push(sql`lost_reason = ${f.lost_reason || null}`);

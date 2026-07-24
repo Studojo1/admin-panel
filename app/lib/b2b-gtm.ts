@@ -318,6 +318,11 @@ export interface Company {
   they_reachout_on: string | null;
   deal_value: string | null;
   next_purchase_due: string | null;
+  /** Cash reality — distinct from deal_value (committed). Net = collected - refunded. */
+  cash_collected: string | null;
+  deposit: string | null;
+  collected_at: string | null;
+  refunded: string | null;
   blocker_type: BlockerType | null;
   blocker_note: string | null;
   lost_reason: LostReason | null;
@@ -992,6 +997,42 @@ export const FLAGS: FlagDef[] = [
 
 export function activeFlags(c: Company): FlagDef[] {
   return FLAGS.filter((f) => c[f.key]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Cash model — the reality behind a committed deal value               */
+/* ------------------------------------------------------------------ */
+
+export function num(v: string | number | null | undefined): number {
+  if (v === null || v === undefined || v === "") return 0;
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return Number.isNaN(n) ? 0 : n;
+}
+
+export interface CashSummary {
+  committed: number; // deal_value — what they agreed to
+  collected: number; // cash actually in
+  refunded: number; // clawed back
+  net: number; // collected - refunded
+  outstanding: number; // committed - collected (never below 0)
+  pctCollected: number; // 0..100
+  daysToCollect: number | null; // won date → paid-in-full date
+}
+
+export function cashSummary(c: Company): CashSummary {
+  const committed = num(c.deal_value);
+  const collected = num(c.cash_collected);
+  const refunded = num(c.refunded);
+  const outstanding = Math.max(committed - collected, 0);
+  const pctCollected = committed > 0 ? Math.min(100, Math.round((collected / committed) * 100)) : 0;
+  let daysToCollect: number | null = null;
+  if (c.collected_at) {
+    // From when it was won (best proxy: created_at of the won record) to paid.
+    const from = new Date(c.created_at).getTime();
+    const to = new Date(c.collected_at).getTime();
+    daysToCollect = Math.max(0, Math.round((to - from) / (24 * 60 * 60 * 1000)));
+  }
+  return { committed, collected, refunded, net: collected - refunded, outstanding, pctCollected, daysToCollect };
 }
 
 export function formatValue(v: string | number | null | undefined): string {
