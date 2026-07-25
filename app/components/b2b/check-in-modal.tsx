@@ -141,6 +141,10 @@ export function CheckInModal({
   // A next action isn't always possible — sometimes the ball's genuinely in
   // their court (red tape, waiting on them). Then we log with no follow-up date.
   const [noDate, setNoDate] = useState(false);
+  // On a no-answer / no-show, they may still have arranged a callback ("text me
+  // at 4"). Flagging it marks the row as a callback, same as if they'd asked on
+  // a live call.
+  const [callbackArranged, setCallbackArranged] = useState(false);
   const nextOk = noDate || !!nextAt;
   const canSave =
     method !== null &&
@@ -197,13 +201,17 @@ export function CheckInModal({
           kind: methodToKind(method!),
           picked_up: reached,
           attendees: method === "meet" ? attendees.trim() || null : null,
-          outcome,
+          // A no-answer with a callback arranged records as asked_callback, so the
+          // board flags it with the callback highlight like any other callback.
+          outcome: !reached && callbackArranged ? "asked_callback" : outcome,
           objection,
           objection_note: objectionNote.trim() || null,
           temperature_at_time: temperature,
           note: note.trim() || null,
           next_action_at: noDate ? null : new Date(nextAt).toISOString(),
-          next_action_reason: noDate ? nextReason || "Waiting on them — no date set" : nextReason,
+          next_action_reason: noDate
+            ? nextReason || "Waiting on them — no date set"
+            : nextReason || (callbackArranged ? "They'll call back" : ""),
           value_discussed: dealValue === "" ? null : Number(dealValue),
           stage,
           blocker_type: outcome === "blocked" ? blockerType : undefined,
@@ -508,6 +516,19 @@ export function CheckInModal({
               />
               No follow-up date — waiting on them
             </label>
+
+            {/* No-answer / no-show can still end in an arranged callback. */}
+            {!reached && (
+              <label className="flex items-center gap-2 text-sm text-gray-700 mb-3">
+                <input
+                  type="checkbox"
+                  checked={callbackArranged}
+                  onChange={(e) => setCallbackArranged(e.target.checked)}
+                  className="rounded"
+                />
+                They'll call back / callback arranged
+              </label>
+            )}
 
             {!noDate && !reached && (
               <div className="flex flex-wrap gap-2 mb-3">
