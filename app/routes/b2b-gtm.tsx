@@ -931,13 +931,128 @@ function ExpandedPanel({
   }
 
   return (
-    <ActionBar
-      c={c}
-      onLog={() => setLogging(true)}
-      onContactChange={onContactChange}
-      onReactivate={onReactivate}
-      onSaved={onSaved}
-    />
+    <div className="space-y-3">
+      <ActionBar
+        c={c}
+        onLog={() => setLogging(true)}
+        onContactChange={onContactChange}
+        onReactivate={onReactivate}
+        onSaved={onSaved}
+      />
+      <NextActionEditor c={c} onSaved={onSaved} />
+    </div>
+  );
+}
+
+/**
+ * Edit the next action straight from the expanded row — change the date/reason,
+ * or clear it entirely ("waiting on them", no date) without opening the wizard.
+ */
+function NextActionEditor({ c, onSaved }: { c: Company; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [noDate, setNoDate] = useState(!c.next_action_at);
+  const [nextAt, setNextAt] = useState(
+    c.next_action_at ? toLocalInputValue(new Date(c.next_action_at)) : ""
+  );
+  const [reason, setReason] = useState(c.next_action_reason ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=company", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: c.id,
+          fields: {
+            next_action_at: noDate || !nextAt ? null : new Date(nextAt).toISOString(),
+            next_action_reason: reason.trim() || (noDate ? "Waiting on them — no date set" : null),
+          },
+        }),
+      });
+      toast.success("Next action updated");
+      setOpen(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm min-w-0">
+          <p className="text-[11px] font-semibold text-violet-800 uppercase tracking-wide">
+            Next action
+            {c.next_action_at && (
+              <span className="ml-1.5 font-normal text-violet-500 normal-case">
+                · {formatDateTime(c.next_action_at)}
+              </span>
+            )}
+          </p>
+          {c.next_action_at ? (
+            <p className="text-sm text-gray-800">
+              {c.next_action_reason || <span className="text-gray-400">no reason noted</span>}
+            </p>
+          ) : (
+            <p className="text-sm text-gray-500">
+              No date set{c.next_action_reason ? ` — ${c.next_action_reason}` : " — waiting on them"}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => setOpen(true)}
+          className="text-xs text-violet-600 hover:underline font-medium shrink-0"
+        >
+          Edit
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
+        Next action
+      </p>
+      <label className="flex items-center gap-2 text-sm text-gray-700 mb-2">
+        <input
+          type="checkbox"
+          checked={noDate}
+          onChange={(e) => setNoDate(e.target.checked)}
+          className="rounded"
+        />
+        No follow-up date — waiting on them
+      </label>
+      {!noDate && (
+        <input
+          type="datetime-local"
+          value={nextAt}
+          onChange={(e) => setNextAt(e.target.value)}
+          className={inputCls}
+        />
+      )}
+      <input
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder={noDate ? "Why no date? e.g. stuck in their internal red tape" : "Why then?"}
+        className={`${inputCls} mt-2`}
+      />
+      <div className="flex justify-end gap-2 mt-2">
+        <button onClick={() => setOpen(false)} className="text-xs text-gray-500">
+          Cancel
+        </button>
+        <button
+          disabled={saving || (!noDate && !nextAt)}
+          onClick={save}
+          className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1112,7 +1227,7 @@ function ActionBar({
               )}
             </p>
             {lastNote ? (
-              <p className="text-sm font-semibold text-gray-900 whitespace-pre-wrap line-clamp-4">
+              <p className="text-sm font-semibold text-gray-900 whitespace-pre-wrap line-clamp-3">
                 {lastNote}
               </p>
             ) : (
@@ -1121,7 +1236,11 @@ function ActionBar({
               </p>
             )}
 
-            <NextActionEditor c={c} onSaved={onSaved} />
+            {/* Next action + why — the future move, kept distinct from the past
+                context above. Editable inline. */}
+            <div className="mt-3 pt-3 border-t border-violet-200">
+              <NextActionEditor c={c} onSaved={onSaved} />
+            </div>
           </div>
         </div>
       )}
@@ -1133,93 +1252,6 @@ function ActionBar({
  * Edit the next action straight from the expanded row — change the date/reason
  * or clear it entirely (for companies where the ball's in their court and no
  * date makes sense). Saves via PATCH without needing to log a full call.
- */
-function NextActionEditor({ c, onSaved }: { c: Company; onSaved: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [at, setAt] = useState(c.next_action_at ? toLocalInputValue(new Date(c.next_action_at)) : "");
-  const [reason, setReason] = useState(c.next_action_reason ?? "");
-  const [saving, setSaving] = useState(false);
-
-  const save = async (clear = false) => {
-    setSaving(true);
-    try {
-      await authedFetch("/api/b2b-gtm?action=company", {
-        method: "PATCH",
-        body: JSON.stringify({
-          id: c.id,
-          fields: {
-            next_action_at: clear || !at ? null : new Date(at).toISOString(),
-            next_action_reason: clear ? reason || "Waiting on them — no date set" : reason,
-          },
-        }),
-      });
-      toast.success(clear || !at ? "Next action cleared" : "Next action updated");
-      setOpen(false);
-      onSaved();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="mt-2 text-xs text-violet-600 hover:underline font-medium"
-      >
-        {c.next_action_at ? "Edit next action" : "Set next action"}
-      </button>
-    );
-  }
-
-  return (
-    <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
-      <input
-        type="datetime-local"
-        value={at}
-        onChange={(e) => setAt(e.target.value)}
-        className={inputCls}
-      />
-      <input
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        placeholder="Why? (or why there's no date)"
-        className={`${inputCls} mt-1.5`}
-      />
-      <div className="flex items-center justify-between mt-1.5">
-        <button
-          onClick={() => save(true)}
-          disabled={saving}
-          className="text-xs text-rose-600 hover:underline"
-          title="Waiting on them — no follow-up date"
-        >
-          Clear date
-        </button>
-        <div className="flex gap-2">
-          <button onClick={() => setOpen(false)} className="text-xs text-gray-500">
-            Cancel
-          </button>
-          <button
-            onClick={() => save(false)}
-            disabled={saving}
-            className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Assign a company without expanding the row. Saves on change.
- *
- * Deliberately a labelled control rather than a colour: a tint would collide
- * with the flag dots (yellow already means "brochure", green "needs leads")
- * and would still need memorising.
  */
 function OwnerPicker({ c, onSaved }: { c: Company; onSaved: () => void }) {
   const [saving, setSaving] = useState(false);

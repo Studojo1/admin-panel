@@ -278,40 +278,7 @@ function CompanyBody({
           </p>
         </div>
       ) : (
-      /* Why am I calling them, right at the top. */
-      <div
-        className={`mt-5 rounded-2xl border-2 px-5 py-4 ${
-          overdue
-            ? "border-neutral-900 bg-violet-500 text-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
-            : "border-gray-200 bg-white"
-        }`}
-      >
-        <p
-          className={`text-[11px] font-semibold uppercase tracking-wide ${
-            overdue ? "text-violet-100" : "text-gray-500"
-          }`}
-        >
-          Next action
-        </p>
-        {company.next_action_at ? (
-          <>
-            <p className={`text-lg font-bold mt-0.5 ${overdue ? "" : "text-gray-900"}`}>
-              {formatDateTime(company.next_action_at)}
-              {overdue && " — overdue"}
-            </p>
-            {company.next_action_reason && (
-              <p className={`text-sm mt-0.5 ${overdue ? "text-violet-50" : "text-gray-600"}`}>
-                {company.next_action_reason}
-              </p>
-            )}
-          </>
-        ) : (
-          <p className="text-lg font-bold mt-0.5 text-rose-600">
-            No next action set
-            {company.next_action_reason ? ` — note: ${company.next_action_reason}` : ""}
-          </p>
-        )}
-      </div>
+        <NextActionPanel company={company} overdue={overdue} onSaved={onReload} />
       )}
 
       <div className="grid lg:grid-cols-3 gap-5 mt-5">
@@ -675,6 +642,130 @@ function AddPerson({ companyId, onSaved }: { companyId: number; onSaved: () => v
           {saving ? "Adding…" : "Add"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The next-action banner at the top of the full page, now editable in place —
+ * change the date and reason, or clear the date ("waiting on them"), without
+ * digging into the edit panel.
+ */
+function NextActionPanel({
+  company,
+  overdue,
+  onSaved,
+}: {
+  company: Company;
+  overdue: boolean;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [noDate, setNoDate] = useState(!company.next_action_at);
+  const [nextAt, setNextAt] = useState(
+    company.next_action_at ? toLocalInputValue(new Date(company.next_action_at)) : ""
+  );
+  const [reason, setReason] = useState(company.next_action_reason ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=company", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: company.id,
+          fields: {
+            next_action_at: noDate || !nextAt ? null : new Date(nextAt).toISOString(),
+            next_action_reason: reason.trim() || (noDate ? "Waiting on them — no date set" : null),
+          },
+        }),
+      });
+      toast.success("Next action updated");
+      setEditing(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="mt-5 rounded-2xl border-2 border-gray-300 bg-white px-5 py-4">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
+          Next action
+        </p>
+        <label className="flex items-center gap-2 text-sm text-gray-700 mb-2">
+          <input type="checkbox" checked={noDate} onChange={(e) => setNoDate(e.target.checked)} className="rounded" />
+          No follow-up date — waiting on them
+        </label>
+        {!noDate && (
+          <input
+            type="datetime-local"
+            value={nextAt}
+            onChange={(e) => setNextAt(e.target.value)}
+            className={inputCls}
+          />
+        )}
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder={noDate ? "Why no date? e.g. stuck in their internal red tape" : "Why are we reaching out then?"}
+          className={`${inputCls} mt-2`}
+        />
+        <div className="flex justify-end gap-2 mt-3">
+          <button onClick={() => setEditing(false)} className="text-sm text-gray-500">Cancel</button>
+          <button
+            disabled={saving || (!noDate && !nextAt)}
+            onClick={save}
+            className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium disabled:opacity-40"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`mt-5 rounded-2xl border-2 px-5 py-4 ${
+        overdue
+          ? "border-neutral-900 bg-violet-500 text-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+          : "border-gray-200 bg-white"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className={`text-[11px] font-semibold uppercase tracking-wide ${overdue ? "text-violet-100" : "text-gray-500"}`}>
+          Next action
+        </p>
+        <button
+          onClick={() => setEditing(true)}
+          className={`text-xs font-medium hover:underline shrink-0 ${overdue ? "text-white" : "text-violet-600"}`}
+        >
+          Edit
+        </button>
+      </div>
+      {company.next_action_at ? (
+        <>
+          <p className={`text-lg font-bold mt-0.5 ${overdue ? "" : "text-gray-900"}`}>
+            {formatDateTime(company.next_action_at)}
+            {overdue && " — overdue"}
+          </p>
+          {company.next_action_reason && (
+            <p className={`text-sm mt-0.5 ${overdue ? "text-violet-50" : "text-gray-600"}`}>
+              {company.next_action_reason}
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="text-lg font-bold mt-0.5 text-rose-600">
+          No date set
+          {company.next_action_reason ? ` — ${company.next_action_reason}` : " — waiting on them"}
+        </p>
+      )}
     </div>
   );
 }
