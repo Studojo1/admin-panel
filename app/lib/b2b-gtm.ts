@@ -337,6 +337,8 @@ export interface Company {
   last_reached_at?: string | null;
   /** Admin email that created the row — for the "added today" audit. */
   added_by?: string | null;
+  /** When the demo call is scheduled (post cold-call). Drives the demos view. */
+  demo_at?: string | null;
 }
 
 export interface Contact {
@@ -826,6 +828,32 @@ export function addedOnDay(
   return companies
     .filter((c) => c.created_at && istDayKey(new Date(c.created_at)) === dayKey)
     .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+}
+
+/**
+ * Companies created within the last `days` days (default 14), newest first —
+ * for the two-week audit of who was added, when, and their demo date.
+ */
+export function addedInLastDays(companies: Company[], days = 14, now: Date = new Date()): Company[] {
+  const cutoff = now.getTime() - days * 24 * 60 * 60 * 1000;
+  return companies
+    .filter((c) => c.created_at && new Date(c.created_at).getTime() >= cutoff)
+    .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+}
+
+/**
+ * Companies with a demo scheduled from now through the next `days` days, soonest
+ * first. Past demos drop off.
+ */
+export function upcomingDemos(companies: Company[], days = 14, now: Date = new Date()): Company[] {
+  const horizon = now.getTime() + days * 24 * 60 * 60 * 1000;
+  return companies
+    .filter((c) => {
+      if (!c.demo_at) return false;
+      const t = new Date(c.demo_at).getTime();
+      return t >= now.getTime() && t <= horizon;
+    })
+    .sort((a, b) => +new Date(a.demo_at!) - +new Date(b.demo_at!));
 }
 
 export function isSameCalendarDay(a: Date, b: Date): boolean {

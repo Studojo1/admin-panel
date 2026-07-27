@@ -41,11 +41,13 @@ import {
   WON_STAGES,
   activeFlags,
   addDays,
+  addedInLastDays,
   addedOnDay,
   companyMatchesView,
   daysSince,
   forecast,
   istDayKey,
+  upcomingDemos,
   formatDateTime,
   formatValue,
   isLaterToday,
@@ -552,13 +554,22 @@ export default function B2BGtm() {
         {/* End-of-day audit — companies added today (this person's, on a person
             page), with a date control to look back. Overview + person pages. */}
         {(view === "overview" || view.startsWith("owner:")) && (
-          <AddsAudit
-            companies={
-              view.startsWith("owner:")
-                ? companies.filter((c) => matchesOwnerView(c, view.slice(6)))
-                : companies
-            }
-          />
+          <>
+            <UpcomingDemos
+              companies={
+                view.startsWith("owner:")
+                  ? companies.filter((c) => matchesOwnerView(c, view.slice(6)))
+                  : companies
+              }
+            />
+            <AddsAudit
+              companies={
+                view.startsWith("owner:")
+                  ? companies.filter((c) => matchesOwnerView(c, view.slice(6)))
+                  : companies
+              }
+            />
+          </>
         )}
 
         {error && (
@@ -665,19 +676,21 @@ export default function B2BGtm() {
  * the relay a visible "new in your queue" surface.
  */
 /**
- * End-of-day audit: which companies were added on a given day. Collapsed by
- * default, opens on today, with a date input to review any past day. On a
+ * Audit of who was added and when — plus their demo date. Toggles between just
+ * today (with a date picker to review any past day) and the last two weeks. On a
  * person's page the `companies` are already scoped to them.
  */
 function AddsAudit({ companies }: { companies: Company[] }) {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"today" | "fortnight">("today");
   const [day, setDay] = useState(istDayKey(new Date()));
   const todayKey = istDayKey(new Date());
-  const added = useMemo(() => addedOnDay(companies, day), [companies, day]);
-  const todayCount = useMemo(
-    () => addedOnDay(companies, todayKey).length,
-    [companies, todayKey]
+
+  const rows = useMemo(
+    () => (mode === "today" ? addedOnDay(companies, day) : addedInLastDays(companies, 14)),
+    [companies, mode, day]
   );
+  const todayCount = useMemo(() => addedOnDay(companies, todayKey).length, [companies, todayKey]);
 
   return (
     <div className="mb-4 rounded-2xl border border-gray-200 bg-white">
@@ -686,46 +699,66 @@ function AddsAudit({ companies }: { companies: Company[] }) {
         className="w-full flex items-center justify-between px-4 py-2.5 text-left"
       >
         <span className="text-sm font-semibold text-gray-800">
-          {open ? "▾" : "▸"} Added today
+          {open ? "▾" : "▸"} Added
           <span className="ml-2 text-xs font-normal text-gray-500">
-            {todayCount} {todayCount === 1 ? "company" : "companies"}
+            {todayCount} today
           </span>
         </span>
-        <span className="text-[11px] text-gray-400 uppercase tracking-wide">End-of-day audit</span>
+        <span className="text-[11px] text-gray-400 uppercase tracking-wide">Audit</span>
       </button>
 
       {open && (
         <div className="px-4 pb-3 border-t border-gray-100 pt-3">
-          <div className="flex items-center gap-2 mb-3">
-            <label className="text-xs text-gray-500">Day</label>
-            <input
-              type="date"
-              value={day}
-              max={todayKey}
-              onChange={(e) => setDay(e.target.value)}
-              className="text-sm rounded-lg border border-gray-300 px-2 py-1"
-            />
-            {day !== todayKey && (
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <div className="flex rounded-lg border border-gray-300 overflow-hidden text-xs">
               <button
-                onClick={() => setDay(todayKey)}
-                className="text-xs text-violet-600 hover:underline"
+                onClick={() => setMode("today")}
+                className={`px-2.5 py-1 ${mode === "today" ? "bg-neutral-900 text-white" : "bg-white text-gray-600"}`}
               >
-                Back to today
+                A day
               </button>
+              <button
+                onClick={() => setMode("fortnight")}
+                className={`px-2.5 py-1 ${mode === "fortnight" ? "bg-neutral-900 text-white" : "bg-white text-gray-600"}`}
+              >
+                Last 2 weeks
+              </button>
+            </div>
+            {mode === "today" && (
+              <input
+                type="date"
+                value={day}
+                max={todayKey}
+                onChange={(e) => setDay(e.target.value)}
+                className="text-sm rounded-lg border border-gray-300 px-2 py-1"
+              />
             )}
+            <span className="text-xs text-gray-400">
+              {rows.length} {rows.length === 1 ? "company" : "companies"}
+            </span>
           </div>
 
-          {added.length === 0 ? (
-            <p className="text-sm text-gray-400">Nothing added {day === todayKey ? "today" : "that day"}.</p>
+          {rows.length === 0 ? (
+            <p className="text-sm text-gray-400">Nothing added in this range.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wide text-gray-400 text-left">
+                    <th className="py-1 pr-3 w-8"></th>
+                    <th className="py-1 pr-3">Company</th>
+                    <th className="py-1 pr-3">Contact</th>
+                    <th className="py-1 pr-3">Added</th>
+                    <th className="py-1 pr-3">By</th>
+                    <th className="py-1">Demo</th>
+                  </tr>
+                </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {added.map((c, i) => {
+                  {rows.map((c, i) => {
                     const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
                     return (
                       <tr key={c.id}>
-                        <td className="py-1.5 pr-3 text-gray-400 tabular-nums text-xs w-8">{i + 1}</td>
+                        <td className="py-1.5 pr-3 text-gray-400 tabular-nums text-xs">{i + 1}</td>
                         <td className="py-1.5 pr-3 font-medium text-gray-900 whitespace-nowrap">
                           <Link to={`/b2b-gtm/${c.id}`} className="hover:underline">
                             {c.name}
@@ -734,17 +767,28 @@ function AddsAudit({ companies }: { companies: Company[] }) {
                         <td className="py-1.5 pr-3 text-gray-600 whitespace-nowrap">
                           {contact?.name || "—"}
                         </td>
-                        <td className="py-1.5 pr-3 whitespace-nowrap">
-                          <StageBadge s={c.stage} />
-                        </td>
                         <td className="py-1.5 pr-3 text-gray-500 text-xs whitespace-nowrap">
-                          by {ownerLabel(c.owner)}
-                        </td>
-                        <td className="py-1.5 text-gray-400 text-xs whitespace-nowrap">
+                          {new Date(c.created_at).toLocaleDateString("en-GB", {
+                            day: "2-digit",
+                            month: "short",
+                          })}
+                          {" · "}
                           {new Date(c.created_at).toLocaleTimeString("en-GB", {
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
+                        </td>
+                        <td className="py-1.5 pr-3 text-gray-500 text-xs whitespace-nowrap">
+                          {ownerLabel(c.owner)}
+                        </td>
+                        <td className="py-1.5 text-xs whitespace-nowrap">
+                          {c.demo_at ? (
+                            <span className="text-emerald-700 font-medium">
+                              {formatDateTime(c.demo_at)}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">—</span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -753,6 +797,49 @@ function AddsAudit({ companies }: { companies: Company[] }) {
               </table>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Upcoming demos over the next two weeks, soonest first — so scheduled demo calls
+ * are visible at a glance. Collapsed by default.
+ */
+function UpcomingDemos({ companies }: { companies: Company[] }) {
+  const [open, setOpen] = useState(false);
+  const demos = useMemo(() => upcomingDemos(companies, 14), [companies]);
+  if (demos.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50/40">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left"
+      >
+        <span className="text-sm font-semibold text-emerald-900">
+          {open ? "▾" : "▸"} Upcoming demos
+          <span className="ml-2 text-xs font-normal text-emerald-700">{demos.length} scheduled</span>
+        </span>
+        <span className="text-[11px] text-emerald-600 uppercase tracking-wide">Next 2 weeks</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-3 border-t border-emerald-100 pt-3 space-y-1.5">
+          {demos.map((c) => {
+            const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
+            return (
+              <div key={c.id} className="flex items-center justify-between gap-3 text-sm">
+                <Link to={`/b2b-gtm/${c.id}`} className="font-medium text-gray-900 hover:underline">
+                  {c.name}
+                  {contact?.name && <span className="font-normal text-gray-500"> · {contact.name}</span>}
+                </Link>
+                <span className="text-emerald-800 font-medium whitespace-nowrap">
+                  {formatDateTime(c.demo_at)}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1237,6 +1324,35 @@ function ActionBar({
     }
   };
 
+  // Book the demo: sets demo_at, moves to Demo scheduled, and points the next
+  // action at the demo. Its own field so the demo survives later next-action edits.
+  const [scheduling, setScheduling] = useState(false);
+  const [demoAt, setDemoAt] = useState("");
+  const scheduleDemo = async () => {
+    if (!demoAt) return;
+    setBusy(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=note", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: c.id,
+          note: `Demo scheduled for ${formatDateTime(new Date(demoAt).toISOString())}.`,
+          stage: "demo_scheduled",
+          demo_at: new Date(demoAt).toISOString(),
+          next_action_at: new Date(demoAt).toISOString(),
+          next_action_reason: "Demo call",
+        }),
+      });
+      toast.success("Demo scheduled");
+      setScheduling(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // The Me→Deal hand needs a person choice (Jeremy or Hegde); every other relay
   // step has a single fixed destination.
   const relayNeedsChoice = relay?.owner === "Jeremy" && roleForCompany(c) === "Me";
@@ -1316,7 +1432,40 @@ function ActionBar({
                     : "Push to buy decision →"}
                 </button>
               )}
+              {/* Book the demo — for cold-call-done leads that don't have one yet. */}
+              {c.stage === "cold_call_done" && !c.demo_at && (
+                <button
+                  disabled={busy}
+                  onClick={() => setScheduling((v) => !v)}
+                  className="px-4 py-2 rounded-xl bg-white text-emerald-700 text-sm font-medium border border-emerald-300 hover:border-emerald-400 disabled:opacity-40"
+                >
+                  Schedule demo
+                </button>
+              )}
             </div>
+
+            {scheduling && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-sm text-gray-700">When's the demo?</span>
+                <input
+                  type="datetime-local"
+                  value={demoAt}
+                  onChange={(e) => setDemoAt(e.target.value)}
+                  className="text-sm rounded-lg border border-gray-300 px-2 py-1"
+                />
+                <button
+                  disabled={!demoAt || busy}
+                  onClick={scheduleDemo}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium disabled:opacity-40"
+                >
+                  Set demo
+                </button>
+                <button onClick={() => setScheduling(false)} className="text-xs text-gray-500">
+                  Cancel
+                </button>
+              </div>
+            )}
+
             <button
               onClick={onContactChange}
               className="mt-2 text-xs text-sky-700 hover:underline font-medium"

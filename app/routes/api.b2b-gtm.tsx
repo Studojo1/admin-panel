@@ -49,6 +49,9 @@ async function ensureTables() {
       refunded NUMERIC,
       -- Who created this row (admin email), for the end-of-day "added today" audit.
       added_by TEXT,
+      -- When the demo call is scheduled. Its own field (not next_action_at) so it
+      -- survives next-action changes and drives the "upcoming demos" view.
+      demo_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -108,6 +111,7 @@ async function ensureTables() {
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS collected_at TIMESTAMPTZ`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS refunded NUMERIC`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS added_by TEXT`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS demo_at TIMESTAMPTZ`);
 
   // The seed used to prefix imported notes with "Imported from Excel: ".
   // Strip it in place so the notes read exactly as they were written, without
@@ -790,7 +794,7 @@ export async function action({ request }: Route.ActionArgs) {
     // `stage` and `new_owner` are OPTIONAL: a plain note never moves the pipeline
     // (that would let jotting skew things). They're only sent when the user
     // explicitly flips "this note changes where they are" and confirms the move.
-    const { company_id, note, next_action_at, next_action_reason, stage, new_owner } = body;
+    const { company_id, note, next_action_at, next_action_reason, stage, new_owner, demo_at } = body;
 
     if (!note?.trim()) {
       return Response.json({ error: "A note needs something in it." }, { status: 400 });
@@ -823,6 +827,7 @@ export async function action({ request }: Route.ActionArgs) {
     }
     if (stage) sets.push(sql`stage = ${stage}`);
     if (new_owner !== undefined) sets.push(sql`owner = ${new_owner || null}`);
+    if (demo_at !== undefined) sets.push(sql`demo_at = ${demo_at || null}`);
 
     await db.execute(
       sql`UPDATE b2b_companies SET ${sql.join(sets, sql`, `)} WHERE id = ${company_id}`
@@ -1031,6 +1036,7 @@ export async function action({ request }: Route.ActionArgs) {
     if ("they_reachout_on" in f) sets.push(sql`they_reachout_on = ${f.they_reachout_on || null}`);
     if ("deal_value" in f) sets.push(sql`deal_value = ${f.deal_value ?? null}`);
     if ("next_purchase_due" in f) sets.push(sql`next_purchase_due = ${f.next_purchase_due || null}`);
+    if ("demo_at" in f) sets.push(sql`demo_at = ${f.demo_at || null}`);
     if ("cash_collected" in f) sets.push(sql`cash_collected = ${f.cash_collected ?? null}`);
     if ("deposit" in f) sets.push(sql`deposit = ${f.deposit ?? null}`);
     if ("collected_at" in f) sets.push(sql`collected_at = ${f.collected_at || null}`);
