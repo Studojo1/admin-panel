@@ -47,6 +47,8 @@ async function ensureTables() {
       deposit NUMERIC,
       collected_at TIMESTAMPTZ,
       refunded NUMERIC,
+      -- Who created this row (admin email), for the end-of-day "added today" audit.
+      added_by TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -105,6 +107,7 @@ async function ensureTables() {
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS deposit NUMERIC`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS collected_at TIMESTAMPTZ`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS refunded NUMERIC`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS added_by TEXT`);
 
   // The seed used to prefix imported notes with "Imported from Excel: ".
   // Strip it in place so the notes read exactly as they were written, without
@@ -746,7 +749,7 @@ export async function action({ request }: Route.ActionArgs) {
       INSERT INTO b2b_companies (
         name, stage, temperature, status, owner, whatsapp_group_made,
         needs_brochure, brochure_note, next_action_at, next_action_reason,
-        they_reachout_on, notes
+        they_reachout_on, notes, added_by
       ) VALUES (
         ${body.name},
         ${body.stage ?? "cold_call_done"},
@@ -759,7 +762,8 @@ export async function action({ request }: Route.ActionArgs) {
         ${body.next_action_at ?? null},
         ${body.next_action_reason ?? null},
         ${body.they_reachout_on ?? null},
-        ${body.notes ?? null}
+        ${body.notes ?? null},
+        ${admin.email}
       )
       RETURNING id
     `);

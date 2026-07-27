@@ -335,6 +335,8 @@ export interface Company {
   last_log?: CallLog | null;
   /** Last time we actually reached out — a call/meet/WhatsApp, not a note. */
   last_reached_at?: string | null;
+  /** Admin email that created the row — for the "added today" audit. */
+  added_by?: string | null;
 }
 
 export interface Contact {
@@ -801,6 +803,29 @@ export function isLaterToday(nextActionAt: string | null, now: Date = new Date()
   if (!nextActionAt) return false;
   const d = new Date(nextActionAt);
   return d.getTime() > now.getTime() && isSameCalendarDay(d, now);
+}
+
+/**
+ * The IST calendar day for a date, as "YYYY-MM-DD". The team works in IST, so the
+ * "added today" audit must bucket by the IST day, not the server's day.
+ */
+export function istDayKey(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** Companies created on the given IST day (default: today), newest first. */
+export function addedOnDay(
+  companies: Company[],
+  dayKey: string = istDayKey(new Date())
+): Company[] {
+  return companies
+    .filter((c) => c.created_at && istDayKey(new Date(c.created_at)) === dayKey)
+    .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
 }
 
 export function isSameCalendarDay(a: Date, b: Date): boolean {

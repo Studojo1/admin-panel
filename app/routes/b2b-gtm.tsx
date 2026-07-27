@@ -41,9 +41,11 @@ import {
   WON_STAGES,
   activeFlags,
   addDays,
+  addedOnDay,
   companyMatchesView,
   daysSince,
   forecast,
+  istDayKey,
   formatDateTime,
   formatValue,
   isLaterToday,
@@ -547,6 +549,18 @@ export default function B2BGtm() {
           </div>
         )}
 
+        {/* End-of-day audit — companies added today (this person's, on a person
+            page), with a date control to look back. Overview + person pages. */}
+        {(view === "overview" || view.startsWith("owner:")) && (
+          <AddsAudit
+            companies={
+              view.startsWith("owner:")
+                ? companies.filter((c) => matchesOwnerView(c, view.slice(6)))
+                : companies
+            }
+          />
+        )}
+
         {error && (
           <div className="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
             {error}
@@ -650,6 +664,101 @@ export default function B2BGtm() {
  * is a handoff (so it was passed to them and nothing's been logged since). Gives
  * the relay a visible "new in your queue" surface.
  */
+/**
+ * End-of-day audit: which companies were added on a given day. Collapsed by
+ * default, opens on today, with a date input to review any past day. On a
+ * person's page the `companies` are already scoped to them.
+ */
+function AddsAudit({ companies }: { companies: Company[] }) {
+  const [open, setOpen] = useState(false);
+  const [day, setDay] = useState(istDayKey(new Date()));
+  const todayKey = istDayKey(new Date());
+  const added = useMemo(() => addedOnDay(companies, day), [companies, day]);
+  const todayCount = useMemo(
+    () => addedOnDay(companies, todayKey).length,
+    [companies, todayKey]
+  );
+
+  return (
+    <div className="mb-4 rounded-2xl border border-gray-200 bg-white">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left"
+      >
+        <span className="text-sm font-semibold text-gray-800">
+          {open ? "▾" : "▸"} Added today
+          <span className="ml-2 text-xs font-normal text-gray-500">
+            {todayCount} {todayCount === 1 ? "company" : "companies"}
+          </span>
+        </span>
+        <span className="text-[11px] text-gray-400 uppercase tracking-wide">End-of-day audit</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-3 border-t border-gray-100 pt-3">
+          <div className="flex items-center gap-2 mb-3">
+            <label className="text-xs text-gray-500">Day</label>
+            <input
+              type="date"
+              value={day}
+              max={todayKey}
+              onChange={(e) => setDay(e.target.value)}
+              className="text-sm rounded-lg border border-gray-300 px-2 py-1"
+            />
+            {day !== todayKey && (
+              <button
+                onClick={() => setDay(todayKey)}
+                className="text-xs text-violet-600 hover:underline"
+              >
+                Back to today
+              </button>
+            )}
+          </div>
+
+          {added.length === 0 ? (
+            <p className="text-sm text-gray-400">Nothing added {day === todayKey ? "today" : "that day"}.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-gray-100">
+                  {added.map((c, i) => {
+                    const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
+                    return (
+                      <tr key={c.id}>
+                        <td className="py-1.5 pr-3 text-gray-400 tabular-nums text-xs w-8">{i + 1}</td>
+                        <td className="py-1.5 pr-3 font-medium text-gray-900 whitespace-nowrap">
+                          <Link to={`/b2b-gtm/${c.id}`} className="hover:underline">
+                            {c.name}
+                          </Link>
+                        </td>
+                        <td className="py-1.5 pr-3 text-gray-600 whitespace-nowrap">
+                          {contact?.name || "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 whitespace-nowrap">
+                          <StageBadge s={c.stage} />
+                        </td>
+                        <td className="py-1.5 pr-3 text-gray-500 text-xs whitespace-nowrap">
+                          by {ownerLabel(c.owner)}
+                        </td>
+                        <td className="py-1.5 text-gray-400 text-xs whitespace-nowrap">
+                          {new Date(c.created_at).toLocaleTimeString("en-GB", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PersonHeader({
   owner,
   companies,
