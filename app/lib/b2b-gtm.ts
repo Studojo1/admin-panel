@@ -178,6 +178,7 @@ export const LOST_REASON_LABELS: Record<LostReason, string> = {
 export type ExitReason =
   | "not_interested"
   | "not_in_space"
+  | "no_placements"
   | "no_response"
   | "too_small"
   | "bad_fit"
@@ -186,6 +187,7 @@ export type ExitReason =
 export const EXIT_REASONS: ExitReason[] = [
   "not_interested",
   "not_in_space",
+  "no_placements",
   "no_response",
   "too_small",
   "bad_fit",
@@ -195,6 +197,7 @@ export const EXIT_REASONS: ExitReason[] = [
 export const EXIT_REASON_LABELS: Record<ExitReason, string> = {
   not_interested: "Not interested",
   not_in_space: "Not in this space",
+  no_placements: "Not into placements",
   no_response: "Never responded",
   too_small: "Too small to be worth it",
   bad_fit: "Not a fit for BOB",
