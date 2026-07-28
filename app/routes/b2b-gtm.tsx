@@ -1610,6 +1610,7 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
   const [blockNote, setBlockNote] = useState("");
   const [notes, setNotes] = useState("");
   const [groupMade, setGroupMade] = useState(true);
+  const [demoAt, setDemoAt] = useState("");
   const [saving, setSaving] = useState(false);
 
   const interestOpt = INTEREST_OPTS.find((o) => o.key === interest);
@@ -1630,15 +1631,18 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
         notes.trim() ? `Notes: ${notes.trim()}` : "",
       ].filter(Boolean);
 
+      const demoIso = demoAt ? new Date(demoAt).toISOString() : null;
       await authedFetch("/api/b2b-gtm?action=company", {
         method: "POST",
         body: JSON.stringify({
           name,
-          stage: "cold_call_done",
+          // A demo already booked → start them at Demo scheduled, else Cold call done.
+          stage: demoIso ? "demo_scheduled" : "cold_call_done",
           owner: "Vivaan",
           temperature: interestOpt?.temp ?? null,
           whatsapp_group_made: groupMade,
           notes: parts.join(" "),
+          demo_at: demoIso,
           next_action_at: addDays(new Date(), 1).toISOString(),
           next_action_reason: "Vivaan to hand to Pranav",
           contact_name: contactName.trim() || null,
@@ -1689,6 +1693,18 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
             </Choice>
           ))}
         </div>
+      </Field>
+
+      <Field label="Demo call date (if booked)">
+        <input
+          type="datetime-local"
+          value={demoAt}
+          onChange={(e) => setDemoAt(e.target.value)}
+          className={inputCls}
+        />
+        <p className="text-[11px] text-gray-400 mt-1">
+          Sets the demo and starts them at "Demo scheduled". Leave blank if not booked yet.
+        </p>
       </Field>
 
       <Field label="Did you hit any block?">

@@ -753,7 +753,7 @@ export async function action({ request }: Route.ActionArgs) {
       INSERT INTO b2b_companies (
         name, stage, temperature, status, owner, whatsapp_group_made,
         needs_brochure, brochure_note, next_action_at, next_action_reason,
-        they_reachout_on, notes, added_by
+        they_reachout_on, notes, added_by, demo_at
       ) VALUES (
         ${body.name},
         ${body.stage ?? "cold_call_done"},
@@ -767,7 +767,8 @@ export async function action({ request }: Route.ActionArgs) {
         ${body.next_action_reason ?? null},
         ${body.they_reachout_on ?? null},
         ${body.notes ?? null},
-        ${admin.email}
+        ${admin.email},
+        ${body.demo_at ?? null}
       )
       RETURNING id
     `);
