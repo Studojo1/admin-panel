@@ -26,12 +26,16 @@ import {
   TEAM,
   WON_STAGES,
   activeFlags,
+  addDays,
   cashSummary,
   daysSince,
   formatDateTime,
   formatValue,
   isOverdue,
   logSentence,
+  nextRelayStep,
+  ownerLabel,
+  roleForCompany,
   toLocalInputValue,
   type CallLog,
   type Company,
@@ -250,6 +254,7 @@ function CompanyBody({
               >
                 Remove from pipeline
               </button>
+              <BuyDecisionButton company={company} onSaved={onReload} />
               <button
                 onClick={onCheckIn}
                 className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700"
@@ -472,6 +477,76 @@ function NoteComposer({ companyId, onSaved }: { companyId: number; onSaved: () =
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Push a company into the buy decision from the full page — the same relay
+ * advance as on the board. Pranav's lead asks which of the deal team (Jeremy /
+ * Hegde) takes it; Vivaan's hands to Pranav. Shown only for Vivaan's/Pranav's
+ * leads that still have a forward hand.
+ */
+function BuyDecisionButton({ company, onSaved }: { company: Company; onSaved: () => void }) {
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const relay = nextRelayStep(company);
+  const role = roleForCompany(company);
+
+  if ((role !== "Vivaan" && role !== "Me") || !relay) return null;
+
+  const advance = async (owner: string, stage: Stage, reason: string) => {
+    setBusy(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=note", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: company.id,
+          note: `Advanced — ${reason}.`,
+          stage,
+          new_owner: owner,
+          next_action_at: addDays(new Date(), 2).toISOString(),
+          next_action_reason: reason,
+        }),
+      });
+      toast.success(`Handed to ${ownerLabel(owner)}`);
+      setPicking(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (picking) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-gray-600">To whom?</span>
+        {["Jeremy", "Hegde"].map((t) => (
+          <button
+            key={t}
+            disabled={busy}
+            onClick={() => advance(t, "negotiating", `${t} to demo & work the deal`)}
+            className="px-3 py-2 rounded-xl bg-white text-violet-700 text-sm font-medium border border-violet-300 hover:border-violet-400 disabled:opacity-40"
+          >
+            {t}
+          </button>
+        ))}
+        <button onClick={() => setPicking(false)} className="text-xs text-gray-500">
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      disabled={busy}
+      onClick={() => (role === "Me" ? setPicking(true) : advance(relay.owner, relay.stage, relay.reason))}
+      className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 disabled:opacity-40"
+    >
+      {role === "Vivaan" ? "Hand to Pranav →" : "Push to buy decision →"}
+    </button>
   );
 }
 
@@ -865,6 +940,9 @@ function EditPanel({
     leads_change_note: company.leads_change_note ?? "",
   });
   const [whatsapp, setWhatsapp] = useState(company.whatsapp_group_made);
+  const [demoAt, setDemoAt] = useState(
+    company.demo_at ? toLocalInputValue(new Date(company.demo_at)) : ""
+  );
   const [dealValue, setDealValue] = useState(company.deal_value ?? "");
   const [nextPurchaseDue, setNextPurchaseDue] = useState(
     company.next_purchase_due ? toLocalInputValue(new Date(company.next_purchase_due)) : ""
@@ -890,6 +968,7 @@ function EditPanel({
             stage,
             owner,
             whatsapp_group_made: whatsapp,
+            demo_at: demoAt ? new Date(demoAt).toISOString() : null,
             deal_value: dealValue === "" ? null : Number(dealValue),
             next_purchase_due: nextPurchaseDue ? new Date(nextPurchaseDue).toISOString() : null,
             cash_collected: cashCollected === "" ? null : Number(cashCollected),
@@ -941,6 +1020,17 @@ function EditPanel({
             </Choice>
           ))}
         </div>
+      </Field>
+      <Field label="Demo call date">
+        <input
+          type="datetime-local"
+          value={demoAt}
+          onChange={(e) => setDemoAt(e.target.value)}
+          className={inputCls}
+        />
+        <p className="text-[11px] text-gray-400 mt-1">
+          When the demo is scheduled — shows in "Upcoming demos". Leave blank if none.
+        </p>
       </Field>
       <Field label="Deal value (₹)">
         <input

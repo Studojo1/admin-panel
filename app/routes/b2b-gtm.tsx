@@ -1327,7 +1327,9 @@ function ActionBar({
   // Book the demo: sets demo_at, moves to Demo scheduled, and points the next
   // action at the demo. Its own field so the demo survives later next-action edits.
   const [scheduling, setScheduling] = useState(false);
-  const [demoAt, setDemoAt] = useState("");
+  const [demoAt, setDemoAt] = useState(
+    c.demo_at ? toLocalInputValue(new Date(c.demo_at)) : ""
+  );
   const scheduleDemo = async () => {
     if (!demoAt) return;
     setBusy(true);
@@ -1339,8 +1341,8 @@ function ActionBar({
           note: `Demo scheduled for ${formatDateTime(new Date(demoAt).toISOString())}.`,
           stage: "demo_scheduled",
           demo_at: new Date(demoAt).toISOString(),
-          next_action_at: new Date(demoAt).toISOString(),
-          next_action_reason: "Demo call",
+          // Deliberately no next_action_at — scheduling a demo shouldn't set or
+          // overwrite the follow-up date. The demo lives in its own demo_at field.
         }),
       });
       toast.success("Demo scheduled");
@@ -1432,14 +1434,18 @@ function ActionBar({
                     : "Push to buy decision →"}
                 </button>
               )}
-              {/* Book the demo — for cold-call-done leads that don't have one yet. */}
-              {c.stage === "cold_call_done" && !c.demo_at && (
+              {/* Book (or change) the demo — on any active lead in play, not just
+                  cold-call-done. Won / lost / exited don't get it. */}
+              {(branch === "pre_gtm" ||
+                branch === "mine_active" ||
+                branch === "buy_decision" ||
+                branch === "blocked") && (
                 <button
                   disabled={busy}
                   onClick={() => setScheduling((v) => !v)}
                   className="px-4 py-2 rounded-xl bg-white text-emerald-700 text-sm font-medium border border-emerald-300 hover:border-emerald-400 disabled:opacity-40"
                 >
-                  Schedule demo
+                  {c.demo_at ? "Change demo" : "Schedule demo"}
                 </button>
               )}
             </div>
