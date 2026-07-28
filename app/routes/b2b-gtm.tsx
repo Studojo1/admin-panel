@@ -1253,6 +1253,96 @@ function NextActionEditor({ c, onSaved }: { c: Company; onSaved: () => void }) {
 }
 
 /**
+ * Edit the demo-call date right from the expanded row — set it, change it, or
+ * clear it, mirroring the next-action editor. Its own field, so it never touches
+ * the follow-up date.
+ */
+function DemoEditor({ c, onSaved }: { c: Company; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState(c.demo_at ? toLocalInputValue(new Date(c.demo_at)) : "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async (clear = false) => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=company", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: c.id,
+          fields: { demo_at: clear || !at ? null : new Date(at).toISOString() },
+        }),
+      });
+      toast.success(clear ? "Demo cleared" : "Demo date saved");
+      setOpen(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm min-w-0">
+          <p className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wide">
+            Demo call
+            {c.demo_at && (
+              <span className="ml-1.5 font-normal text-emerald-600 normal-case">
+                · {formatDateTime(c.demo_at)}
+              </span>
+            )}
+          </p>
+          {!c.demo_at && <p className="text-sm text-gray-400">Not scheduled</p>}
+        </div>
+        <button
+          onClick={() => setOpen(true)}
+          className="text-xs text-emerald-700 hover:underline font-medium shrink-0"
+        >
+          {c.demo_at ? "Change" : "Set demo"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wide mb-1.5">
+        Demo call date
+      </p>
+      <input
+        type="datetime-local"
+        value={at}
+        onChange={(e) => setAt(e.target.value)}
+        className={inputCls}
+      />
+      <div className="flex justify-end gap-2 mt-2">
+        {c.demo_at && (
+          <button
+            onClick={() => save(true)}
+            disabled={saving}
+            className="text-xs text-rose-600 hover:underline mr-auto"
+          >
+            Clear
+          </button>
+        )}
+        <button onClick={() => setOpen(false)} className="text-xs text-gray-500">
+          Cancel
+        </button>
+        <button
+          disabled={!at || saving}
+          onClick={() => save(false)}
+          className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium disabled:opacity-40"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The guided next-action bar — the MCQ. Which buttons show is decided purely by
  * where the company IS (mcqBranchFor), so a cold Pre-GTM lead is never offered
  * "push to buy decision" and a won account isn't asked to log a cold call.
@@ -1324,36 +1414,6 @@ function ActionBar({
     }
   };
 
-  // Book the demo: sets demo_at, moves to Demo scheduled, and points the next
-  // action at the demo. Its own field so the demo survives later next-action edits.
-  const [scheduling, setScheduling] = useState(false);
-  const [demoAt, setDemoAt] = useState(
-    c.demo_at ? toLocalInputValue(new Date(c.demo_at)) : ""
-  );
-  const scheduleDemo = async () => {
-    if (!demoAt) return;
-    setBusy(true);
-    try {
-      await authedFetch("/api/b2b-gtm?action=note", {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: c.id,
-          note: `Demo scheduled for ${formatDateTime(new Date(demoAt).toISOString())}.`,
-          stage: "demo_scheduled",
-          demo_at: new Date(demoAt).toISOString(),
-          // Deliberately no next_action_at — scheduling a demo shouldn't set or
-          // overwrite the follow-up date. The demo lives in its own demo_at field.
-        }),
-      });
-      toast.success("Demo scheduled");
-      setScheduling(false);
-      onSaved();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   // The Me→Deal hand needs a person choice (Jeremy or Hegde); every other relay
   // step has a single fixed destination.
@@ -1434,43 +1494,7 @@ function ActionBar({
                     : "Push to buy decision →"}
                 </button>
               )}
-              {/* Book (or change) the demo — on any active lead in play, not just
-                  cold-call-done. Won / lost / exited don't get it. */}
-              {(branch === "pre_gtm" ||
-                branch === "mine_active" ||
-                branch === "buy_decision" ||
-                branch === "blocked") && (
-                <button
-                  disabled={busy}
-                  onClick={() => setScheduling((v) => !v)}
-                  className="px-4 py-2 rounded-xl bg-white text-emerald-700 text-sm font-medium border border-emerald-300 hover:border-emerald-400 disabled:opacity-40"
-                >
-                  {c.demo_at ? "Change demo" : "Schedule demo"}
-                </button>
-              )}
             </div>
-
-            {scheduling && (
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="text-sm text-gray-700">When's the demo?</span>
-                <input
-                  type="datetime-local"
-                  value={demoAt}
-                  onChange={(e) => setDemoAt(e.target.value)}
-                  className="text-sm rounded-lg border border-gray-300 px-2 py-1"
-                />
-                <button
-                  disabled={!demoAt || busy}
-                  onClick={scheduleDemo}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium disabled:opacity-40"
-                >
-                  Set demo
-                </button>
-                <button onClick={() => setScheduling(false)} className="text-xs text-gray-500">
-                  Cancel
-                </button>
-              </div>
-            )}
 
             <button
               onClick={onContactChange}
@@ -1504,6 +1528,11 @@ function ActionBar({
                 context above. Editable inline. */}
             <div className="mt-3 pt-3 border-t border-violet-200">
               <NextActionEditor c={c} onSaved={onSaved} />
+            </div>
+
+            {/* Demo call date — always visible & editable right here in the row. */}
+            <div className="mt-3 pt-3 border-t border-violet-200">
+              <DemoEditor c={c} onSaved={onSaved} />
             </div>
           </div>
         </div>
