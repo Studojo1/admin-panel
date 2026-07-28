@@ -26,12 +26,16 @@ import {
   TEAM,
   WON_STAGES,
   activeFlags,
+  addDays,
   cashSummary,
   daysSince,
   formatDateTime,
   formatValue,
   isOverdue,
   logSentence,
+  nextRelayStep,
+  ownerLabel,
+  roleForCompany,
   toLocalInputValue,
   type CallLog,
   type Company,
@@ -250,6 +254,7 @@ function CompanyBody({
               >
                 Remove from pipeline
               </button>
+              <BuyDecisionButton company={company} onSaved={onReload} />
               <button
                 onClick={onCheckIn}
                 className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-700"
@@ -274,44 +279,11 @@ function CompanyBody({
             <p className="text-sm mt-0.5 text-gray-600">{company.lost_feedback}</p>
           )}
           <p className="text-xs text-gray-500 mt-1">
-            Bring them back any time — they'll return to GTM active as yours.
+            Bring them back any time — they'll return to GTM active as Pranav's.
           </p>
         </div>
       ) : (
-      /* Why am I calling them, right at the top. */
-      <div
-        className={`mt-5 rounded-2xl border-2 px-5 py-4 ${
-          overdue
-            ? "border-neutral-900 bg-violet-500 text-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
-            : "border-gray-200 bg-white"
-        }`}
-      >
-        <p
-          className={`text-[11px] font-semibold uppercase tracking-wide ${
-            overdue ? "text-violet-100" : "text-gray-500"
-          }`}
-        >
-          Next action
-        </p>
-        {company.next_action_at ? (
-          <>
-            <p className={`text-lg font-bold mt-0.5 ${overdue ? "" : "text-gray-900"}`}>
-              {formatDateTime(company.next_action_at)}
-              {overdue && " — overdue"}
-            </p>
-            {company.next_action_reason && (
-              <p className={`text-sm mt-0.5 ${overdue ? "text-violet-50" : "text-gray-600"}`}>
-                {company.next_action_reason}
-              </p>
-            )}
-          </>
-        ) : (
-          <p className="text-lg font-bold mt-0.5 text-rose-600">
-            No next action set
-            {company.next_action_reason ? ` — note: ${company.next_action_reason}` : ""}
-          </p>
-        )}
-      </div>
+        <NextActionPanel company={company} overdue={overdue} onSaved={onReload} />
       )}
 
       <div className="grid lg:grid-cols-3 gap-5 mt-5">
@@ -509,6 +481,76 @@ function NoteComposer({ companyId, onSaved }: { companyId: number; onSaved: () =
 }
 
 /**
+ * Push a company into the buy decision from the full page — the same relay
+ * advance as on the board. Pranav's lead asks which of the deal team (Jeremy /
+ * Hegde) takes it; Vivaan's hands to Pranav. Shown only for Vivaan's/Pranav's
+ * leads that still have a forward hand.
+ */
+function BuyDecisionButton({ company, onSaved }: { company: Company; onSaved: () => void }) {
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const relay = nextRelayStep(company);
+  const role = roleForCompany(company);
+
+  if ((role !== "Vivaan" && role !== "Me") || !relay) return null;
+
+  const advance = async (owner: string, stage: Stage, reason: string) => {
+    setBusy(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=note", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: company.id,
+          note: `Advanced — ${reason}.`,
+          stage,
+          new_owner: owner,
+          next_action_at: addDays(new Date(), 2).toISOString(),
+          next_action_reason: reason,
+        }),
+      });
+      toast.success(`Handed to ${ownerLabel(owner)}`);
+      setPicking(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (picking) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-gray-600">To whom?</span>
+        {["Jeremy", "Hegde"].map((t) => (
+          <button
+            key={t}
+            disabled={busy}
+            onClick={() => advance(t, "negotiating", `${t} to demo & work the deal`)}
+            className="px-3 py-2 rounded-xl bg-white text-violet-700 text-sm font-medium border border-violet-300 hover:border-violet-400 disabled:opacity-40"
+          >
+            {t}
+          </button>
+        ))}
+        <button onClick={() => setPicking(false)} className="text-xs text-gray-500">
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      disabled={busy}
+      onClick={() => (role === "Me" ? setPicking(true) : advance(relay.owner, relay.stage, relay.reason))}
+      className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 disabled:opacity-40"
+    >
+      {role === "Vivaan" ? "Hand to Pranav →" : "Push to buy decision →"}
+    </button>
+  );
+}
+
+/**
  * Contacts, editable. Each active contact's name / phone / role can be fixed
  * inline, and "+ Add person" adds another stakeholder alongside (distinct from
  * "Contact changed", which retires the old one). Past contacts stay for history.
@@ -679,6 +721,130 @@ function AddPerson({ companyId, onSaved }: { companyId: number; onSaved: () => v
   );
 }
 
+/**
+ * The next-action banner at the top of the full page, now editable in place —
+ * change the date and reason, or clear the date ("waiting on them"), without
+ * digging into the edit panel.
+ */
+function NextActionPanel({
+  company,
+  overdue,
+  onSaved,
+}: {
+  company: Company;
+  overdue: boolean;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [noDate, setNoDate] = useState(!company.next_action_at);
+  const [nextAt, setNextAt] = useState(
+    company.next_action_at ? toLocalInputValue(new Date(company.next_action_at)) : ""
+  );
+  const [reason, setReason] = useState(company.next_action_reason ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=company", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: company.id,
+          fields: {
+            next_action_at: noDate || !nextAt ? null : new Date(nextAt).toISOString(),
+            next_action_reason: reason.trim() || (noDate ? "Waiting on them — no date set" : null),
+          },
+        }),
+      });
+      toast.success("Next action updated");
+      setEditing(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="mt-5 rounded-2xl border-2 border-gray-300 bg-white px-5 py-4">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
+          Next action
+        </p>
+        <label className="flex items-center gap-2 text-sm text-gray-700 mb-2">
+          <input type="checkbox" checked={noDate} onChange={(e) => setNoDate(e.target.checked)} className="rounded" />
+          No follow-up date — waiting on them
+        </label>
+        {!noDate && (
+          <input
+            type="datetime-local"
+            value={nextAt}
+            onChange={(e) => setNextAt(e.target.value)}
+            className={inputCls}
+          />
+        )}
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder={noDate ? "Why no date? e.g. stuck in their internal red tape" : "Why are we reaching out then?"}
+          className={`${inputCls} mt-2`}
+        />
+        <div className="flex justify-end gap-2 mt-3">
+          <button onClick={() => setEditing(false)} className="text-sm text-gray-500">Cancel</button>
+          <button
+            disabled={saving || (!noDate && !nextAt)}
+            onClick={save}
+            className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-medium disabled:opacity-40"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`mt-5 rounded-2xl border-2 px-5 py-4 ${
+        overdue
+          ? "border-neutral-900 bg-violet-500 text-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+          : "border-gray-200 bg-white"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className={`text-[11px] font-semibold uppercase tracking-wide ${overdue ? "text-violet-100" : "text-gray-500"}`}>
+          Next action
+        </p>
+        <button
+          onClick={() => setEditing(true)}
+          className={`text-xs font-medium hover:underline shrink-0 ${overdue ? "text-white" : "text-violet-600"}`}
+        >
+          Edit
+        </button>
+      </div>
+      {company.next_action_at ? (
+        <>
+          <p className={`text-lg font-bold mt-0.5 ${overdue ? "" : "text-gray-900"}`}>
+            {formatDateTime(company.next_action_at)}
+            {overdue && " — overdue"}
+          </p>
+          {company.next_action_reason && (
+            <p className={`text-sm mt-0.5 ${overdue ? "text-violet-50" : "text-gray-600"}`}>
+              {company.next_action_reason}
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="text-lg font-bold mt-0.5 text-rose-600">
+          No date set
+          {company.next_action_reason ? ` — ${company.next_action_reason}` : " — waiting on them"}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
@@ -774,6 +940,9 @@ function EditPanel({
     leads_change_note: company.leads_change_note ?? "",
   });
   const [whatsapp, setWhatsapp] = useState(company.whatsapp_group_made);
+  const [demoAt, setDemoAt] = useState(
+    company.demo_at ? toLocalInputValue(new Date(company.demo_at)) : ""
+  );
   const [dealValue, setDealValue] = useState(company.deal_value ?? "");
   const [nextPurchaseDue, setNextPurchaseDue] = useState(
     company.next_purchase_due ? toLocalInputValue(new Date(company.next_purchase_due)) : ""
@@ -799,6 +968,7 @@ function EditPanel({
             stage,
             owner,
             whatsapp_group_made: whatsapp,
+            demo_at: demoAt ? new Date(demoAt).toISOString() : null,
             deal_value: dealValue === "" ? null : Number(dealValue),
             next_purchase_due: nextPurchaseDue ? new Date(nextPurchaseDue).toISOString() : null,
             cash_collected: cashCollected === "" ? null : Number(cashCollected),
@@ -842,7 +1012,7 @@ function EditPanel({
       <Field label="Who's handling it">
         <div className="flex flex-wrap gap-1.5">
           <Choice active={!owner} onClick={() => setOwner("")}>
-            Me
+            Pranav
           </Choice>
           {TEAM.map((t) => (
             <Choice key={t} active={owner === t} onClick={() => setOwner(t)}>
@@ -850,6 +1020,17 @@ function EditPanel({
             </Choice>
           ))}
         </div>
+      </Field>
+      <Field label="Demo call date">
+        <input
+          type="datetime-local"
+          value={demoAt}
+          onChange={(e) => setDemoAt(e.target.value)}
+          className={inputCls}
+        />
+        <p className="text-[11px] text-gray-400 mt-1">
+          When the demo is scheduled — shows in "Upcoming demos". Leave blank if none.
+        </p>
       </Field>
       <Field label="Deal value (₹)">
         <input

@@ -138,9 +138,17 @@ export function CheckInModal({
   const needsObjection = outcome ? objectionRequired(outcome) : false;
   const objectionNoteMissing = objectionNeedsNote(objection) && !objectionNote.trim();
   const lostIncomplete = outcome === "closed_lost" && (!lostReason || !lostFeedback.trim());
+  // A next action isn't always possible — sometimes the ball's genuinely in
+  // their court (red tape, waiting on them). Then we log with no follow-up date.
+  const [noDate, setNoDate] = useState(false);
+  // On a no-answer / no-show, they may still have arranged a callback ("text me
+  // at 4"). Flagging it marks the row as a callback, same as if they'd asked on
+  // a live call.
+  const [callbackArranged, setCallbackArranged] = useState(false);
+  const nextOk = noDate || !!nextAt;
   const canSave =
     method !== null &&
-    !!nextAt &&
+    nextOk &&
     (!reached ||
       (!!outcome && (!needsObjection || !!objection) && !objectionNoteMissing && !lostIncomplete));
 
@@ -168,10 +176,10 @@ export function CheckInModal({
           },
         ]
       : []),
-    { key: "context", title: "Anything they said?", canNext: true },
+    { key: "context", title: reached ? "Anything they said?" : "Note for next time?", canNext: true },
     ...(reached ? [{ key: "asks", title: "Did they ask for anything?", canNext: true }] : []),
     ...(stageStepNeeded ? [{ key: "stage", title: "Where are they now?", canNext: true }] : []),
-    { key: "next", title: "When do you reach back?", canNext: !!nextAt },
+    { key: "next", title: "When do you reach back?", canNext: nextOk },
   ];
 
   const clampedStep = Math.min(step, steps.length - 1);
@@ -193,20 +201,25 @@ export function CheckInModal({
           kind: methodToKind(method!),
           picked_up: reached,
           attendees: method === "meet" ? attendees.trim() || null : null,
-          outcome,
+          // A no-answer with a callback arranged records as asked_callback, so the
+          // board flags it with the callback highlight like any other callback.
+          outcome: !reached && callbackArranged ? "asked_callback" : outcome,
           objection,
           objection_note: objectionNote.trim() || null,
           temperature_at_time: temperature,
           note: note.trim() || null,
-          next_action_at: new Date(nextAt).toISOString(),
-          next_action_reason: nextReason,
+          next_action_at: noDate ? null : new Date(nextAt).toISOString(),
+          next_action_reason: noDate
+            ? nextReason || "Waiting on them — no date set"
+            : nextReason || (callbackArranged ? "They'll call back" : ""),
           value_discussed: dealValue === "" ? null : Number(dealValue),
           stage,
           blocker_type: outcome === "blocked" ? blockerType : undefined,
           blocker_note: outcome === "blocked" ? blockerNote : undefined,
           lost_reason: outcome === "closed_lost" ? lostReason : undefined,
           lost_feedback: outcome === "closed_lost" ? lostFeedback : undefined,
-          comeback_at: outcome === "closed_lost" ? new Date(nextAt).toISOString() : undefined,
+          comeback_at:
+            outcome === "closed_lost" && !noDate ? new Date(nextAt).toISOString() : undefined,
           next_purchase_due:
             outcome === "closed_won" && nextPurchaseDue
               ? new Date(nextPurchaseDue).toISOString()
@@ -405,13 +418,17 @@ export function CheckInModal({
         {current.key === "context" && (
           <>
             <p className="text-base font-semibold text-gray-900 mb-3">
-              What did they say? How did it feel?
+              {reached ? "What did they say? How did it feel?" : "Any note for next time? (optional)"}
             </p>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              rows={4}
-              placeholder="Their tone, exactly what they asked for, anything worth remembering next time…"
+              rows={reached ? 4 : 2}
+              placeholder={
+                reached
+                  ? "Their tone, exactly what they asked for, anything worth remembering next time…"
+                  : "e.g. rang out twice — try WhatsApp, or call after 6pm"
+              }
               className={inputCls}
             />
             {reached && (
@@ -487,7 +504,33 @@ export function CheckInModal({
         {current.key === "next" && (
           <>
             <p className="text-base font-semibold text-gray-900 mb-3">When do you reach back?</p>
+
+            {/* Sometimes there's genuinely no next step to schedule — the ball's
+                in their court. Log it without a follow-up date. */}
+            <label className="flex items-center gap-2 text-sm text-gray-700 mb-3">
+              <input
+                type="checkbox"
+                checked={noDate}
+                onChange={(e) => setNoDate(e.target.checked)}
+                className="rounded"
+              />
+              No follow-up date — waiting on them
+            </label>
+
+            {/* No-answer / no-show can still end in an arranged callback. */}
             {!reached && (
+              <label className="flex items-center gap-2 text-sm text-gray-700 mb-3">
+                <input
+                  type="checkbox"
+                  checked={callbackArranged}
+                  onChange={(e) => setCallbackArranged(e.target.checked)}
+                  className="rounded"
+                />
+                They'll call back / callback arranged
+              </label>
+            )}
+
+            {!noDate && !reached && (
               <div className="flex flex-wrap gap-2 mb-3">
                 {method === "no_answer" && (
                   <>
@@ -521,18 +564,29 @@ export function CheckInModal({
                 </Choice>
               </div>
             )}
-            <input
-              type="datetime-local"
-              value={nextAt}
-              onChange={(e) => setNextAt(e.target.value)}
-              className={inputCls}
-            />
-            <input
-              value={nextReason}
-              onChange={(e) => setNextReason(e.target.value)}
-              placeholder="Why then? (suggested from the call — change freely)"
-              className={inputCls + " mt-2"}
-            />
+            {noDate ? (
+              <input
+                value={nextReason}
+                onChange={(e) => setNextReason(e.target.value)}
+                placeholder="Why no date? e.g. their side is stuck in internal red tape"
+                className={inputCls}
+              />
+            ) : (
+              <>
+                <input
+                  type="datetime-local"
+                  value={nextAt}
+                  onChange={(e) => setNextAt(e.target.value)}
+                  className={inputCls}
+                />
+                <input
+                  value={nextReason}
+                  onChange={(e) => setNextReason(e.target.value)}
+                  placeholder="Why then? (suggested from the call — change freely)"
+                  className={inputCls + " mt-2"}
+                />
+              </>
+            )}
           </>
         )}
       </div>

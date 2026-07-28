@@ -41,12 +41,17 @@ import {
   WON_STAGES,
   activeFlags,
   addDays,
+  addedInLastDays,
+  addedOnDay,
   companyMatchesView,
   daysSince,
   forecast,
+  istDayKey,
+  upcomingDemos,
   formatDateTime,
   formatValue,
   isLaterToday,
+  isOnTodaysList,
   isOverdue,
   logSentence,
   toLocalInputValue,
@@ -311,7 +316,7 @@ export default function B2BGtm() {
           <div className="flex gap-2 shrink-0">
             <button
               onClick={() => setAdding(true)}
-              title="New companies enter Pre-GTM as Vivaan's, then get handed to you"
+              title="New companies enter Pre-GTM as Vivaan's, then get handed to Pranav"
               className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium border-2 border-neutral-900 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all"
             >
               + Add to Pre-GTM
@@ -546,6 +551,27 @@ export default function B2BGtm() {
           </div>
         )}
 
+        {/* End-of-day audit — companies added today (this person's, on a person
+            page), with a date control to look back. Overview + person pages. */}
+        {(view === "overview" || view.startsWith("owner:")) && (
+          <>
+            <UpcomingDemos
+              companies={
+                view.startsWith("owner:")
+                  ? companies.filter((c) => matchesOwnerView(c, view.slice(6)))
+                  : companies
+              }
+            />
+            <AddsAudit
+              companies={
+                view.startsWith("owner:")
+                  ? companies.filter((c) => matchesOwnerView(c, view.slice(6)))
+                  : companies
+              }
+            />
+          </>
+        )}
+
         {error && (
           <div className="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
             {error}
@@ -649,6 +675,177 @@ export default function B2BGtm() {
  * is a handoff (so it was passed to them and nothing's been logged since). Gives
  * the relay a visible "new in your queue" surface.
  */
+/**
+ * Audit of who was added and when — plus their demo date. Toggles between just
+ * today (with a date picker to review any past day) and the last two weeks. On a
+ * person's page the `companies` are already scoped to them.
+ */
+function AddsAudit({ companies }: { companies: Company[] }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"today" | "fortnight">("today");
+  const [day, setDay] = useState(istDayKey(new Date()));
+  const todayKey = istDayKey(new Date());
+
+  const rows = useMemo(
+    () => (mode === "today" ? addedOnDay(companies, day) : addedInLastDays(companies, 14)),
+    [companies, mode, day]
+  );
+  const todayCount = useMemo(() => addedOnDay(companies, todayKey).length, [companies, todayKey]);
+
+  return (
+    <div className="mb-4 rounded-2xl border border-gray-200 bg-white">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left"
+      >
+        <span className="text-sm font-semibold text-gray-800">
+          {open ? "▾" : "▸"} Added
+          <span className="ml-2 text-xs font-normal text-gray-500">
+            {todayCount} today
+          </span>
+        </span>
+        <span className="text-[11px] text-gray-400 uppercase tracking-wide">Audit</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-3 border-t border-gray-100 pt-3">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <div className="flex rounded-lg border border-gray-300 overflow-hidden text-xs">
+              <button
+                onClick={() => setMode("today")}
+                className={`px-2.5 py-1 ${mode === "today" ? "bg-neutral-900 text-white" : "bg-white text-gray-600"}`}
+              >
+                A day
+              </button>
+              <button
+                onClick={() => setMode("fortnight")}
+                className={`px-2.5 py-1 ${mode === "fortnight" ? "bg-neutral-900 text-white" : "bg-white text-gray-600"}`}
+              >
+                Last 2 weeks
+              </button>
+            </div>
+            {mode === "today" && (
+              <input
+                type="date"
+                value={day}
+                max={todayKey}
+                onChange={(e) => setDay(e.target.value)}
+                className="text-sm rounded-lg border border-gray-300 px-2 py-1"
+              />
+            )}
+            <span className="text-xs text-gray-400">
+              {rows.length} {rows.length === 1 ? "company" : "companies"}
+            </span>
+          </div>
+
+          {rows.length === 0 ? (
+            <p className="text-sm text-gray-400">Nothing added in this range.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wide text-gray-400 text-left">
+                    <th className="py-1 pr-3 w-8"></th>
+                    <th className="py-1 pr-3">Company</th>
+                    <th className="py-1 pr-3">Contact</th>
+                    <th className="py-1 pr-3">Added</th>
+                    <th className="py-1 pr-3">By</th>
+                    <th className="py-1">Demo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {rows.map((c, i) => {
+                    const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
+                    return (
+                      <tr key={c.id}>
+                        <td className="py-1.5 pr-3 text-gray-400 tabular-nums text-xs">{i + 1}</td>
+                        <td className="py-1.5 pr-3 font-medium text-gray-900 whitespace-nowrap">
+                          <Link to={`/b2b-gtm/${c.id}`} className="hover:underline">
+                            {c.name}
+                          </Link>
+                        </td>
+                        <td className="py-1.5 pr-3 text-gray-600 whitespace-nowrap">
+                          {contact?.name || "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 text-gray-500 text-xs whitespace-nowrap">
+                          {new Date(c.created_at).toLocaleDateString("en-GB", {
+                            day: "2-digit",
+                            month: "short",
+                          })}
+                          {" · "}
+                          {new Date(c.created_at).toLocaleTimeString("en-GB", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                        <td className="py-1.5 pr-3 text-gray-500 text-xs whitespace-nowrap">
+                          {ownerLabel(c.owner)}
+                        </td>
+                        <td className="py-1.5 text-xs whitespace-nowrap">
+                          {c.demo_at ? (
+                            <span className="text-emerald-700 font-medium">
+                              {formatDateTime(c.demo_at)}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Upcoming demos over the next two weeks, soonest first — so scheduled demo calls
+ * are visible at a glance. Collapsed by default.
+ */
+function UpcomingDemos({ companies }: { companies: Company[] }) {
+  const [open, setOpen] = useState(false);
+  const demos = useMemo(() => upcomingDemos(companies, 14), [companies]);
+  if (demos.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50/40">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left"
+      >
+        <span className="text-sm font-semibold text-emerald-900">
+          {open ? "▾" : "▸"} Upcoming demos
+          <span className="ml-2 text-xs font-normal text-emerald-700">{demos.length} scheduled</span>
+        </span>
+        <span className="text-[11px] text-emerald-600 uppercase tracking-wide">Next 2 weeks</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-3 border-t border-emerald-100 pt-3 space-y-1.5">
+          {demos.map((c) => {
+            const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
+            return (
+              <div key={c.id} className="flex items-center justify-between gap-3 text-sm">
+                <Link to={`/b2b-gtm/${c.id}`} className="font-medium text-gray-900 hover:underline">
+                  {c.name}
+                  {contact?.name && <span className="font-normal text-gray-500"> · {contact.name}</span>}
+                </Link>
+                <span className="text-emerald-800 font-medium whitespace-nowrap">
+                  {formatDateTime(c.demo_at)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PersonHeader({
   owner,
   companies,
@@ -709,7 +906,7 @@ function PersonHeader({
       {inbox.length > 0 && (
         <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
           <p className="text-[11px] font-semibold text-violet-800 uppercase tracking-wide mb-2">
-            Just handed to you ({inbox.length}) — pick these up first
+            Just handed to {label} ({inbox.length}) — pick these up first
           </p>
           <div className="flex flex-wrap gap-2">
             {inbox.map((c) => (
@@ -783,20 +980,37 @@ function Row({
   const exited = EXITED_STAGES.includes(c.stage);
   const quiet = daysSince(c.last_log?.called_at ?? c.updated_at, now);
   const stale = (isAccount || c.stage === "gtm_active") && quiet !== null && quiet > STALE_ACCOUNT_DAYS;
+  // They asked us to call them back — a promise to keep, flag it loudly.
+  const callback = !exited && c.last_log?.outcome === "asked_callback";
+  // Due today (overdue or scheduled later today).
+  const dueToday = !exited && isOnTodaysList(c.next_action_at, now);
+
+  // Row accent: callback (amber) is the loudest, then today (violet).
+  const rowAccent = callback
+    ? "border-l-4 border-l-amber-500 bg-amber-50/40"
+    : dueToday
+    ? "border-l-4 border-l-violet-500 bg-violet-50/30"
+    : "";
 
   return (
     <>
       <tr
         onClick={onToggle}
-        className={`cursor-pointer hover:bg-gray-50 ${expanded ? "bg-gray-50" : ""} ${
-          overdue ? "border-l-4 border-l-violet-500" : ""
-        }`}
+        className={`cursor-pointer hover:bg-gray-50 ${expanded ? "bg-gray-50" : ""} ${rowAccent}`}
       >
         <td className="px-3 py-2.5 text-gray-400 w-6">{expanded ? "▾" : "▸"}</td>
         <td className="px-3 py-2.5 text-gray-400 tabular-nums text-xs w-8">{serial}</td>
         <td className="px-3 py-2.5 font-medium text-gray-900 whitespace-nowrap">
           <div className="flex items-center gap-1.5">
             {c.name}
+            {callback && (
+              <span
+                className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shrink-0"
+                title="They asked us to call them back"
+              >
+                ⏱ Callback
+              </span>
+            )}
             {activeFlags(c).map((f) => (
               <span
                 key={f.key}
@@ -810,9 +1024,9 @@ function Row({
             {c.needs_my_followup && (
               <span
                 className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700 border border-violet-200 shrink-0"
-                title={c.my_followup_note || "I need to follow up"}
+                title={c.my_followup_note || "Needs a follow-up"}
               >
-                My follow-up
+                Follow-up
               </span>
             )}
           </div>
@@ -913,13 +1127,128 @@ function ExpandedPanel({
   }
 
   return (
-    <ActionBar
-      c={c}
-      onLog={() => setLogging(true)}
-      onContactChange={onContactChange}
-      onReactivate={onReactivate}
-      onSaved={onSaved}
-    />
+    <div className="space-y-3">
+      <ActionBar
+        c={c}
+        onLog={() => setLogging(true)}
+        onContactChange={onContactChange}
+        onReactivate={onReactivate}
+        onSaved={onSaved}
+      />
+      <NextActionEditor c={c} onSaved={onSaved} />
+    </div>
+  );
+}
+
+/**
+ * Edit the next action straight from the expanded row — change the date/reason,
+ * or clear it entirely ("waiting on them", no date) without opening the wizard.
+ */
+function NextActionEditor({ c, onSaved }: { c: Company; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [noDate, setNoDate] = useState(!c.next_action_at);
+  const [nextAt, setNextAt] = useState(
+    c.next_action_at ? toLocalInputValue(new Date(c.next_action_at)) : ""
+  );
+  const [reason, setReason] = useState(c.next_action_reason ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=company", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: c.id,
+          fields: {
+            next_action_at: noDate || !nextAt ? null : new Date(nextAt).toISOString(),
+            next_action_reason: reason.trim() || (noDate ? "Waiting on them — no date set" : null),
+          },
+        }),
+      });
+      toast.success("Next action updated");
+      setOpen(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm min-w-0">
+          <p className="text-[11px] font-semibold text-violet-800 uppercase tracking-wide">
+            Next action
+            {c.next_action_at && (
+              <span className="ml-1.5 font-normal text-violet-500 normal-case">
+                · {formatDateTime(c.next_action_at)}
+              </span>
+            )}
+          </p>
+          {c.next_action_at ? (
+            <p className="text-sm text-gray-800">
+              {c.next_action_reason || <span className="text-gray-400">no reason noted</span>}
+            </p>
+          ) : (
+            <p className="text-sm text-gray-500">
+              No date set{c.next_action_reason ? ` — ${c.next_action_reason}` : " — waiting on them"}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => setOpen(true)}
+          className="text-xs text-violet-600 hover:underline font-medium shrink-0"
+        >
+          Edit
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
+        Next action
+      </p>
+      <label className="flex items-center gap-2 text-sm text-gray-700 mb-2">
+        <input
+          type="checkbox"
+          checked={noDate}
+          onChange={(e) => setNoDate(e.target.checked)}
+          className="rounded"
+        />
+        No follow-up date — waiting on them
+      </label>
+      {!noDate && (
+        <input
+          type="datetime-local"
+          value={nextAt}
+          onChange={(e) => setNextAt(e.target.value)}
+          className={inputCls}
+        />
+      )}
+      <input
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder={noDate ? "Why no date? e.g. stuck in their internal red tape" : "Why then?"}
+        className={`${inputCls} mt-2`}
+      />
+      <div className="flex justify-end gap-2 mt-2">
+        <button onClick={() => setOpen(false)} className="text-xs text-gray-500">
+          Cancel
+        </button>
+        <button
+          disabled={saving || (!noDate && !nextAt)}
+          onClick={save}
+          className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white text-xs font-medium disabled:opacity-40"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -953,7 +1282,7 @@ function ActionBar({
     branch === "pre_gtm"
       ? "Vivaan's lead — what's the move?"
       : branch === "mine_active"
-      ? "Your call: push it forward or let it go?"
+      ? "Push it forward or let it go?"
       : branch === "buy_decision"
       ? "In the buy decision — log how it's going."
       : branch === "blocked"
@@ -987,6 +1316,37 @@ function ActionBar({
       });
       toast.success(`Handed to ${ownerLabel(owner)}`);
       setHanding(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Book the demo: sets demo_at, moves to Demo scheduled, and points the next
+  // action at the demo. Its own field so the demo survives later next-action edits.
+  const [scheduling, setScheduling] = useState(false);
+  const [demoAt, setDemoAt] = useState(
+    c.demo_at ? toLocalInputValue(new Date(c.demo_at)) : ""
+  );
+  const scheduleDemo = async () => {
+    if (!demoAt) return;
+    setBusy(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=note", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: c.id,
+          note: `Demo scheduled for ${formatDateTime(new Date(demoAt).toISOString())}.`,
+          stage: "demo_scheduled",
+          demo_at: new Date(demoAt).toISOString(),
+          // Deliberately no next_action_at — scheduling a demo shouldn't set or
+          // overwrite the follow-up date. The demo lives in its own demo_at field.
+        }),
+      });
+      toast.success("Demo scheduled");
+      setScheduling(false);
       onSaved();
     } catch (e: any) {
       toast.error(e.message);
@@ -1070,11 +1430,48 @@ function ActionBar({
                   {roleForCompany(c) === "Deal"
                     ? "Hand to Ayushi to close →"
                     : roleForCompany(c) === "Vivaan"
-                    ? "Hand to me →"
+                    ? "Hand to Pranav →"
                     : "Push to buy decision →"}
                 </button>
               )}
+              {/* Book (or change) the demo — on any active lead in play, not just
+                  cold-call-done. Won / lost / exited don't get it. */}
+              {(branch === "pre_gtm" ||
+                branch === "mine_active" ||
+                branch === "buy_decision" ||
+                branch === "blocked") && (
+                <button
+                  disabled={busy}
+                  onClick={() => setScheduling((v) => !v)}
+                  className="px-4 py-2 rounded-xl bg-white text-emerald-700 text-sm font-medium border border-emerald-300 hover:border-emerald-400 disabled:opacity-40"
+                >
+                  {c.demo_at ? "Change demo" : "Schedule demo"}
+                </button>
+              )}
             </div>
+
+            {scheduling && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-sm text-gray-700">When's the demo?</span>
+                <input
+                  type="datetime-local"
+                  value={demoAt}
+                  onChange={(e) => setDemoAt(e.target.value)}
+                  className="text-sm rounded-lg border border-gray-300 px-2 py-1"
+                />
+                <button
+                  disabled={!demoAt || busy}
+                  onClick={scheduleDemo}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium disabled:opacity-40"
+                >
+                  Set demo
+                </button>
+                <button onClick={() => setScheduling(false)} className="text-xs text-gray-500">
+                  Cancel
+                </button>
+              </div>
+            )}
+
             <button
               onClick={onContactChange}
               className="mt-2 text-xs text-sky-700 hover:underline font-medium"
@@ -1094,7 +1491,7 @@ function ActionBar({
               )}
             </p>
             {lastNote ? (
-              <p className="text-sm font-semibold text-gray-900 whitespace-pre-wrap line-clamp-4">
+              <p className="text-sm font-semibold text-gray-900 whitespace-pre-wrap line-clamp-3">
                 {lastNote}
               </p>
             ) : (
@@ -1102,6 +1499,12 @@ function ActionBar({
                 No notes yet — log a call to start the history.
               </p>
             )}
+
+            {/* Next action + why — the future move, kept distinct from the past
+                context above. Editable inline. */}
+            <div className="mt-3 pt-3 border-t border-violet-200">
+              <NextActionEditor c={c} onSaved={onSaved} />
+            </div>
           </div>
         </div>
       )}
@@ -1110,11 +1513,9 @@ function ActionBar({
 }
 
 /**
- * Assign a company without expanding the row. Saves on change.
- *
- * Deliberately a labelled control rather than a colour: a tint would collide
- * with the flag dots (yellow already means "brochure", green "needs leads")
- * and would still need memorising.
+ * Edit the next action straight from the expanded row — change the date/reason
+ * or clear it entirely (for companies where the ball's in their court and no
+ * date makes sense). Saves via PATCH without needing to log a full call.
  */
 function OwnerPicker({ c, onSaved }: { c: Company; onSaved: () => void }) {
   const [saving, setSaving] = useState(false);
@@ -1126,7 +1527,7 @@ function OwnerPicker({ c, onSaved }: { c: Company; onSaved: () => void }) {
         method: "PATCH",
         body: JSON.stringify({ id: c.id, fields: { owner: value } }),
       });
-      toast.success(value ? `Assigned to ${value}` : "Assigned to you");
+      toast.success(`Assigned to ${value || "Pranav"}`);
       onSaved();
     } catch (e: any) {
       toast.error(e.message);
@@ -1146,7 +1547,7 @@ function OwnerPicker({ c, onSaved }: { c: Company; onSaved: () => void }) {
           : "bg-white text-gray-400 border-gray-200"
       }`}
     >
-      <option value="">Me</option>
+      <option value="">Pranav</option>
       {TEAM.map((t) => (
         <option key={t} value={t}>
           {t}
@@ -1228,7 +1629,7 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
     <Shell title="Vivaan — add a company" onClose={onClose}>
       <p className="text-sm text-gray-500 mb-4">
         Cold-called them and made a WhatsApp group? Drop them in here with what you learned. It lands
-        in Pre-GTM as yours, briefed and ready to hand to Pranav.
+        in Pre-GTM as Vivaan's, briefed and ready to hand to Pranav.
       </p>
 
       <Field label="Company">
