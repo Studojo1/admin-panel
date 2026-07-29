@@ -929,16 +929,12 @@ function EditPanel({
 }) {
   const [stage, setStage] = useState<Stage>(company.stage);
   const [owner, setOwner] = useState(company.owner ?? "");
-  const [flags, setFlags] = useState<Record<string, boolean>>({
-    needs_brochure: company.needs_brochure,
-    needs_leads: company.needs_leads,
-    leads_change: company.leads_change,
-  });
-  const [flagNotes, setFlagNotes] = useState<Record<string, string>>({
-    brochure_note: company.brochure_note ?? "",
-    leads_note: company.leads_note ?? "",
-    leads_change_note: company.leads_change_note ?? "",
-  });
+  const [flags, setFlags] = useState<Record<string, boolean>>(
+    Object.fromEntries(FLAGS.map((f) => [f.key, !!(company as any)[f.key]]))
+  );
+  const [flagNotes, setFlagNotes] = useState<Record<string, string>>(
+    Object.fromEntries(FLAGS.map((f) => [f.noteKey, (company as any)[f.noteKey] ?? ""]))
+  );
   const [whatsapp, setWhatsapp] = useState(company.whatsapp_group_made);
   const [demoAt, setDemoAt] = useState(
     company.demo_at ? toLocalInputValue(new Date(company.demo_at)) : ""
@@ -976,12 +972,13 @@ function EditPanel({
             refunded: refunded === "" ? null : Number(refunded),
             collected_at: collectedAt ? new Date(collectedAt).toISOString() : null,
             notes,
-            needs_brochure: flags.needs_brochure,
-            brochure_note: flagNotes.brochure_note,
-            needs_leads: flags.needs_leads,
-            leads_note: flagNotes.leads_note,
-            leads_change: flags.leads_change,
-            leads_change_note: flagNotes.leads_change_note,
+            // All flags, sent dynamically from the shared FLAGS list.
+            ...Object.fromEntries(
+              FLAGS.flatMap((f) => [
+                [f.key, flags[f.key]],
+                [f.noteKey, flagNotes[f.noteKey]],
+              ])
+            ),
           },
         }),
       });

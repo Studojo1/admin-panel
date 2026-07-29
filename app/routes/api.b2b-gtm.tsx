@@ -27,6 +27,8 @@ async function ensureTables() {
       leads_note TEXT,
       leads_change BOOLEAN NOT NULL DEFAULT FALSE,
       leads_change_note TEXT,
+      wants_trial BOOLEAN NOT NULL DEFAULT FALSE,
+      trial_note TEXT,
       needs_my_followup BOOLEAN NOT NULL DEFAULT FALSE,
       my_followup_note TEXT,
       next_action_at TIMESTAMPTZ,
@@ -103,6 +105,8 @@ async function ensureTables() {
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_note TEXT`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_change BOOLEAN NOT NULL DEFAULT FALSE`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS leads_change_note TEXT`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS wants_trial BOOLEAN NOT NULL DEFAULT FALSE`);
+  await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS trial_note TEXT`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS needs_my_followup BOOLEAN NOT NULL DEFAULT FALSE`);
   await db.execute(sql`ALTER TABLE b2b_companies ADD COLUMN IF NOT EXISTS my_followup_note TEXT`);
   // Cash model (see CREATE TABLE for the why).
@@ -753,7 +757,7 @@ export async function action({ request }: Route.ActionArgs) {
       INSERT INTO b2b_companies (
         name, stage, temperature, status, owner, whatsapp_group_made,
         needs_brochure, brochure_note, next_action_at, next_action_reason,
-        they_reachout_on, notes, added_by
+        they_reachout_on, notes, added_by, demo_at
       ) VALUES (
         ${body.name},
         ${body.stage ?? "cold_call_done"},
@@ -767,7 +771,8 @@ export async function action({ request }: Route.ActionArgs) {
         ${body.next_action_reason ?? null},
         ${body.they_reachout_on ?? null},
         ${body.notes ?? null},
-        ${admin.email}
+        ${admin.email},
+        ${body.demo_at ?? null}
       )
       RETURNING id
     `);
@@ -1029,6 +1034,8 @@ export async function action({ request }: Route.ActionArgs) {
     if ("my_followup_note" in f) sets.push(sql`my_followup_note = ${f.my_followup_note || null}`);
     if ("needs_leads" in f) sets.push(sql`needs_leads = ${f.needs_leads}`);
     if ("leads_note" in f) sets.push(sql`leads_note = ${f.leads_note || null}`);
+    if ("wants_trial" in f) sets.push(sql`wants_trial = ${f.wants_trial}`);
+    if ("trial_note" in f) sets.push(sql`trial_note = ${f.trial_note || null}`);
     if ("leads_change" in f) sets.push(sql`leads_change = ${f.leads_change}`);
     if ("leads_change_note" in f) sets.push(sql`leads_change_note = ${f.leads_change_note || null}`);
     if ("next_action_at" in f) sets.push(sql`next_action_at = ${f.next_action_at || null}`);
@@ -1048,6 +1055,24 @@ export async function action({ request }: Route.ActionArgs) {
     if ("comeback_at" in f) sets.push(sql`comeback_at = ${f.comeback_at || null}`);
     if ("notes" in f) sets.push(sql`notes = ${f.notes || null}`);
     if ("name" in f) sets.push(sql`name = ${f.name}`);
+
+    // Auto follow-up: flagging "wants leads" or "wants a free trial" is a promise
+    // to circle back. If this PATCH turns one on and isn't already setting a next
+    // action, schedule one +7 days out — but only when the company has none, so a
+    // date you deliberately set is never overwritten.
+    const turningOnPromise =
+      (f.needs_leads === true || f.wants_trial === true) && !("next_action_at" in f);
+    if (turningOnPromise) {
+      const cur = await db.execute(
+        sql`SELECT next_action_at FROM b2b_companies WHERE id = ${body.id}`
+      );
+      const existing = (cur.rows[0] as any)?.next_action_at ?? null;
+      if (!existing) {
+        const at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        sets.push(sql`next_action_at = ${at}`);
+        sets.push(sql`next_action_reason = ${"Follow up on their request"}`);
+      }
+    }
 
     if (sets.length === 0) return Response.json({ ok: true });
     sets.push(sql`updated_at = NOW()`);
@@ -1106,6 +1131,8 @@ export async function action({ request }: Route.ActionArgs) {
       brochure_note,
       needs_leads,
       leads_note,
+      wants_trial,
+      trial_note,
       leads_change,
       leads_change_note,
     } = body;
@@ -1171,6 +1198,8 @@ export async function action({ request }: Route.ActionArgs) {
     if (brochure_note !== undefined) sets.push(sql`brochure_note = ${brochure_note || null}`);
     if (needs_leads !== undefined) sets.push(sql`needs_leads = ${needs_leads}`);
     if (leads_note !== undefined) sets.push(sql`leads_note = ${leads_note || null}`);
+    if (wants_trial !== undefined) sets.push(sql`wants_trial = ${wants_trial}`);
+    if (trial_note !== undefined) sets.push(sql`trial_note = ${trial_note || null}`);
     if (leads_change !== undefined) sets.push(sql`leads_change = ${leads_change}`);
     if (leads_change_note !== undefined)
       sets.push(sql`leads_change_note = ${leads_change_note || null}`);

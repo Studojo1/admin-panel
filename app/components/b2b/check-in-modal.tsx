@@ -51,16 +51,12 @@ export function CheckInModal({
   const [method, setMethod] = useState<ContactMethod | null>(null);
   // Things they asked us for on this call. Seeded from the company's current
   // flags so the wizard shows what's already outstanding.
-  const [flags, setFlags] = useState<Record<string, boolean>>({
-    needs_brochure: company.needs_brochure,
-    needs_leads: company.needs_leads,
-    leads_change: company.leads_change,
-  });
-  const [flagNotes, setFlagNotes] = useState<Record<string, string>>({
-    brochure_note: company.brochure_note ?? "",
-    leads_note: company.leads_note ?? "",
-    leads_change_note: company.leads_change_note ?? "",
-  });
+  const [flags, setFlags] = useState<Record<string, boolean>>(
+    Object.fromEntries(FLAGS.map((f) => [f.key, !!(company as any)[f.key]]))
+  );
+  const [flagNotes, setFlagNotes] = useState<Record<string, string>>(
+    Object.fromEntries(FLAGS.map((f) => [f.noteKey, (company as any)[f.noteKey] ?? ""]))
+  );
   const [attendees, setAttendees] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [objection, setObjection] = useState<Objection | null>(null);
@@ -224,13 +220,16 @@ export function CheckInModal({
             outcome === "closed_won" && nextPurchaseDue
               ? new Date(nextPurchaseDue).toISOString()
               : undefined,
-          // What they asked us for — only sent when we actually reached them.
-          needs_brochure: reached ? flags.needs_brochure : undefined,
-          brochure_note: reached ? flagNotes.brochure_note.trim() || null : undefined,
-          needs_leads: reached ? flags.needs_leads : undefined,
-          leads_note: reached ? flagNotes.leads_note.trim() || null : undefined,
-          leads_change: reached ? flags.leads_change : undefined,
-          leads_change_note: reached ? flagNotes.leads_change_note.trim() || null : undefined,
+          // What they asked us for — every flag, sent dynamically so a new flag
+          // can never be forgotten here. Only when we actually reached them.
+          ...(reached
+            ? Object.fromEntries(
+                FLAGS.flatMap((f) => [
+                  [f.key, flags[f.key]],
+                  [f.noteKey, (flagNotes[f.noteKey] ?? "").trim() || null],
+                ])
+              )
+            : {}),
         }),
       });
       toast.success("Logged");
