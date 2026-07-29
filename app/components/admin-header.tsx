@@ -18,11 +18,12 @@ const NAV_LINKS = [
   { to: "/tickets", label: "Tickets" },
   { to: "/webinar-registrations", label: "Webinar Signups" },
   { to: "/email-sequences", label: "Emails" },
+  { to: "/sensei", label: "Sensei" },
   { to: "/analytics", label: "Analytics" },
   { to: "/utm-builder", label: "UTM Builder" },
   { to: "/coupons", label: "Coupons" },
+  { to: "/b2b-gtm", label: "B2B GTM" },
   { to: "/career-coach", label: "Career Coach" },
-  { to: "/sensei", label: "Sensei" },
   { to: "/settings", label: "Settings" },
 ] as const;
 
