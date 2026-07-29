@@ -313,6 +313,9 @@ export interface Company {
   /** They want leads they haven't been sent yet. */
   needs_leads: boolean;
   leads_note: string | null;
+  /** They asked for a free trial. */
+  wants_trial: boolean;
+  trial_note: string | null;
   /** They have leads, but the wrong ones — spec needs changing. */
   leads_change: boolean;
   leads_change_note: string | null;
@@ -1023,13 +1026,15 @@ export function mcqBranchFor(c: Company): McqBranch {
  * forgotten in the row, the counts or the filters.
  */
 export interface FlagDef {
-  key: "needs_brochure" | "needs_leads" | "leads_change";
-  noteKey: "brochure_note" | "leads_note" | "leads_change_note";
+  key: "needs_brochure" | "needs_leads" | "leads_change" | "wants_trial";
+  noteKey: "brochure_note" | "leads_note" | "leads_change_note" | "trial_note";
   label: string;
   short: string;
   dot: string;
   badge: string;
   placeholder: string;
+  /** Flags that promise a follow-through auto-set the next action to +7 days. */
+  autoFollowupDays?: number;
 }
 
 export const FLAGS: FlagDef[] = [
@@ -1050,6 +1055,17 @@ export const FLAGS: FlagDef[] = [
     dot: "bg-emerald-500",
     badge: "bg-emerald-100 text-emerald-800 border-emerald-300",
     placeholder: "What leads do they want?",
+    autoFollowupDays: 7,
+  },
+  {
+    key: "wants_trial",
+    noteKey: "trial_note",
+    label: "Wants a free trial",
+    short: "Free trial",
+    dot: "bg-sky-500",
+    badge: "bg-sky-100 text-sky-800 border-sky-300",
+    placeholder: "What did they want to try?",
+    autoFollowupDays: 7,
   },
   {
     key: "leads_change",
