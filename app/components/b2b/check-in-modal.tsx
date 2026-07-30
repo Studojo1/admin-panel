@@ -33,7 +33,7 @@ import {
   type Stage,
   type Temperature,
 } from "~/lib/b2b-gtm";
-import { Choice, ConfirmStage, Field, Shell, Stepper, authedFetch, inputCls } from "./shared";
+import { Choice, ConfirmStage, Field, MicButton, Shell, Stepper, authedFetch, inputCls } from "./shared";
 
 export function CheckInModal({
   company,
@@ -430,6 +430,9 @@ export function CheckInModal({
               }
               className={inputCls}
             />
+            <div className="mt-2">
+              <MicButton onAppend={(t) => setNote((v) => (v ? v + " " + t : t))} />
+            </div>
             {reached && (
               <div className="mt-4">
                 <label className="block text-xs font-semibold text-gray-600 mb-1.5">

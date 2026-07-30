@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getToken } from "~/lib/api";
 import {
@@ -144,6 +144,81 @@ export function Choice({
       }`}
     >
       {children}
+    </button>
+  );
+}
+
+/**
+ * Free voice-to-text for a text field, using the browser's built-in Web Speech
+ * API — no key, no backend, no Azure. Chrome/Edge only (hidden elsewhere).
+ * Recognised speech is appended to the current value via onAppend; the parent
+ * owns the text. Live/interim words are shown while speaking.
+ */
+export function MicButton({ onAppend }: { onAppend: (text: string) => void }) {
+  const [supported, setSupported] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SR =
+      (typeof window !== "undefined" &&
+        ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) ||
+      null;
+    setSupported(!!SR);
+  }, []);
+
+  const stop = () => {
+    try {
+      recRef.current?.stop();
+    } catch {}
+    setListening(false);
+  };
+
+  const start = () => {
+    const SR =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = "en-IN"; // Indian English
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = (e: any) => {
+      // Append only finalized chunks; interim results are noisy for notes.
+      let finalText = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+      }
+      if (finalText.trim()) onAppend(finalText.trim());
+    };
+    rec.onerror = (e: any) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        toast.error("Microphone blocked — allow mic access to dictate.");
+      }
+      setListening(false);
+    };
+    rec.onend = () => setListening(false);
+    recRef.current = rec;
+    try {
+      rec.start();
+      setListening(true);
+    } catch {}
+  };
+
+  // Not on Chrome/Edge → don't show a button that can't work.
+  if (!supported) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={listening ? stop : start}
+      title={listening ? "Stop dictation" : "Dictate (voice to text)"}
+      className={`shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
+        listening
+          ? "bg-rose-500 text-white border-rose-500 animate-pulse"
+          : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+      }`}
+    >
+      {listening ? "● Listening…" : "🎤 Dictate"}
     </button>
   );
 }
