@@ -48,6 +48,8 @@ import {
   forecast,
   istDayKey,
   upcomingDemos,
+  demosOnDay,
+  allDemos,
   formatDateTime,
   formatValue,
   isLaterToday,
@@ -580,6 +582,8 @@ export default function B2BGtm() {
 
         {loading ? (
           <div className="text-center py-16 text-gray-400 text-sm">Loading…</div>
+        ) : view === "demos" ? (
+          <DemoCalendar companies={companies} />
         ) : visible.length === 0 ? (
           <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-400 text-sm">
             Nothing here.
@@ -797,6 +801,137 @@ function AddsAudit({ companies }: { companies: Company[] }) {
               </table>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A month-grid calendar of demo calls — each day cell lists the demos booked
+ * that day (company + time). Navigate month to month; click a demo to open it.
+ * All demos, everyone's.
+ */
+function DemoCalendar({ companies }: { companies: Company[] }) {
+  // Which month is shown — first of the month.
+  const [cursor, setCursor] = useState(() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1);
+  });
+
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+  const todayKey = istDayKey(new Date());
+  const total = useMemo(() => allDemos(companies).length, [companies]);
+
+  // Build the grid: leading blanks for the weekday the 1st falls on, then days.
+  const first = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const leadBlanks = first.getDay(); // 0=Sun
+  const cells: (number | null)[] = [
+    ...Array(leadBlanks).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const dayKeyFor = (d: number) =>
+    istDayKey(new Date(year, month, d, 12)); // noon avoids tz edge slips
+
+  const monthDemoCount = useMemo(
+    () => companies.filter((c) => {
+      if (!c.demo_at) return false;
+      const dk = istDayKey(new Date(c.demo_at));
+      return dk.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`);
+    }).length,
+    [companies, year, month]
+  );
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+        <div>
+          <p className="text-lg font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
+            {cursor.toLocaleDateString("en-GB", { month: "long", year: "numeric" })}
+          </p>
+          <p className="text-xs text-gray-500">
+            {monthDemoCount} demo{monthDemoCount === 1 ? "" : "s"} this month · {total} total booked
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setCursor(new Date(year, month - 1, 1))}
+            className="px-2.5 py-1 rounded-lg border border-gray-300 text-sm hover:bg-gray-50"
+          >
+            ←
+          </button>
+          <button
+            onClick={() => setCursor(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}
+            className="px-2.5 py-1 rounded-lg border border-gray-300 text-xs hover:bg-gray-50"
+          >
+            Today
+          </button>
+          <button
+            onClick={() => setCursor(new Date(year, month + 1, 1))}
+            className="px-2.5 py-1 rounded-lg border border-gray-300 text-sm hover:bg-gray-50"
+          >
+            →
+          </button>
+        </div>
+      </div>
+
+      {/* Weekday header */}
+      <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <div key={d} className="px-2 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-center">
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* Day cells */}
+      <div className="grid grid-cols-7">
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i} className="min-h-[92px] border-b border-r border-gray-100 bg-gray-50/40" />;
+          const dk = dayKeyFor(d);
+          const demos = demosOnDay(companies, dk);
+          const isToday = dk === todayKey;
+          return (
+            <div
+              key={i}
+              className={`min-h-[92px] border-b border-r border-gray-100 p-1.5 align-top ${
+                isToday ? "bg-violet-50/50" : ""
+              }`}
+            >
+              <div className={`text-xs mb-1 ${isToday ? "font-bold text-violet-700" : "text-gray-400"}`}>
+                {d}
+              </div>
+              <div className="space-y-1">
+                {demos.map((c) => {
+                  const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
+                  const time = new Date(c.demo_at!).toLocaleTimeString("en-GB", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+                  return (
+                    <Link
+                      key={c.id}
+                      to={`/b2b-gtm/${c.id}`}
+                      title={`${c.name}${contact?.name ? ` · ${contact.name}` : ""} — ${time}`}
+                      className="block w-full text-left rounded-md bg-emerald-100 border border-emerald-200 px-1.5 py-0.5 text-[11px] text-emerald-900 hover:bg-emerald-200 truncate"
+                    >
+                      <span className="font-medium">{time}</span> {c.name}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {total === 0 && (
+        <div className="px-4 py-6 text-center text-sm text-gray-400">
+          No demos booked yet. Set a demo date on a company and it shows up here.
         </div>
       )}
     </div>
@@ -1449,12 +1584,36 @@ function ActionBar({
           </button>
         </div>
       ) : branch === "exited" ? (
-        <button
-          onClick={onReactivate}
-          className="px-3 py-1.5 rounded-xl bg-violet-500 text-white text-sm font-medium"
-        >
-          Bring back to pipeline
-        </button>
+        <div className="flex gap-4 items-start">
+          <div className="shrink-0">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={onReactivate}
+                className="px-4 py-2 rounded-xl bg-violet-500 text-white text-sm font-medium hover:bg-violet-600"
+              >
+                Bring back to pipeline
+              </button>
+              {/* Exited companies still open their full page for all the info. */}
+              <Link
+                to={`/b2b-gtm/${c.id}`}
+                className="px-4 py-2 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
+              >
+                Study past interactions →
+              </Link>
+            </div>
+          </div>
+          {/* Why they were parked + where we left off. */}
+          <div className="flex-1 min-w-0 border-l border-violet-200 pl-4">
+            {c.lost_reason && (
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
+                Exited · {c.lost_reason.replace(/_/g, " ")}
+              </p>
+            )}
+            <p className="text-sm font-semibold text-gray-900 whitespace-pre-wrap line-clamp-4 mt-0.5">
+              {c.lost_feedback || c.last_log?.note || c.notes || "No notes."}
+            </p>
+          </div>
+        </div>
       ) : (
         <div className="flex gap-4 items-start">
           {/* Actions on the left. */}
