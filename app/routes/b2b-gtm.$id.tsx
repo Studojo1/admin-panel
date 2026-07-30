@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { AdminHeader } from "~/components";
+import { useModal } from "~/components/common/modal-context";
 import { useAdminGuard } from "~/lib/auth-guard";
 import type { Route } from "./+types/b2b-gtm.$id";
 import { CheckInModal, ContactChangeModal } from "~/components/b2b/check-in-modal";
@@ -336,39 +337,7 @@ function CompanyBody({
             )}
             <div className="space-y-2">
               {logs.map((l) => (
-                <div
-                  key={l.id}
-                  className={`rounded-xl border p-3 ${
-                    l.kind === "contact_change"
-                      ? "border-sky-200 bg-sky-50"
-                      : l.kind === "handoff"
-                      ? "border-emerald-200 bg-emerald-50"
-                      : l.kind === "note"
-                      ? "border-violet-200 bg-violet-50"
-                      : "border-gray-200 bg-gray-50"
-                  }`}
-                >
-                  {/* The event as a plain sentence, then what they actually said. */}
-                  <p className="text-sm text-gray-800">{logSentence(l)}</p>
-                  {l.note && <p className="text-sm text-gray-600 mt-0.5 italic">“{l.note}”</p>}
-                  <div className="flex items-center gap-2 flex-wrap text-xs mt-1">
-                    {l.attendees && <span className="text-gray-500">with {l.attendees}</span>}
-                    {l.objection && (
-                      <span className="px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200">
-                        {l.objection === "other" && l.objection_note
-                          ? l.objection_note
-                          : OBJECTION_LABELS[l.objection]}
-                        {l.objection !== "other" && l.objection_note ? `: ${l.objection_note}` : ""}
-                      </span>
-                    )}
-                    {l.value_discussed && (
-                      <span className="px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 border border-green-200">
-                        {formatValue(l.value_discussed)}
-                      </span>
-                    )}
-                    {l.logged_by && <span className="text-gray-400 ml-auto">{l.logged_by}</span>}
-                  </div>
-                </div>
+                <TimelineRow key={l.id} l={l} onSaved={onReload} />
               ))}
             </div>
           </Panel>
@@ -436,6 +405,84 @@ function CompanyBody({
  * Always-available note box on the full page. A plain note never moves the
  * stage — it's the running record of what they said, their tone, the context.
  */
+/**
+ * One timeline row. Plain notes (kind='note') get a delete button — with a
+ * confirm — since they carry no outcome. Calls/meets/handoffs/contact-changes
+ * are the append-only record that state is projected from, so they can't be
+ * deleted (the delete endpoint refuses non-notes too).
+ */
+function TimelineRow({ l, onSaved }: { l: CallLog; onSaved: () => void }) {
+  const { showConfirm } = useModal();
+  const [deleting, setDeleting] = useState(false);
+
+  const del = async () => {
+    const ok = await showConfirm(
+      "Delete this note? This can't be undone.",
+      "Delete note"
+    );
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await authedFetch("/api/b2b-gtm?action=delete_note", {
+        method: "POST",
+        body: JSON.stringify({ log_id: l.id }),
+      });
+      toast.success("Note deleted");
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div
+      className={`rounded-xl border p-3 ${
+        l.kind === "contact_change"
+          ? "border-sky-200 bg-sky-50"
+          : l.kind === "handoff"
+          ? "border-emerald-200 bg-emerald-50"
+          : l.kind === "note"
+          ? "border-violet-200 bg-violet-50"
+          : "border-gray-200 bg-gray-50"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        {/* The event as a plain sentence, then what they actually said. */}
+        <p className="text-sm text-gray-800">{logSentence(l)}</p>
+        {l.kind === "note" && (
+          <button
+            onClick={del}
+            disabled={deleting}
+            title="Delete this note"
+            className="text-xs text-rose-500 hover:text-rose-700 shrink-0 disabled:opacity-40"
+          >
+            {deleting ? "…" : "Delete"}
+          </button>
+        )}
+      </div>
+      {l.note && <p className="text-sm text-gray-600 mt-0.5 italic">“{l.note}”</p>}
+      <div className="flex items-center gap-2 flex-wrap text-xs mt-1">
+        {l.attendees && <span className="text-gray-500">with {l.attendees}</span>}
+        {l.objection && (
+          <span className="px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200">
+            {l.objection === "other" && l.objection_note
+              ? l.objection_note
+              : OBJECTION_LABELS[l.objection]}
+            {l.objection !== "other" && l.objection_note ? `: ${l.objection_note}` : ""}
+          </span>
+        )}
+        {l.value_discussed && (
+          <span className="px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 border border-green-200">
+            {formatValue(l.value_discussed)}
+          </span>
+        )}
+        {l.logged_by && <span className="text-gray-400 ml-auto">{l.logged_by}</span>}
+      </div>
+    </div>
+  );
+}
+
 function NoteComposer({ companyId, onSaved }: { companyId: number; onSaved: () => void }) {
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
