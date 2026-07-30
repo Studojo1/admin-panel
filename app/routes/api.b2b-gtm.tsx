@@ -1211,5 +1211,25 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ ok: true });
   }
 
+  /**
+   * Delete a note. ONLY kind='note' rows can be removed — the log is otherwise
+   * append-only, and a company's current state is projected from its call/meet/
+   * handoff rows, so those must never be deleted (it would rewrite history and
+   * skew the stats). A jotted note carries no outcome, so removing one is safe.
+   */
+  if (request.method === "POST" && intent === "delete_note") {
+    const { log_id } = body;
+    const r = await db.execute(
+      sql`DELETE FROM b2b_call_logs WHERE id = ${log_id} AND kind = 'note' RETURNING id`
+    );
+    if (r.rows.length === 0) {
+      return Response.json(
+        { error: "Only plain notes can be deleted (calls and events are kept)." },
+        { status: 400 }
+      );
+    }
+    return Response.json({ ok: true });
+  }
+
   return Response.json({ error: "Unknown action" }, { status: 400 });
 }

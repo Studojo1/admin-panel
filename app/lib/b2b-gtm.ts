@@ -862,6 +862,23 @@ export function upcomingDemos(companies: Company[], days = 14, now: Date = new D
     .sort((a, b) => +new Date(a.demo_at!) - +new Date(b.demo_at!));
 }
 
+/**
+ * Companies whose demo falls on a given IST calendar day ("YYYY-MM-DD"), sorted
+ * by time — for the demo calendar's day cells.
+ */
+export function demosOnDay(companies: Company[], dayKey: string): Company[] {
+  return companies
+    .filter((c) => c.demo_at && istDayKey(new Date(c.demo_at)) === dayKey)
+    .sort((a, b) => +new Date(a.demo_at!) - +new Date(b.demo_at!));
+}
+
+/** All companies that have a demo booked, soonest first. */
+export function allDemos(companies: Company[]): Company[] {
+  return companies
+    .filter((c) => c.demo_at)
+    .sort((a, b) => +new Date(a.demo_at!) - +new Date(b.demo_at!));
+}
+
 export function isSameCalendarDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
@@ -899,6 +916,7 @@ export type ViewKey =
   | "accounts"
   | "feedback"
   | "my_followups"
+  | "demos"
   | "exit";
 
 /**
@@ -915,6 +933,7 @@ export const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "blocked", label: "Blocked" },
   { key: "accounts", label: "Accounts (Won)" },
   { key: "feedback", label: "Feedback Loop" },
+  { key: "demos", label: "Demos" },
 ];
 
 /** One sheet per person, in pipeline order. `owner: ""` is mine. */
@@ -954,6 +973,9 @@ export function companyMatchesView(c: Company, view: ViewKey, now: Date = new Da
       return LOST_STAGES.includes(c.stage);
     case "my_followups":
       return !exited && c.needs_my_followup;
+    case "demos":
+      // Any company with a demo booked — the calendar renders these by day.
+      return !!c.demo_at;
     default:
       return !exited;
   }
