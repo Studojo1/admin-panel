@@ -75,6 +75,7 @@ export default function Sensei() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [rates, setRates] = useState<Rates | null>(null);
+  const [logs, setLogs] = useState<{ errors: any[]; runs: any[]; reveals: any[]; credit_events: any[]; governor: any } | null>(null);
   const [name, setName] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [domain, setDomain] = useState("");
@@ -99,6 +100,7 @@ export default function Sensei() {
         setTickets(d.tickets || []);
         setTotals(d.totals || null);
         setRates(d.rates || null);
+        setLogs(d.logs || null);
       }
     } catch { /* */ }
   };
@@ -356,6 +358,107 @@ export default function Sensei() {
             </div>
           ))}
           {tickets.length === 0 && <div className="px-5 py-8 text-center text-neutral-400 text-sm">No Sensei tickets yet.</div>}
+        </div>
+      </div>
+
+      {/* System logs & errors — live from bob /admin/logs (all orgs) */}
+      <div className="mt-10">
+        <h2 className="font-['Clash_Display'] text-xl font-bold mb-3">System logs &amp; errors</h2>
+
+        {logs?.governor && (
+          <div className={`mb-4 rounded-xl px-5 py-3 text-sm border ${
+            logs.governor.paused
+              ? "bg-red-50 border-red-200 text-red-800"
+              : "bg-emerald-50 border-emerald-200 text-emerald-800"}`}>
+            <span className="font-bold">Spend governor: {logs.governor.paused ? "PAUSED" : "active"}</span>
+            {logs.governor.paused && logs.governor.reason ? ` — ${logs.governor.reason}` : ""}
+            {typeof logs.governor.last_remaining === "number"
+              ? ` · context.dev credits left: ${logs.governor.last_remaining}` : ""}
+          </div>
+        )}
+
+        {/* Phone reveals — per user + the company/contact unlocked (from the ledger) */}
+        <div className={`${card} overflow-hidden mb-4`}>
+          <div className="px-5 py-2 bg-neutral-50 border-b border-neutral-100 text-xs font-bold uppercase tracking-wide text-neutral-500">
+            Recent reveals ({logs?.reveals?.length ?? 0})
+          </div>
+          {(logs?.reveals || []).slice(0, 40).map((v: any, i: number) => (
+            <div key={`rev-${i}`} className="flex items-center gap-3 px-5 py-2 border-b border-neutral-100 text-sm">
+              <span className="shrink-0 text-[10px] font-bold rounded px-1.5 py-0.5 bg-violet-100 text-violet-700">REVEAL</span>
+              <span className="font-semibold truncate">{v.org}</span>
+              <span className="text-neutral-400 text-xs truncate">{v.user}</span>
+              <span className="text-neutral-700 truncate flex-1">{v.company}{v.contact ? ` · ${v.contact}` : ""}</span>
+              {v.source ? <span className="shrink-0 text-[10px] text-neutral-400">{v.source}</span> : null}
+              <span className="shrink-0 text-neutral-400 text-xs">{fmtDateTime(v.at)}</span>
+            </div>
+          ))}
+          {(logs?.reveals?.length ?? 0) === 0 && (
+            <div className="px-5 py-8 text-center text-neutral-400 text-sm">No reveals yet.</div>
+          )}
+        </div>
+
+        {/* Credit events — grants, top-ups, adjustments (never reveals) */}
+        <div className={`${card} overflow-hidden mb-4`}>
+          <div className="px-5 py-2 bg-neutral-50 border-b border-neutral-100 text-xs font-bold uppercase tracking-wide text-neutral-500">
+            Credit events ({logs?.credit_events?.length ?? 0})
+          </div>
+          {(logs?.credit_events || []).slice(0, 30).map((c: any, i: number) => (
+            <div key={`ce-${i}`} className="flex items-center gap-3 px-5 py-2 border-b border-neutral-100 text-sm">
+              <span className={`shrink-0 text-[10px] font-bold rounded px-1.5 py-0.5 ${
+                c.delta >= 0 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                {c.delta >= 0 ? `+${c.delta}` : c.delta} {c.kind}
+              </span>
+              <span className="font-semibold truncate">{c.org}</span>
+              <span className="text-neutral-600 truncate flex-1">{c.reason}</span>
+              <span className="shrink-0 text-neutral-400 text-xs">{fmtDateTime(c.at)}</span>
+            </div>
+          ))}
+          {(logs?.credit_events?.length ?? 0) === 0 && (
+            <div className="px-5 py-8 text-center text-neutral-400 text-sm">No credit events yet.</div>
+          )}
+        </div>
+
+        <div className={`${card} overflow-hidden`}>
+          <div className="px-5 py-2 bg-neutral-50 border-b border-neutral-100 text-xs font-bold uppercase tracking-wide text-neutral-500">
+            Recent errors ({logs?.errors?.length ?? 0})
+          </div>
+          {(logs?.errors || []).map((e: any) => (
+            <div key={`err-${e.run_id}`} className="flex items-start gap-3 px-5 py-3 border-b border-neutral-100 text-sm">
+              <span className="shrink-0 mt-0.5 text-[10px] font-bold rounded px-1.5 py-0.5 bg-red-100 text-red-700">ERROR</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold truncate">{e.org}</span>
+                  <span className="text-neutral-400 text-xs truncate">run {e.run_id}{e.chat ? ` · ${e.chat}` : ""}</span>
+                </div>
+                <div className="text-neutral-600 truncate">{e.error || "(no message)"}</div>
+              </div>
+              <div className="shrink-0 text-neutral-400 text-xs mt-0.5">{fmtDateTime(e.at)}</div>
+            </div>
+          ))}
+          {(logs?.errors?.length ?? 0) === 0 && (
+            <div className="px-5 py-8 text-center text-neutral-400 text-sm">No errors. Clean run.</div>
+          )}
+        </div>
+
+        <div className={`${card} overflow-hidden mt-4`}>
+          <div className="px-5 py-2 bg-neutral-50 border-b border-neutral-100 text-xs font-bold uppercase tracking-wide text-neutral-500">
+            Recent activity
+          </div>
+          {(logs?.runs || []).slice(0, 40).map((r: any) => (
+            <div key={`run-${r.run_id}`} className="flex items-center gap-3 px-5 py-2 border-b border-neutral-100 text-sm">
+              <span className={`shrink-0 text-[10px] font-bold rounded px-1.5 py-0.5 ${
+                r.status === "error" ? "bg-red-100 text-red-700"
+                : r.status === "done" ? "bg-emerald-100 text-emerald-700"
+                : r.status === "running" ? "bg-blue-100 text-blue-700"
+                : "bg-amber-100 text-amber-700"}`}>{r.status}</span>
+              <span className="font-semibold truncate">{r.org}</span>
+              <span className="text-neutral-400 text-xs truncate flex-1">{r.chat || `run ${r.run_id}`}</span>
+              <span className="shrink-0 text-neutral-400 text-xs">{fmtDateTime(r.at)}</span>
+            </div>
+          ))}
+          {(logs?.runs?.length ?? 0) === 0 && (
+            <div className="px-5 py-8 text-center text-neutral-400 text-sm">No activity yet.</div>
+          )}
         </div>
       </div>
     </div>
