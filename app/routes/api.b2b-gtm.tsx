@@ -613,7 +613,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
-  const [companies, contacts, lastLogs, lastReached, stats, objectionStats, activity] =
+  const [companies, contacts, lastLogs, lastNotes, lastReached, stats, objectionStats, activity] =
     await Promise.all([
     db.execute(sql`SELECT * FROM b2b_companies ORDER BY next_action_at ASC NULLS LAST, name ASC`),
     // Inactive contacts must never win the primary slot the cards read from.
@@ -622,6 +622,16 @@ export async function loader({ request }: Route.LoaderArgs) {
     db.execute(sql`
       SELECT DISTINCT ON (company_id) *
       FROM b2b_call_logs
+      ORDER BY company_id, called_at DESC
+    `),
+    // Latest ACTUAL note per company — the last real thing said, ignoring
+    // handoffs and contact-changes (those are events, not context). Must have a
+    // non-empty note. This is what "Where we left off" should show.
+    db.execute(sql`
+      SELECT DISTINCT ON (company_id) company_id, note, called_at
+      FROM b2b_call_logs
+      WHERE kind IN ('call', 'meet', 'note')
+        AND note IS NOT NULL AND btrim(note) <> ''
       ORDER BY company_id, called_at DESC
     `),
     // Last time we ACTUALLY reached out — a call, meet or WhatsApp (all logged
@@ -709,6 +719,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     lastLogByCompany.set(l.company_id, l);
   }
 
+  const lastNoteByCompany = new Map<number, string>();
+  for (const n of lastNotes.rows as any[]) {
+    lastNoteByCompany.set(n.company_id, n.note);
+  }
+
   const lastReachedByCompany = new Map<number, string>();
   for (const r of lastReached.rows as any[]) {
     lastReachedByCompany.set(r.company_id, r.last_reached_at);
@@ -718,6 +733,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     ...c,
     contacts: contactsByCompany.get(c.id) ?? [],
     last_log: lastLogByCompany.get(c.id) ?? null,
+    last_note: lastNoteByCompany.get(c.id) ?? null,
     last_reached_at: lastReachedByCompany.get(c.id) ?? null,
   }));
 

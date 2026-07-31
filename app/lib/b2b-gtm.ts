@@ -341,6 +341,8 @@ export interface Company {
   last_log?: CallLog | null;
   /** Last time we actually reached out — a call/meet/WhatsApp, not a note. */
   last_reached_at?: string | null;
+  /** The last real note said (call/meet/note), ignoring handoffs — "where we left off". */
+  last_note?: string | null;
   /** Admin email that created the row — for the "added today" audit. */
   added_by?: string | null;
   /** When the demo call is scheduled (post cold-call). Drives the demos view. */
