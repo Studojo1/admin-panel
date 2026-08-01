@@ -157,6 +157,8 @@ export function Choice({
 export function MicButton({ onAppend }: { onAppend: (text: string) => void }) {
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
+  // Live, not-yet-finalized words — shown as a preview while speaking.
+  const [interim, setInterim] = useState("");
   const recRef = useRef<any>(null);
 
   useEffect(() => {
@@ -172,6 +174,7 @@ export function MicButton({ onAppend }: { onAppend: (text: string) => void }) {
       recRef.current?.stop();
     } catch {}
     setListening(false);
+    setInterim("");
   };
 
   const start = () => {
@@ -181,22 +184,34 @@ export function MicButton({ onAppend }: { onAppend: (text: string) => void }) {
     const rec = new SR();
     rec.lang = "en-IN"; // Indian English
     rec.continuous = true;
-    rec.interimResults = false;
+    rec.interimResults = true; // stream live words for the preview
     rec.onresult = (e: any) => {
-      // Append only finalized chunks; interim results are noisy for notes.
       let finalText = "";
+      let interimText = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t;
+        else interimText += t;
       }
-      if (finalText.trim()) onAppend(finalText.trim());
+      // Finalized words commit to the real text; interim just previews.
+      if (finalText.trim()) {
+        onAppend(finalText.trim());
+        setInterim("");
+      } else {
+        setInterim(interimText);
+      }
     };
     rec.onerror = (e: any) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         toast.error("Microphone blocked — allow mic access to dictate.");
       }
       setListening(false);
+      setInterim("");
     };
-    rec.onend = () => setListening(false);
+    rec.onend = () => {
+      setListening(false);
+      setInterim("");
+    };
     recRef.current = rec;
     try {
       rec.start();
@@ -208,18 +223,26 @@ export function MicButton({ onAppend }: { onAppend: (text: string) => void }) {
   if (!supported) return null;
 
   return (
-    <button
-      type="button"
-      onClick={listening ? stop : start}
-      title={listening ? "Stop dictation" : "Dictate (voice to text)"}
-      className={`shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
-        listening
-          ? "bg-rose-500 text-white border-rose-500 animate-pulse"
-          : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
-      }`}
-    >
-      {listening ? "● Listening…" : "🎤 Dictate"}
-    </button>
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={listening ? stop : start}
+        title={listening ? "Stop dictation" : "Dictate (voice to text)"}
+        className={`shrink-0 self-start inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
+          listening
+            ? "bg-rose-500 text-white border-rose-500 animate-pulse"
+            : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+        }`}
+      >
+        {listening ? "● Listening…" : "🎤 Dictate"}
+      </button>
+      {/* Live transcription preview — what it's hearing right now. */}
+      {listening && (
+        <p className="text-xs text-gray-500 italic">
+          {interim ? interim : "Listening… speak now"}
+        </p>
+      )}
+    </div>
   );
 }
 
