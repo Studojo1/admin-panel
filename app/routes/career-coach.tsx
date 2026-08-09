@@ -596,6 +596,11 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       setQuestions(qu);
       toast.success("Career Coach data refreshed");
       setKeyError(false);
+      // The data loaded, so the CC admin key is valid — render the dashboard.
+      // Don't wait on useAdminGuard: it resolves independently and stays null
+      // if the control-plane admin check fails, which would otherwise leave
+      // this page stuck on "Loading career coach analytics…" forever.
+      setAuthenticated(true);
     } catch (e) {
       toast.error("Failed to load career coach data");
       if (!overview) setKeyError(true);
