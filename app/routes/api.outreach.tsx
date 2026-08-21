@@ -5,8 +5,6 @@
  * GET /api/outreach?type=overview
  * GET /api/outreach?type=users&limit=&offset=&search=&status_filter=
  * GET /api/outreach?type=user_detail&user_id=
- * GET /api/outreach?type=candidate_profile&candidate_id=
- * PATCH /api/outreach?type=candidate_profile&candidate_id=   (body: profile patch)
  */
 
 import type { Route } from "./+types/api.outreach";
@@ -70,16 +68,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
-    if (type === "candidate_profile") {
-      const candidateId = url.searchParams.get("candidate_id");
-      if (!candidateId) return Response.json({ error: "candidate_id required" }, { status: 400 });
-      const res = await fetch(
-        `${JOB_OUTREACH_URL}/api/v1/admin/outreach/candidates/${candidateId}/profile`,
-        { headers },
-      );
-      return Response.json(await res.json(), { status: res.status, headers: noCache });
-    }
-
     if (type === "paid_funnel") {
       const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/paid-funnel`, { headers });
       return Response.json(await res.json(), { status: res.status, headers: noCache });
@@ -90,32 +78,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       const offset = url.searchParams.get("offset") ?? "0";
       const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/opened-emails?limit=${limit}&offset=${offset}`, { headers });
       return Response.json(await res.json(), { status: res.status, headers: noCache });
-    }
-
-    return Response.json({ error: "Unknown type" }, { status: 400 });
-  } catch (err: any) {
-    return Response.json({ error: err.message }, { status: 500 });
-  }
-}
-
-export async function action({ request }: Route.ActionArgs) {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-  const url = new URL(request.url);
-  const type = url.searchParams.get("type");
-  const headers = { Authorization: authHeader, "Content-Type": "application/json" };
-
-  try {
-    if (type === "candidate_profile") {
-      const candidateId = url.searchParams.get("candidate_id");
-      if (!candidateId) return Response.json({ error: "candidate_id required" }, { status: 400 });
-      const body = await request.text();
-      const res = await fetch(
-        `${JOB_OUTREACH_URL}/api/v1/admin/outreach/candidates/${candidateId}/profile`,
-        { method: "PATCH", headers, body },
-      );
-      return Response.json(await res.json(), { status: res.status });
     }
 
     return Response.json({ error: "Unknown type" }, { status: 400 });

@@ -10,7 +10,6 @@ import {
 import { Doughnut } from "react-chartjs-2";
 import { getOutreachUserDetail, type OutreachUserDetail, type OutreachOrderDetail } from "~/lib/api";
 import { toast } from "sonner";
-import { CandidateProfileEditor } from "./candidate-profile-editor";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -91,7 +90,6 @@ function EmailStatBar({ label, value, total, color }: { label: string; value: nu
 
 function OrderCard({ order }: { order: OutreachOrderDetail }) {
   const [showLog, setShowLog] = useState(false);
-  const [editingProfile, setEditingProfile] = useState(false);
   const navigate = useNavigate();
   const campaign = order.campaign;
   const emailTotal = campaign
@@ -107,26 +105,8 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
           <StatusBadge status={order.status} />
           <span className="font-['Satoshi'] text-xs text-neutral-500">Order #{order.id}</span>
         </div>
-        <div className="flex items-center gap-3">
-          {order.candidate_id != null && (
-            <button
-              type="button"
-              onClick={() => setEditingProfile(true)}
-              className="rounded-lg border-2 border-neutral-900 bg-white px-3 py-1 font-['Satoshi'] text-xs font-bold text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0px_0px_rgba(25,26,35,1)]"
-            >
-              Edit profile
-            </button>
-          )}
-          <span className="font-['Satoshi'] text-xs text-neutral-500">{fmtDate(order.created_at)}</span>
-        </div>
+        <span className="font-['Satoshi'] text-xs text-neutral-500">{fmtDate(order.created_at)}</span>
       </div>
-
-      {editingProfile && order.candidate_id != null && (
-        <CandidateProfileEditor
-          candidateId={order.candidate_id}
-          onClose={() => setEditingProfile(false)}
-        />
-      )}
 
       {order.is_stuck && (
         <div className="mt-3 rounded-lg border border-red-300 bg-red-50 px-4 py-2 font-['Satoshi'] text-xs font-medium text-red-700">
