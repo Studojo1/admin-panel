@@ -3,7 +3,6 @@ import { toast } from "sonner";
 import {
   getCandidateProfile,
   patchCandidateProfile,
-  resetCandidateLeads,
   type CandidateEditableProfile,
   type CandidateProfileResponse,
 } from "~/lib/api";
@@ -140,8 +139,6 @@ export function CandidateProfileEditor({
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  const [lastSaveChanged, setLastSaveChanged] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -175,37 +172,6 @@ export function CandidateProfileEditor({
 
   const changed = Object.keys(diff());
 
-  // Fields that change WHO gets contacted. Editing any of these leaves the
-  // previously collected leads stale — they were found under the old criteria.
-  const TARGETING_FIELDS = [
-    "target_role", "locations", "company_size", "company_stage",
-    "industries", "niche_keywords", "extra_manager_titles", "dream_companies",
-  ];
-  const targetingStale = lastSaveChanged.some((f) => TARGETING_FIELDS.includes(f));
-
-  const resetLeads = async () => {
-    if (!confirm(
-      "Clear this candidate's leads?\n\n" +
-      "Leads already emailed are kept, so send and reply history survives. " +
-      "Everything else is removed and the next discovery run starts clean.",
-    )) return;
-    setResetting(true);
-    try {
-      const res = await resetCandidateLeads(candidateId, {
-        reason: reason || "Profile retargeted",
-      });
-      toast.success(
-        `Removed ${res.deleted} lead(s)` +
-        (res.kept_contacted ? ` — kept ${res.kept_contacted} already emailed` : ""),
-      );
-      setLastSaveChanged([]);
-    } catch (e: any) {
-      toast.error(e.message || "Reset failed");
-    } finally {
-      setResetting(false);
-    }
-  };
-
   const save = async () => {
     const patch = diff();
     if (!Object.keys(patch).length) { toast.info("Nothing changed"); return; }
@@ -213,7 +179,7 @@ export function CandidateProfileEditor({
     try {
       const res = await patchCandidateProfile(candidateId, { ...patch, reason });
       toast.success(`Saved — ${Object.keys(res.changed).length} field(s) updated`);
-      setLastSaveChanged(Object.keys(res.changed));
+      if (res.note) toast.info(res.note, { duration: 8000 });
       const fresh = await getCandidateProfile(candidateId);
       setData(fresh);
       setForm({ ...fresh.profile });
@@ -253,27 +219,6 @@ export function CandidateProfileEditor({
                 Changes here feed lead targeting and the wording of outreach emails sent in this
                 person&rsquo;s name. Only record skills and experience they actually have.
               </div>
-
-              {targetingStale && (
-                <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3">
-                  <p className="text-sm font-medium text-red-800">
-                    Existing leads no longer match this profile
-                  </p>
-                  <p className="mt-1 text-xs text-red-700">
-                    You changed targeting, but the leads already collected were found under the
-                    old criteria and will keep showing. Clear them, then run lead discovery again.
-                    Leads already emailed are kept.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={resetLeads}
-                    disabled={resetting}
-                    className="mt-2.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:bg-gray-300"
-                  >
-                    {resetting ? "Clearing…" : "Clear stale leads"}
-                  </button>
-                </div>
-              )}
 
               <Field
                 label="Target role"

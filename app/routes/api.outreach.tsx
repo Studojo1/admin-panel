@@ -118,17 +118,6 @@ export async function action({ request }: Route.ActionArgs) {
       return Response.json(await res.json(), { status: res.status });
     }
 
-    if (type === "reset_leads") {
-      const candidateId = url.searchParams.get("candidate_id");
-      if (!candidateId) return Response.json({ error: "candidate_id required" }, { status: 400 });
-      const body = await request.text();
-      const res = await fetch(
-        `${JOB_OUTREACH_URL}/api/v1/admin/outreach/candidates/${candidateId}/leads/reset`,
-        { method: "POST", headers, body },
-      );
-      return Response.json(await res.json(), { status: res.status });
-    }
-
     return Response.json({ error: "Unknown type" }, { status: 400 });
   } catch (err: any) {
     return Response.json({ error: err.message }, { status: 500 });

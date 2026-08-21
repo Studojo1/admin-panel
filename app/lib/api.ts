@@ -573,30 +573,6 @@ export async function patchCandidateProfile(
   return response.json();
 }
 
-/** Clear a candidate's leads so the next discovery run starts clean. */
-export async function resetCandidateLeads(
-  candidateId: number,
-  opts: { keep_contacted?: boolean; reason?: string } = {},
-): Promise<{ ok: boolean; deleted: number; kept_contacted: number; remaining: number; note?: string }> {
-  const token = await getToken();
-  if (!token) throw new Error("No authentication token available. Please sign in.");
-  const qs = new URLSearchParams({
-    type: "reset_leads",
-    candidate_id: candidateId.toString(),
-  }).toString();
-  const response = await fetch(`/api/outreach?${qs}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    credentials: "include",
-    body: JSON.stringify({ keep_contacted: opts.keep_contacted ?? true, reason: opts.reason ?? "" }),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error((err as any).error || (err as any).detail || `HTTP ${response.status}`);
-  }
-  return response.json();
-}
-
 export async function getAdminCampaignEmails(campaignId: number): Promise<AdminCampaignDetail> {
   return outreachProxyFetch<AdminCampaignDetail>("campaign_emails", { campaign_id: campaignId.toString() });
 }
