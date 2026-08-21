@@ -46,6 +46,8 @@ export default [
   route("career-coach", "routes/career-coach.tsx"),
   route("webinar-registrations", "routes/webinar-registrations.tsx"),
   route("api/webinar-registrations", "routes/api.webinar-registrations.tsx"),
+  route("campus-ambassadors", "routes/campus-ambassadors.tsx"),
+  route("api/campus-ambassadors", "routes/api.campus-ambassadors.tsx"),
   route("b2b-gtm", "routes/b2b-gtm.tsx"),
   route("b2b-gtm/team/:who", "routes/b2b-gtm.team.$who.tsx"),
   route("b2b-gtm/:id", "routes/b2b-gtm.$id.tsx"),

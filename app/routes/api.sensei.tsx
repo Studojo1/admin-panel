@@ -40,8 +40,11 @@ async function loadSenseiTickets() {
 
 export async function loader({ request }: Route.LoaderArgs) {
   if (!(await requireAdmin(request))) return Response.json({ error: "Forbidden" }, { status: 403 });
-  const [analytics, tickets] = await Promise.all([
+  const [analytics, logs, tickets] = await Promise.all([
     fetch(`${BOB_API}/admin/analytics`, { headers: { "X-Superadmin-Secret": SECRET } })
+      .then((r) => r.json())
+      .catch(() => ({})),
+    fetch(`${BOB_API}/admin/logs?limit=100`, { headers: { "X-Superadmin-Secret": SECRET } })
       .then((r) => r.json())
       .catch(() => ({})),
     loadSenseiTickets().catch(() => []),
@@ -49,7 +52,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   return Response.json({
     orgs: analytics.orgs || [],
     users: analytics.users || [],
+    chats: analytics.chats || [],
     totals: analytics.totals || null,
+    rates: analytics.rates || null,
+    logs: {
+      errors: logs.errors || [], runs: logs.runs || [],
+      reveals: logs.reveals || [], credit_events: logs.credit_events || [],
+      governor: logs.governor || null,
+    },
     tickets,
   });
 }
