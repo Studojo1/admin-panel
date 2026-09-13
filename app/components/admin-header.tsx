@@ -17,7 +17,7 @@ const NAV_LINKS = [
   { to: "/ops-alerts", label: "Ops Alerts" },
   { to: "/tickets", label: "Tickets" },
   { to: "/webinar-registrations", label: "Webinar Signups" },
-  { to: "/campus-ambassadors", label: "Campus Ambassadors" },
+  { to: "/campus-ambassadors", label: "Studojo Insiders" },
   { to: "/email-sequences", label: "Emails" },
   { to: "/sensei", label: "Sensei" },
   { to: "/analytics", label: "Analytics" },
