@@ -67,6 +67,206 @@ function inr(n: number | null | undefined): string {
   return "₹" + v.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+// ── chat transcript modal ───────────────────────────────────────────────────
+// The table could only ever show a chat's COUNTS. Diagnosing "why did this chat go wrong" meant
+// opening psql against prod and reading bob_messages by hand. This is that same forensic view,
+// one click from the row: the real prompt, the real reply, and the runs each turn kicked off.
+interface ChatMessage {
+  id: number; role: string; content: string; suggestions: string[]; created_at: string | null;
+}
+interface ChatRun {
+  id: number; status: string; created_at: string | null; seconds: number | null;
+  credits_used: number | null; error: string; keywords: string[]; location: string;
+  count: number | null; freshness_days: number | null; constraints: string[];
+  stopped_because: string; search_summary: string; delivered: number | null;
+}
+interface ChatDetail {
+  chat: {
+    id: number; title: string; owner_email: string | null; org_id: number;
+    org_name: string | null; assigned_to: string | null;
+    created_at: string | null; updated_at: string | null;
+  };
+  messages: ChatMessage[];
+  runs: ChatRun[];
+}
+
+function RunCard({ r }: { r: ChatRun }) {
+  const bad = r.status === "error" || !!r.error;
+  return (
+    <div className={`border-2 rounded-xl p-3 text-xs ${bad ? "border-red-400 bg-red-50" : "border-neutral-200 bg-neutral-50"}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1">
+        <span className="font-bold">run {r.id}</span>
+        <span className={`px-2 py-0.5 rounded-full border font-semibold ${
+          bad ? "border-red-500 text-red-700" : r.status === "done" ? "border-emerald-500 text-emerald-700"
+              : "border-neutral-400 text-neutral-600"}`}>{r.status}</span>
+        {r.seconds != null && <span className="text-neutral-500">{Math.floor(r.seconds / 60)}m {r.seconds % 60}s</span>}
+        {r.delivered != null && <span className="text-neutral-500">delivered <b>{r.delivered}</b>{r.count ? ` / ${r.count}` : ""}</span>}
+        {r.credits_used != null && <span className="text-neutral-500">{r.credits_used} credits</span>}
+        <span className="text-neutral-400 ml-auto">{fmtDateTime(r.created_at)}</span>
+      </div>
+      {(r.keywords?.length > 0 || r.location) && (
+        <div className="text-neutral-600">
+          {r.keywords?.length > 0 && <span><b>keywords</b> {r.keywords.join(", ")}</span>}
+          {r.location && <span className="ml-3"><b>where</b> {r.location}</span>}
+          {r.freshness_days != null && <span className="ml-3"><b>freshness</b> {r.freshness_days}d</span>}
+        </div>
+      )}
+      {r.constraints?.length > 0 && (
+        <div className="text-neutral-600 mt-1"><b>constraints</b> {r.constraints.join(" · ")}</div>
+      )}
+      {r.stopped_because && <div className="text-neutral-500 mt-1">stopped: {r.stopped_because}</div>}
+      {r.error && <div className="text-red-700 mt-1 font-semibold break-words">{r.error}</div>}
+    </div>
+  );
+}
+
+function ChatModal({ chatId, onClose }: { chatId: number; onClose: () => void }) {
+  const [data, setData] = useState<ChatDetail | null>(null);
+  const [err, setErr] = useState("");
+  const [tab, setTab] = useState<"chat" | "runs">("chat");
+  const [opening, setOpening] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const token = await getToken();
+        const r = await fetch(`/api/sensei/chat/${chatId}`, {
+          credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!alive) return;
+        if (r.ok && d.chat) setData(d);
+        else setErr(d.detail || d.error || "Could not load that chat.");
+      } catch { if (alive) setErr("Could not load that chat."); }
+    })();
+    return () => { alive = false; };
+  }, [chatId]);
+
+  // Mint a short-lived support session and open their workspace at this chat. The token is
+  // minted server-side (bob-svc caps the TTL at an hour and logs every one), so nothing
+  // sensitive passes through the browser beyond the one-time URL.
+  const openInSensei = async () => {
+    if (opening) return;
+    setOpening(true);
+    // opened synchronously so the browser attributes it to the click, not the await below
+    const tabRef = window.open("", "_blank");
+    try {
+      const token = await getToken();
+      const r = await fetch(`/api/sensei/chat/${chatId}`, {
+        method: "POST",
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.url) {
+        if (tabRef) tabRef.location.href = d.url;
+        else window.open(d.url, "_blank");
+      } else {
+        tabRef?.close();
+        setErr(d.detail || d.error || "Could not open a session for that customer.");
+      }
+    } catch {
+      tabRef?.close();
+      setErr("Could not open a session for that customer.");
+    } finally { setOpening(false); }
+  };
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
+
+  const c = data?.chat;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto"
+         onClick={onClose}>
+      <div className="w-full max-w-3xl my-8 bg-white border-2 border-neutral-900 rounded-2xl shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+           onClick={(e) => e.stopPropagation()}>
+        {/* header */}
+        <div className="border-b-2 border-neutral-900 px-5 py-4">
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="font-['Clash_Display'] text-lg font-bold truncate">
+                {c?.title || `Chat ${chatId}`}
+              </div>
+              <div className="text-xs text-neutral-500 mt-0.5">
+                #{chatId}
+                {c?.org_name && <> · {c.org_name}</>}
+                {c?.owner_email && <> · {c.owner_email}</>}
+                {c?.updated_at && <> · {fmtDateTime(c.updated_at)}</>}
+              </div>
+            </div>
+            <button onClick={openInSensei} disabled={opening || !c?.owner_email}
+                    title={c?.owner_email ? `Sign in as ${c.owner_email} and open this chat` : "This chat has no owner"}
+                    className="shrink-0 bg-violet-600 text-white font-bold px-3 py-2 rounded-xl border-2 border-neutral-900 text-xs shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50">
+              {opening ? "Opening…" : "Open with Sensei ↗"}
+            </button>
+            <button onClick={onClose}
+                    className="shrink-0 border-2 border-neutral-900 rounded-xl px-3 py-2 text-xs font-bold hover:bg-neutral-100">
+              Close
+            </button>
+          </div>
+          <div className="flex gap-2 mt-3">
+            {(["chat", "runs"] as const).map((t) => (
+              <button key={t} onClick={() => setTab(t)}
+                      className={`px-3 py-1 rounded-lg border-2 text-xs font-bold ${
+                        tab === t ? "border-neutral-900 bg-neutral-900 text-white"
+                                  : "border-neutral-300 text-neutral-500 hover:border-neutral-900"}`}>
+                {t === "chat" ? `Conversation (${data?.messages.length ?? 0})` : `Runs (${data?.runs.length ?? 0})`}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* body */}
+        <div className="p-5 max-h-[65vh] overflow-y-auto">
+          {err && <div className="text-red-600 text-sm font-semibold">{err}</div>}
+          {!data && !err && <div className="text-neutral-400 text-sm">Loading…</div>}
+
+          {data && tab === "chat" && (
+            <div className="space-y-3">
+              {data.messages.length === 0 && <div className="text-neutral-400 text-sm">No messages in this chat.</div>}
+              {data.messages.map((m) => {
+                const user = m.role === "user";
+                return (
+                  <div key={m.id} className={`flex ${user ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[85%] border-2 rounded-2xl px-4 py-2.5 ${
+                      user ? "bg-violet-600 text-white border-neutral-900"
+                           : "bg-white text-neutral-900 border-neutral-900"}`}>
+                      <div className="text-sm whitespace-pre-wrap break-words">{m.content || <i className="opacity-60">(empty)</i>}</div>
+                      {m.suggestions?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {m.suggestions.map((s, i) => (
+                            <span key={i} className={`text-[11px] px-2 py-0.5 rounded-full border ${
+                              user ? "border-white/50" : "border-neutral-400 text-neutral-600"}`}>{s}</span>
+                          ))}
+                        </div>
+                      )}
+                      <div className={`text-[10px] mt-1 ${user ? "text-white/60" : "text-neutral-400"}`}>
+                        {m.role} · {fmtDateTime(m.created_at)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {data && tab === "runs" && (
+            <div className="space-y-2">
+              {data.runs.length === 0 && <div className="text-neutral-400 text-sm">This chat never started a run.</div>}
+              {data.runs.map((r) => <RunCard key={r.id} r={r} />)}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Sensei() {
   const { isAuthorized, isPending } = useAdminGuard();
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -82,6 +282,7 @@ export default function Sensei() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [chatFilter, setChatFilter] = useState("");
+  const [openChatId, setOpenChatId] = useState<number | null>(null);
 
   const load = async () => {
     try {
@@ -274,7 +475,10 @@ export default function Sensei() {
 
         {/* Every chat */}
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-['Clash_Display'] text-xl font-bold">All chats <span className="text-neutral-400 text-base font-normal">({chats.length})</span></h2>
+          <h2 className="font-['Clash_Display'] text-xl font-bold">
+            All chats <span className="text-neutral-400 text-base font-normal">({chats.length})</span>
+            <span className="text-neutral-400 text-xs font-normal ml-2">click a row to read it</span>
+          </h2>
           <input value={chatFilter} onChange={(e) => setChatFilter(e.target.value)} placeholder="Filter by org, user, or title" className={`${input} w-64`} />
         </div>
         <div className={`${card} overflow-x-auto mb-8`}>
@@ -284,7 +488,11 @@ export default function Sensei() {
               <div>Msgs</div><div>Runs</div><div>Reveals</div><div>Cost</div>
             </div>
             {filteredChats.map((c) => (
-              <div key={c.id} className="grid grid-cols-[0.5fr_2fr_1.3fr_1.4fr_0.7fr_0.7fr_0.8fr_0.9fr] gap-2 px-5 py-3 border-b border-neutral-100 text-sm items-center">
+              <div key={c.id} role="button" tabIndex={0}
+                   onClick={() => setOpenChatId(c.id)}
+                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenChatId(c.id); } }}
+                   title="Read this chat"
+                   className="grid grid-cols-[0.5fr_2fr_1.3fr_1.4fr_0.7fr_0.7fr_0.8fr_0.9fr] gap-2 px-5 py-3 border-b border-neutral-100 text-sm items-center cursor-pointer hover:bg-violet-50 focus:bg-violet-50 focus:outline-none">
                 <div className="text-neutral-400 text-xs">{c.id}</div>
                 <div className="min-w-0">
                   <div className="font-semibold truncate">{c.title}</div>
@@ -461,6 +669,10 @@ export default function Sensei() {
           )}
         </div>
       </div>
+
+      {openChatId != null && (
+        <ChatModal chatId={openChatId} onClose={() => setOpenChatId(null)} />
+      )}
     </div>
   );
 }
