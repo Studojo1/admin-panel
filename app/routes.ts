@@ -23,6 +23,7 @@ export default [
   route("email-sequences", "routes/email-sequences.tsx"),
   route("sensei", "routes/sensei.tsx"),
   route("api/sensei", "routes/api.sensei.tsx"),
+  route("api/sensei/chat/:chatId", "routes/api.sensei.chat.$chatId.tsx"),
   route("chat-logs", "routes/chat-logs.tsx"),
   route("api/chat-logs", "routes/api.chat-logs.tsx"),
   route("ops-alerts", "routes/ops-alerts.tsx"),
