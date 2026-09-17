@@ -42,6 +42,16 @@ async function ensureTable() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  // Attribution, added after the table shipped. The public form writes these;
+  // rows created before the change carry NULL and render as "Not specified".
+  await db.execute(sql`
+    ALTER TABLE campus_ambassador_applications
+      ADD COLUMN IF NOT EXISTS source_path TEXT,
+      ADD COLUMN IF NOT EXISTS utm_source TEXT,
+      ADD COLUMN IF NOT EXISTS utm_medium TEXT,
+      ADD COLUMN IF NOT EXISTS utm_campaign TEXT,
+      ADD COLUMN IF NOT EXISTS referrer TEXT
+  `);
 }
 
 // POST { intent: "set-status", id, status } — move an applicant through triage.
@@ -90,7 +100,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     db.execute(sql`
       SELECT id, full_name, whatsapp, email, college, course,
              year_of_study, graduation_year, social_handle, why_you,
-             referral_source, status, created_at
+             referral_source, status, created_at,
+             source_path, utm_source, utm_medium, utm_campaign, referrer
       FROM campus_ambassador_applications
       ORDER BY created_at DESC
       LIMIT ${limit} OFFSET ${offset}
