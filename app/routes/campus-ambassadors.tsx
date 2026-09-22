@@ -25,6 +25,8 @@ interface Applicant {
   utm_medium: string | null;
   utm_campaign: string | null;
   referrer: string | null;
+  // Only present on archived rows: which closed cohort they applied in.
+  drive?: string | null;
   status: string;
   created_at: string;
 }
@@ -54,7 +56,7 @@ export default function CampusAmbassadors() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [reloadKey, setReloadKey] = useState(0);
-  // false = the drive currently open for applications, true = closed drives.
+  // false = the cohort currently open for applications, true = closed cohorts.
   const [showArchive, setShowArchive] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   // The applicant whose "why you" answer is expanded in the modal.
@@ -139,7 +141,23 @@ export default function CampusAmbassadors() {
   // separates /insider from /campus-ambassador; utm_source needs the link to
   // carry ?utm_source=, so untagged links land in "Not specified".
   const pathBreakdown = useMemo(() => countBy((r) => r.source_path), [rows]);
-  const utmBreakdown = useMemo(() => countBy((r) => r.utm_source), [rows]);
+  // No link has carried ?utm_source= yet, so utm_source is null for every row.
+  // The referring site is the channel signal that actually arrives: collapse
+  // LinkedIn's app, web and lnkd.in shortener into one bucket per platform.
+  const channelOf = (r: Applicant) => {
+    const ref = (r.referrer || "").toLowerCase();
+    if (!ref) return r.utm_source;
+    if (ref.includes("linkedin") || ref.includes("lnkd.in")) return "LinkedIn";
+    if (ref.includes("instagram")) return "Instagram";
+    if (ref.includes("whatsapp")) return "WhatsApp";
+    if (ref.includes("google")) return "Google";
+    try {
+      return new URL(ref).hostname.replace(/^www\./, "");
+    } catch {
+      return ref;
+    }
+  };
+  const channelBreakdown = useMemo(() => countBy(channelOf), [rows]);
 
   const fmt = (iso: string) =>
     new Date(iso).toLocaleString("en-GB", {
@@ -154,6 +172,7 @@ export default function CampusAmbassadors() {
       "course", "year_of_study", "graduation_year", "social_handle",
       "referral_source", "why_you",
       "source_path", "utm_source", "utm_medium", "utm_campaign", "referrer",
+      ...(showArchive ? ["cohort"] : []),
     ];
     const escape = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [
@@ -164,13 +183,14 @@ export default function CampusAmbassadors() {
           r.course, r.year_of_study, r.graduation_year, r.social_handle,
           r.referral_source, r.why_you,
           r.source_path, r.utm_source, r.utm_medium, r.utm_campaign, r.referrer,
+          ...(showArchive ? [r.drive] : []),
         ].map(escape).join(",")
       ),
     ].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `studojo-insiders-${showArchive ? "past-drives" : "current-drive"}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `studojo-insiders-${showArchive ? "past-cohorts" : "current-cohort"}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -188,8 +208,8 @@ export default function CampusAmbassadors() {
             </h1>
             <p className="text-sm text-gray-500 mt-1">
               {showArchive
-                ? "Past drives — closed, kept for reference."
-                : "Applications from studojo.com/campus-ambassador."}
+                ? `Past cohorts — closed, kept for reference. ${rows.length} applicant${rows.length === 1 ? "" : "s"}.`
+                : `Open cohort — applications from studojo.com/insider and /campus-ambassador (both serve the same page). ${rows.length} applicant${rows.length === 1 ? "" : "s"}.`}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -200,7 +220,7 @@ export default function CampusAmbassadors() {
                   !showArchive ? "bg-neutral-900 text-white" : "bg-white text-gray-900 hover:bg-gray-50"
                 }`}
               >
-                Current drive
+                Current cohort
               </button>
               <button
                 onClick={() => setShowArchive(true)}
@@ -208,7 +228,7 @@ export default function CampusAmbassadors() {
                   showArchive ? "bg-neutral-900 text-white" : "bg-white text-gray-900 hover:bg-gray-50"
                 }`}
               >
-                Past drives
+                Past cohorts
               </button>
             </div>
           <button
@@ -252,7 +272,7 @@ export default function CampusAmbassadors() {
             <BreakdownCard title="Graduation year" items={gradYearBreakdown} />
             <BreakdownCard title="How they heard" items={referralBreakdown} />
             <BreakdownCard title="Which link" items={pathBreakdown} />
-            <BreakdownCard title="Channel (utm_source)" items={utmBreakdown} />
+            <BreakdownCard title="Channel (referrer)" items={channelBreakdown} />
           </div>
         )}
 
@@ -286,7 +306,8 @@ export default function CampusAmbassadors() {
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   {["#", "Date", "Status", "Name", "Email", "WhatsApp", "College", "Course",
-                    "Year", "Grad Year", "Social", "Why them", "Source", "Link", "Channel"].map((h) => (
+                    "Year", "Grad Year", "Social", "Why them", "Source", "Link", "Channel",
+                    ...(showArchive ? ["Cohort"] : [])].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       {h}
                     </th>
@@ -337,8 +358,11 @@ export default function CampusAmbassadors() {
                     <td className="px-4 py-3 text-gray-800">
                       {r.utm_source
                         ? `${r.utm_source}${r.utm_medium ? " / " + r.utm_medium : ""}`
-                        : dash(null)}
+                        : dash(channelOf(r))}
                     </td>
+                    {showArchive && (
+                      <td className="px-4 py-3 text-gray-800">{dash(r.drive)}</td>
+                    )}
                   </tr>
                 ))}
               </tbody>
