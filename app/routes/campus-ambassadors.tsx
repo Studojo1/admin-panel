@@ -5,7 +5,7 @@ import { getToken } from "~/lib/api";
 import type { Route } from "./+types/campus-ambassadors";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: "Campus Ambassadors – Admin Panel" }];
+  return [{ title: "Studojo Insiders – Admin Panel" }];
 }
 
 interface Applicant {
@@ -54,6 +54,8 @@ export default function CampusAmbassadors() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [reloadKey, setReloadKey] = useState(0);
+  // false = the drive currently open for applications, true = closed drives.
+  const [showArchive, setShowArchive] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   // The applicant whose "why you" answer is expanded in the modal.
   const [expanded, setExpanded] = useState<Applicant | null>(null);
@@ -66,10 +68,13 @@ export default function CampusAmbassadors() {
       try {
         const token = await getToken();
         if (!token) throw new Error("Not authenticated");
-        const res = await fetch("/api/campus-ambassadors", {
-          headers: { Authorization: `Bearer ${token}` },
-          credentials: "include",
-        });
+        const res = await fetch(
+          `/api/campus-ambassadors${showArchive ? "?archive=1" : ""}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            credentials: "include",
+          }
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setRows(data.applicants || []);
@@ -82,7 +87,7 @@ export default function CampusAmbassadors() {
     };
 
     fetchRows();
-  }, [isPending, isAuthorized, reloadKey]);
+  }, [isPending, isAuthorized, reloadKey, showArchive]);
 
   async function setStatus(applicant: Applicant, status: string) {
     setBusyId(applicant.id);
@@ -165,7 +170,7 @@ export default function CampusAmbassadors() {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `campus-ambassadors-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `studojo-insiders-${showArchive ? "past-drives" : "current-drive"}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -179,12 +184,33 @@ export default function CampusAmbassadors() {
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
-              Campus Ambassadors
+              Studojo Insiders
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              Applications from studojo.com/campus-ambassador.
+              {showArchive
+                ? "Past drives — closed, kept for reference."
+                : "Applications from studojo.com/campus-ambassador."}
             </p>
           </div>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-lg border-2 border-neutral-900 overflow-hidden shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]">
+              <button
+                onClick={() => setShowArchive(false)}
+                className={`px-3 py-1.5 text-sm font-semibold transition-colors ${
+                  !showArchive ? "bg-neutral-900 text-white" : "bg-white text-gray-900 hover:bg-gray-50"
+                }`}
+              >
+                Current drive
+              </button>
+              <button
+                onClick={() => setShowArchive(true)}
+                className={`px-3 py-1.5 text-sm font-semibold border-l-2 border-neutral-900 transition-colors ${
+                  showArchive ? "bg-neutral-900 text-white" : "bg-white text-gray-900 hover:bg-gray-50"
+                }`}
+              >
+                Past drives
+              </button>
+            </div>
           <button
             onClick={exportCsv}
             disabled={filtered.length === 0}
@@ -192,6 +218,7 @@ export default function CampusAmbassadors() {
           >
             Export CSV
           </button>
+          </div>
         </div>
 
         {stats && (
@@ -274,7 +301,9 @@ export default function CampusAmbassadors() {
                     <td className="px-4 py-3">
                       <select
                         value={r.status}
-                        disabled={busyId === r.id}
+                        // Archived rows live in a different table; set-status
+                        // targets the live one and would match nothing.
+                        disabled={busyId === r.id || showArchive}
                         onChange={(e) => setStatus(r, e.target.value)}
                         className={`rounded-full border px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50 ${
                           STATUS_STYLES[r.status] ?? STATUS_STYLES.new
