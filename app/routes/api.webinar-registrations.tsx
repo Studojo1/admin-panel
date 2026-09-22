@@ -151,6 +151,17 @@ export async function loader({ request }: Route.LoaderArgs) {
   await db.execute(sql`
     ALTER TABLE webinar_registrations ADD COLUMN IF NOT EXISTS webinar_id INTEGER
   `);
+  // Ticketing columns, owned by the public site but read here. Declared so this
+  // panel renders against a database where the public site has not yet taken a
+  // paid registration, instead of erroring on an unknown column.
+  await db.execute(sql`
+    ALTER TABLE webinar_registrations
+      ADD COLUMN IF NOT EXISTS ref_code TEXT,
+      ADD COLUMN IF NOT EXISTS ambassador_id INTEGER,
+      ADD COLUMN IF NOT EXISTS amount_paise INTEGER,
+      ADD COLUMN IF NOT EXISTS paid BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ
+  `);
 
   const url = new URL(request.url);
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "1000"), 2000);
@@ -179,7 +190,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     db.execute(sql`
       SELECT r.id, r.full_name, r.whatsapp, r.email, r.college, r.course,
              r.specialisation, r.year_of_study, r.graduation_year, r.life_stage,
-             r.referral_source, r.webinar_id, w.title AS webinar_title, r.created_at
+             r.referral_source, r.webinar_id, w.title AS webinar_title, r.created_at,
+             r.ref_code, r.paid, r.amount_paise, r.paid_at
       FROM webinar_registrations r
       LEFT JOIN webinars w ON w.id = r.webinar_id
       WHERE ${where}
@@ -189,7 +201,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     db.execute(sql`
       SELECT
         COUNT(*) AS total,
-        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS last_24_hours
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS last_24_hours,
+        -- Seats actually sold, and the money behind them. The total above
+        -- counts everyone who started registering, which for a ticketed
+        -- webinar is a much larger number than the one that matters.
+        COUNT(*) FILTER (WHERE r.paid) AS paid_count,
+        COUNT(*) FILTER (WHERE r.ref_code IS NOT NULL AND r.paid) AS paid_via_ambassador,
+        COALESCE(SUM(r.amount_paise) FILTER (WHERE r.paid), 0) AS revenue_paise
       FROM webinar_registrations r
       WHERE ${where}
     `),
