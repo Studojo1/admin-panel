@@ -20,6 +20,11 @@ interface Applicant {
   social_handle: string | null;
   why_you: string;
   referral_source: string | null;
+  source_path: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  referrer: string | null;
   status: string;
   created_at: string;
 }
@@ -130,6 +135,11 @@ export default function CampusAmbassadors() {
   const yearBreakdown = useMemo(() => countBy((r) => r.year_of_study), [rows]);
   const gradYearBreakdown = useMemo(() => countBy((r) => r.graduation_year), [rows]);
   const referralBreakdown = useMemo(() => countBy((r) => r.referral_source), [rows]);
+  // Which link they used, and which channel it was posted on. source_path
+  // separates /insider from /campus-ambassador; utm_source needs the link to
+  // carry ?utm_source=, so untagged links land in "Not specified".
+  const pathBreakdown = useMemo(() => countBy((r) => r.source_path), [rows]);
+  const utmBreakdown = useMemo(() => countBy((r) => r.utm_source), [rows]);
 
   const fmt = (iso: string) =>
     new Date(iso).toLocaleString("en-GB", {
@@ -143,6 +153,7 @@ export default function CampusAmbassadors() {
       "id", "created_at", "status", "full_name", "email", "whatsapp", "college",
       "course", "year_of_study", "graduation_year", "social_handle",
       "referral_source", "why_you",
+      "source_path", "utm_source", "utm_medium", "utm_campaign", "referrer",
     ];
     const escape = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [
@@ -152,6 +163,7 @@ export default function CampusAmbassadors() {
           r.id, r.created_at, r.status, r.full_name, r.email, r.whatsapp, r.college,
           r.course, r.year_of_study, r.graduation_year, r.social_handle,
           r.referral_source, r.why_you,
+          r.source_path, r.utm_source, r.utm_medium, r.utm_campaign, r.referrer,
         ].map(escape).join(",")
       ),
     ].join("\n");
@@ -239,6 +251,8 @@ export default function CampusAmbassadors() {
             <BreakdownCard title="Year of study" items={yearBreakdown} />
             <BreakdownCard title="Graduation year" items={gradYearBreakdown} />
             <BreakdownCard title="How they heard" items={referralBreakdown} />
+            <BreakdownCard title="Which link" items={pathBreakdown} />
+            <BreakdownCard title="Channel (utm_source)" items={utmBreakdown} />
           </div>
         )}
 
@@ -272,7 +286,7 @@ export default function CampusAmbassadors() {
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   {["#", "Date", "Status", "Name", "Email", "WhatsApp", "College", "Course",
-                    "Year", "Grad Year", "Social", "Why them", "Source"].map((h) => (
+                    "Year", "Grad Year", "Social", "Why them", "Source", "Link", "Channel"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       {h}
                     </th>
@@ -319,6 +333,12 @@ export default function CampusAmbassadors() {
                       </button>
                     </td>
                     <td className="px-4 py-3 text-gray-800">{dash(r.referral_source)}</td>
+                    <td className="px-4 py-3 text-gray-800">{dash(r.source_path)}</td>
+                    <td className="px-4 py-3 text-gray-800">
+                      {r.utm_source
+                        ? `${r.utm_source}${r.utm_medium ? " / " + r.utm_medium : ""}`
+                        : dash(null)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
