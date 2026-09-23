@@ -100,7 +100,7 @@ export default function CampusAmbassadors() {
   async function copyInvite(applicant: Applicant) {
     if (!applicant.ref_code) return;
     const message =
-      `No one is hiring. Get hired anyway.\n` +
+      `How to Get a Job When No One Is Hiring\n` +
       `"My dad knows a guy" is not enough — learn how to create opportunities ` +
       `when job postings aren't enough, from cold emails to reaching out the right way.\n\n` +
       `Saturday, 26 September · 7:00 PM IST\n` +
