@@ -26,7 +26,13 @@ interface Applicant {
   utm_campaign: string | null;
   referrer: string | null;
   status: string;
+  ref_code: string | null;
   created_at: string;
+  // What this ambassador has brought in for the webinar. Strings because
+  // Postgres returns COUNT/SUM as bigint, which the driver hands over as text.
+  webinar_registrations: string;
+  webinar_paid: string;
+  webinar_revenue_paise: string;
 }
 
 interface Stats {
@@ -55,6 +61,8 @@ export default function CampusAmbassadors() {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [reloadKey, setReloadKey] = useState(0);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // Which row just had its invite copied, so the button can confirm it briefly.
+  const [copiedId, setCopiedId] = useState<number | null>(null);
   // The applicant whose "why you" answer is expanded in the modal.
   const [expanded, setExpanded] = useState<Applicant | null>(null);
 
@@ -83,6 +91,30 @@ export default function CampusAmbassadors() {
 
     fetchRows();
   }, [isPending, isAuthorized, reloadKey]);
+
+  /**
+   * Copy the message an ambassador should forward: the link, their code and
+   * what it saves. Ops would otherwise retype this per ambassador, and a code
+   * typo'd into a WhatsApp broadcast is a discount that silently fails.
+   */
+  async function copyInvite(applicant: Applicant) {
+    if (!applicant.ref_code) return;
+    const message =
+      `No one is hiring. Get hired anyway.\n` +
+      `"My dad knows a guy" is not enough — learn how to create opportunities ` +
+      `when job postings aren't enough, from cold emails to reaching out the right way.\n\n` +
+      `🗓️ Saturday, 26 September · 7:00 PM IST\n` +
+      `🎟️ ₹79 with my code (normally ₹100)\n\n` +
+      `Register: https://studojo.com/webinar\n` +
+      `Use code: ${applicant.ref_code}`;
+    try {
+      await navigator.clipboard.writeText(message);
+      setCopiedId(applicant.id);
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      setError("Could not copy to clipboard.");
+    }
+  }
 
   async function setStatus(applicant: Applicant, status: string) {
     setBusyId(applicant.id);
@@ -145,7 +177,9 @@ export default function CampusAmbassadors() {
 
   function exportCsv() {
     const headers = [
-      "id", "created_at", "status", "full_name", "email", "whatsapp", "college",
+      "id", "created_at", "status", "ref_code",
+      "webinar_registrations", "webinar_paid", "webinar_revenue_rupees",
+      "full_name", "email", "whatsapp", "college",
       "course", "year_of_study", "graduation_year", "social_handle",
       "referral_source", "why_you",
       "source_path", "utm_source", "utm_medium", "utm_campaign", "referrer",
@@ -155,7 +189,10 @@ export default function CampusAmbassadors() {
       headers.join(","),
       ...filtered.map((r) =>
         [
-          r.id, r.created_at, r.status, r.full_name, r.email, r.whatsapp, r.college,
+          r.id, r.created_at, r.status, r.ref_code,
+          r.webinar_registrations, r.webinar_paid,
+          Number(r.webinar_revenue_paise ?? 0) / 100,
+          r.full_name, r.email, r.whatsapp, r.college,
           r.course, r.year_of_study, r.graduation_year, r.social_handle,
           r.referral_source, r.why_you,
           r.source_path, r.utm_source, r.utm_medium, r.utm_campaign, r.referrer,
@@ -258,7 +295,7 @@ export default function CampusAmbassadors() {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {["#", "Date", "Status", "Name", "Email", "WhatsApp", "College", "Course",
+                  {["#", "Date", "Status", "Code", "Webinar", "Name", "Email", "WhatsApp", "College", "Course",
                     "Year", "Grad Year", "Social", "Why them", "Source", "Link", "Channel"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       {h}
@@ -286,6 +323,40 @@ export default function CampusAmbassadors() {
                           </option>
                         ))}
                       </select>
+                    </td>
+                    {/* The code they hand out, and a one-click copy of the
+                        message to send them — the thing an ops person actually
+                        needs off this screen. */}
+                    <td className="px-4 py-3">
+                      {r.ref_code ? (
+                        <button
+                          type="button"
+                          onClick={() => copyInvite(r)}
+                          title="Copy the share message for this ambassador"
+                          className="font-mono text-xs font-bold px-2 py-1 rounded border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
+                        >
+                          {copiedId === r.id ? "Copied!" : r.ref_code}
+                        </button>
+                      ) : (
+                        <span className="text-gray-300 text-xs">
+                          {r.status === "selected" ? "—" : "Select to issue"}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {Number(r.webinar_registrations) > 0 ? (
+                        <span className="text-gray-800">
+                          <span className="font-semibold text-green-700">{r.webinar_paid}</span>
+                          <span className="text-gray-400"> paid / {r.webinar_registrations} reg</span>
+                          {Number(r.webinar_revenue_paise) > 0 && (
+                            <span className="text-gray-500">
+                              {" "}· ₹{Number(r.webinar_revenue_paise) / 100}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-900 font-medium">{r.full_name}</td>
                     <td className="px-4 py-3 text-gray-800">{r.email}</td>
