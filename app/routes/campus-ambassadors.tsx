@@ -103,8 +103,8 @@ export default function CampusAmbassadors() {
       `No one is hiring. Get hired anyway.\n` +
       `"My dad knows a guy" is not enough — learn how to create opportunities ` +
       `when job postings aren't enough, from cold emails to reaching out the right way.\n\n` +
-      `🗓️ Saturday, 26 September · 7:00 PM IST\n` +
-      `🎟️ ₹79 with my code (normally ₹100)\n\n` +
+      `Saturday, 26 September · 7:00 PM IST\n` +
+      `21% off with my code — ₹79 instead of ₹100\n\n` +
       `Register: https://studojo.com/webinar\n` +
       `Use code: ${applicant.ref_code}`;
     try {
