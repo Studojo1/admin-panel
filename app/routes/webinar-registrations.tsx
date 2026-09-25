@@ -23,11 +23,17 @@ interface Registration {
   webinar_id: number | null;
   webinar_title: string | null;
   created_at: string;
+  ref_code: string | null;
+  paid: boolean;
+  amount_paise: number | null;
 }
 
 interface Stats {
   total: string;
   last_24_hours: string;
+  paid_count: string;
+  paid_via_ambassador: string;
+  revenue_paise: string;
 }
 
 interface Webinar {
@@ -293,15 +299,46 @@ export default function WebinarRegistrations() {
           {notice && <p className="mt-3 text-sm text-violet-700">{notice}</p>}
         </div>
 
+        {/* Seats sold leads, because that is the number that matters for a
+            ticketed webinar. "Started registering" counts everyone who filled
+            in the form, most of whom abandon checkout and hold no seat;
+            reading it as attendance overstates the room several times over. */}
         {stats && (
-          <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
             {[
-              { label: "Total students", value: stats.total },
-              { label: "Past 24 hours", value: stats.last_24_hours },
+              {
+                label: "Seats paid for",
+                value: stats.paid_count ?? "0",
+                accent: true,
+                hint: "Confirmed attendees",
+              },
+              {
+                label: "Started registering",
+                value: stats.total,
+                hint: `${Math.max(0, Number(stats.total || 0) - Number(stats.paid_count || 0))} did not pay`,
+              },
+              {
+                label: "Revenue",
+                value: `₹${Number(stats.revenue_paise || 0) / 100}`,
+                hint: "From paid seats only",
+              },
+              {
+                label: "Via ambassador",
+                value: stats.paid_via_ambassador ?? "0",
+                hint: "Paid, with a code",
+              },
             ].map((s) => (
-              <div key={s.label} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+              <div
+                key={s.label}
+                className={`rounded-2xl border p-5 shadow-sm ${
+                  s.accent ? "bg-green-50 border-green-200" : "bg-white border-gray-200"
+                }`}
+              >
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{s.label}</p>
-                <p className="text-3xl font-bold text-gray-900 mt-1">{s.value}</p>
+                <p className={`text-3xl font-bold mt-1 ${s.accent ? "text-green-700" : "text-gray-900"}`}>
+                  {s.value}
+                </p>
+                {s.hint && <p className="text-xs text-gray-400 mt-1">{s.hint}</p>}
               </div>
             ))}
           </div>
@@ -347,7 +384,7 @@ export default function WebinarRegistrations() {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {["#", "Webinar", "Date", "Name", "Email", "WhatsApp", "College", "Course", "Specialisation", "Year", "Grad Year", "Stage", "Source"].map((h) => (
+                  {["#", "Paid", "Code", "Webinar", "Date", "Name", "Email", "WhatsApp", "College", "Course", "Specialisation", "Year", "Grad Year", "Stage", "Source"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       {h}
                     </th>
@@ -358,6 +395,21 @@ export default function WebinarRegistrations() {
                 {filtered.map((r) => (
                   <tr key={r.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-400 font-mono text-xs">{r.id}</td>
+                    {/* Whether this person holds a seat. An unpaid row is
+                        someone who filled in the form and left before paying,
+                        so it must not read like an attendee. */}
+                    <td className="px-4 py-3">
+                      {r.paid ? (
+                        <span className="inline-block rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-semibold text-green-700">
+                          Paid ₹{Math.round((r.amount_paise ?? 0) / 100)}
+                        </span>
+                      ) : (
+                        <span className="inline-block rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-500">
+                          Not paid
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs font-mono text-gray-700">{dash(r.ref_code)}</td>
                     <td className="px-4 py-3 text-gray-700 text-xs">{r.webinar_title ?? dash(null)}</td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{fmt(r.created_at)}</td>
                     <td className="px-4 py-3 text-gray-900 font-medium">{r.full_name}</td>
