@@ -25,8 +25,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     const [signups, orders, emails, replies, paid, reached] = await Promise.all([
       q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM "user"
             WHERE DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
-      q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM outreach_orders
-            WHERE DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      // People on the day of their FIRST order. outreach_orders is append-only
+      // (one user holds up to 46 rows), so COUNT(*) overstated this and the
+      // signup -> outreach ratio built on it.
+      q(sql`SELECT DATE(first_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n
+            FROM (SELECT user_id, MIN(created_at) AS first_at FROM outreach_orders WHERE user_id IS NOT NULL GROUP BY user_id) f
+            WHERE DATE(first_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
       q(sql`SELECT DATE(sent_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM emails_sent
             WHERE sent_at IS NOT NULL AND is_test = false
               AND DATE(sent_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
