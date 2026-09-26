@@ -26,7 +26,7 @@ type Day = { day: string; visitors: number; signups: number; orders: number; ema
 const METRICS = [
   { key: "visitors", label: "Visitors" },
   { key: "signups", label: "Signups" },
-  { key: "orders", label: "Outreach Orders" },
+  { key: "orders", label: "New outreach users" },
   { key: "emails", label: "Emails Sent" },
   { key: "replies", label: "Replies" },
   { key: "replyRate", label: "Reply Rate %", rate: true },
@@ -114,7 +114,7 @@ export default function DailyDashboard() {
   const cards = [
     { label: "Total Visitors", v: fmt(T("visitors")) },
     { label: "Total Signups", v: fmt(T("signups")) },
-    { label: "Outreach Orders", v: fmt(T("orders")) },
+    { label: "New outreach users", v: fmt(T("orders")) },
     { label: "Emails Sent", v: fmt(totEmails) },
     { label: "Replies", v: fmt(totReplies) },
     { label: "Avg Reply Rate", v: `${totReached ? Math.round((totReplies / totReached) * 1000) / 10 : 0}%` },
@@ -136,7 +136,7 @@ export default function DailyDashboard() {
       labels: cl,
       datasets: [
         { label: "Visitor → Signup %", data: daily.map((d) => r1(d.signups, d.visitors)), borderColor: "#10b981", tension: 0.35, pointRadius: 0 },
-        { label: "Signup → Outreach order %", data: daily.map((d) => r1(d.orders, d.signups)), borderColor: "#f59e0b", tension: 0.35, pointRadius: 0 },
+        { label: "Signup → Outreach user %", data: daily.map((d) => r1(d.orders, d.signups)), borderColor: "#f59e0b", tension: 0.35, pointRadius: 0 },
         { label: "Order → Paid %", data: daily.map((d) => r1(d.paid, d.orders)), borderColor: "#ec4899", tension: 0.35, pointRadius: 0 },
       ],
     },

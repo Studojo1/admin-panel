@@ -220,7 +220,7 @@ export default function Dashboard() {
               </div>
               <StatCard value={p.rev.orders} label="Paid Orders" color="orange" />
               <StatCard value={p.signups.toLocaleString("en-IN")} label="Signups" color="green" />
-              <StatCard value={p.outreach} label="Outreach Orders" color="pink" />
+              <StatCard value={p.outreach} label="Outreach users" color="pink" />
               <StatCard value={visits === null ? "…" : visits.toLocaleString("en-IN")} label={period === "allTime" ? "Lifetime Visits" : "Visits"} color="yellow" />
             </div>
 
