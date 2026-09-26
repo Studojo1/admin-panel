@@ -70,9 +70,10 @@ export async function loader({ request }: Route.LoaderArgs) {
             WHERE DATE(created_at + INTERVAL '5.5 hours') BETWEEN ${start}::date AND ${end}::date`);
     const sigAll = () => q(sql`SELECT COUNT(*)::int AS c FROM "user"`);
     const outreachRange = (start: string, end: string) =>
-      q(sql`SELECT COUNT(*)::int AS c FROM outreach_orders
+      // Distinct people, not rows: outreach_orders is append-only.
+      q(sql`SELECT COUNT(DISTINCT user_id)::int AS c FROM outreach_orders
             WHERE DATE(created_at + INTERVAL '5.5 hours') BETWEEN ${start}::date AND ${end}::date`);
-    const outreachAll = () => q(sql`SELECT COUNT(*)::int AS c FROM outreach_orders`);
+    const outreachAll = () => q(sql`SELECT COUNT(DISTINCT user_id)::int AS c FROM outreach_orders`);
 
     const [
       rToday, rYest, r7, r30, rAll,
