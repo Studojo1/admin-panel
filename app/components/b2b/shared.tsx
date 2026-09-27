@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getToken } from "~/lib/api";
 import {
@@ -145,6 +145,104 @@ export function Choice({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Free voice-to-text for a text field, using the browser's built-in Web Speech
+ * API — no key, no backend, no Azure. Chrome/Edge only (hidden elsewhere).
+ * Recognised speech is appended to the current value via onAppend; the parent
+ * owns the text. Live/interim words are shown while speaking.
+ */
+export function MicButton({ onAppend }: { onAppend: (text: string) => void }) {
+  const [supported, setSupported] = useState(false);
+  const [listening, setListening] = useState(false);
+  // Live, not-yet-finalized words — shown as a preview while speaking.
+  const [interim, setInterim] = useState("");
+  const recRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SR =
+      (typeof window !== "undefined" &&
+        ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) ||
+      null;
+    setSupported(!!SR);
+  }, []);
+
+  const stop = () => {
+    try {
+      recRef.current?.stop();
+    } catch {}
+    setListening(false);
+    setInterim("");
+  };
+
+  const start = () => {
+    const SR =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = "en-IN"; // Indian English
+    rec.continuous = true;
+    rec.interimResults = true; // stream live words for the preview
+    rec.onresult = (e: any) => {
+      let finalText = "";
+      let interimText = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t;
+        else interimText += t;
+      }
+      // Finalized words commit to the real text; interim just previews.
+      if (finalText.trim()) {
+        onAppend(finalText.trim());
+        setInterim("");
+      } else {
+        setInterim(interimText);
+      }
+    };
+    rec.onerror = (e: any) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        toast.error("Microphone blocked — allow mic access to dictate.");
+      }
+      setListening(false);
+      setInterim("");
+    };
+    rec.onend = () => {
+      setListening(false);
+      setInterim("");
+    };
+    recRef.current = rec;
+    try {
+      rec.start();
+      setListening(true);
+    } catch {}
+  };
+
+  // Not on Chrome/Edge → don't show a button that can't work.
+  if (!supported) return null;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={listening ? stop : start}
+        title={listening ? "Stop dictation" : "Dictate (voice to text)"}
+        className={`shrink-0 self-start inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
+          listening
+            ? "bg-rose-500 text-white border-rose-500 animate-pulse"
+            : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+        }`}
+      >
+        {listening ? "● Listening…" : "🎤 Dictate"}
+      </button>
+      {/* Live transcription preview — what it's hearing right now. */}
+      {listening && (
+        <p className="text-xs text-gray-500 italic">
+          {interim ? interim : "Listening… speak now"}
+        </p>
+      )}
+    </div>
   );
 }
 

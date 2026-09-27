@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { AdminUser } from "~/lib/api";
+import { updateUser, type AdminUser } from "~/lib/api";
+import { toast } from "sonner";
 
 type UserDetailModalProps = {
   user: AdminUser | null;

@@ -10,6 +10,7 @@ import {
   Choice,
   ExitModal,
   Field,
+  MicButton,
   ReactivateModal,
   StageBadge,
   TempBadge,
@@ -514,7 +515,8 @@ function NoteComposer({ companyId, onSaved }: { companyId: number; onSaved: () =
         placeholder="What did they say? Their tone, any context — add as much as you like."
         className={inputCls}
       />
-      <div className="flex justify-end mt-2">
+      <div className="flex items-center justify-between mt-2">
+        <MicButton onAppend={(t) => setText((v) => (v ? v + " " + t : t))} />
         <button
           disabled={!text.trim() || saving}
           onClick={add}

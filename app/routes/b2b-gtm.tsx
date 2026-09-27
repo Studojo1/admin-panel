@@ -223,7 +223,7 @@ export default function B2BGtm() {
         if (typeof Notification !== "undefined" && Notification.permission === "granted") {
           const contact = c.contacts?.find((x) => !x.is_inactive)?.name;
           new Notification(`Call ${c.name}${contact ? ` (${contact})` : ""}`, {
-            body: c.next_action_reason || c.last_log?.note || "Follow-up due now",
+            body: c.next_action_reason || c.last_note || "Follow-up due now",
             tag: `b2b-${c.id}`,
           });
         }
@@ -1557,9 +1557,9 @@ function ActionBar({
   const logLabel =
     branch === "buy_decision" ? "Log demo / call" : branch === "account" ? "Log a touch" : "Log a call";
 
-  // Where we left off — the most recent note, shown next to the actions so the
-  // otherwise-empty space carries context.
-  const lastNote = c.last_log?.note || c.notes;
+  // Where we left off — the last real note said (ignores handoffs/contact-changes),
+  // falling back to the company background. Never "Handed from X to Y".
+  const lastNote = c.last_note || c.notes;
   const lastWhen = c.last_log?.called_at;
 
   return (
@@ -1610,7 +1610,7 @@ function ActionBar({
               </p>
             )}
             <p className="text-sm font-semibold text-gray-900 whitespace-pre-wrap line-clamp-4 mt-0.5">
-              {c.lost_feedback || c.last_log?.note || c.notes || "No notes."}
+              {c.lost_feedback || c.last_note || c.notes || "No notes."}
             </p>
           </div>
         </div>

@@ -5,7 +5,7 @@ import { getToken } from "~/lib/api";
 import type { Route } from "./+types/campus-ambassadors";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: "Campus Ambassadors – Admin Panel" }];
+  return [{ title: "Studojo Insiders – Admin Panel" }];
 }
 
 interface Applicant {
@@ -25,6 +25,8 @@ interface Applicant {
   utm_medium: string | null;
   utm_campaign: string | null;
   referrer: string | null;
+  // Only present on archived rows: which closed cohort they applied in.
+  drive?: string | null;
   status: string;
   ref_code: string | null;
   created_at: string;
@@ -60,6 +62,8 @@ export default function CampusAmbassadors() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [reloadKey, setReloadKey] = useState(0);
+  // false = the cohort currently open for applications, true = closed cohorts.
+  const [showArchive, setShowArchive] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   // Which row just had its invite copied, so the button can confirm it briefly.
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -74,10 +78,13 @@ export default function CampusAmbassadors() {
       try {
         const token = await getToken();
         if (!token) throw new Error("Not authenticated");
-        const res = await fetch("/api/campus-ambassadors", {
-          headers: { Authorization: `Bearer ${token}` },
-          credentials: "include",
-        });
+        const res = await fetch(
+          `/api/campus-ambassadors${showArchive ? "?archive=1" : ""}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            credentials: "include",
+          }
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setRows(data.applicants || []);
@@ -90,7 +97,7 @@ export default function CampusAmbassadors() {
     };
 
     fetchRows();
-  }, [isPending, isAuthorized, reloadKey]);
+  }, [isPending, isAuthorized, reloadKey, showArchive]);
 
   /**
    * Copy the message an ambassador should forward: the link, their code and
@@ -166,7 +173,23 @@ export default function CampusAmbassadors() {
   // separates /insider from /campus-ambassador; utm_source needs the link to
   // carry ?utm_source=, so untagged links land in "Not specified".
   const pathBreakdown = useMemo(() => countBy((r) => r.source_path), [rows]);
-  const utmBreakdown = useMemo(() => countBy((r) => r.utm_source), [rows]);
+  // No link has carried ?utm_source= yet, so utm_source is null for every row.
+  // The referring site is the channel signal that actually arrives: collapse
+  // LinkedIn's app, web and lnkd.in shortener into one bucket per platform.
+  const channelOf = (r: Applicant) => {
+    const ref = (r.referrer || "").toLowerCase();
+    if (!ref) return r.utm_source;
+    if (ref.includes("linkedin") || ref.includes("lnkd.in")) return "LinkedIn";
+    if (ref.includes("instagram")) return "Instagram";
+    if (ref.includes("whatsapp")) return "WhatsApp";
+    if (ref.includes("google")) return "Google";
+    try {
+      return new URL(ref).hostname.replace(/^www\./, "");
+    } catch {
+      return ref;
+    }
+  };
+  const channelBreakdown = useMemo(() => countBy(channelOf), [rows]);
 
   const fmt = (iso: string) =>
     new Date(iso).toLocaleString("en-GB", {
@@ -183,6 +206,7 @@ export default function CampusAmbassadors() {
       "course", "year_of_study", "graduation_year", "social_handle",
       "referral_source", "why_you",
       "source_path", "utm_source", "utm_medium", "utm_campaign", "referrer",
+      ...(showArchive ? ["cohort"] : []),
     ];
     const escape = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [
@@ -196,13 +220,14 @@ export default function CampusAmbassadors() {
           r.course, r.year_of_study, r.graduation_year, r.social_handle,
           r.referral_source, r.why_you,
           r.source_path, r.utm_source, r.utm_medium, r.utm_campaign, r.referrer,
+          ...(showArchive ? [r.drive] : []),
         ].map(escape).join(",")
       ),
     ].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `campus-ambassadors-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `studojo-insiders-${showArchive ? "past-cohorts" : "current-cohort"}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -216,12 +241,33 @@ export default function CampusAmbassadors() {
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
-              Campus Ambassadors
+              Studojo Insiders
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              Applications from studojo.com/campus-ambassador.
+              {showArchive
+                ? `Past cohorts — closed, kept for reference. ${rows.length} applicant${rows.length === 1 ? "" : "s"}.`
+                : `Open cohort — applications from studojo.com/insider and /campus-ambassador (both serve the same page). ${rows.length} applicant${rows.length === 1 ? "" : "s"}.`}
             </p>
           </div>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-lg border-2 border-neutral-900 overflow-hidden shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]">
+              <button
+                onClick={() => setShowArchive(false)}
+                className={`px-3 py-1.5 text-sm font-semibold transition-colors ${
+                  !showArchive ? "bg-neutral-900 text-white" : "bg-white text-gray-900 hover:bg-gray-50"
+                }`}
+              >
+                Current cohort
+              </button>
+              <button
+                onClick={() => setShowArchive(true)}
+                className={`px-3 py-1.5 text-sm font-semibold border-l-2 border-neutral-900 transition-colors ${
+                  showArchive ? "bg-neutral-900 text-white" : "bg-white text-gray-900 hover:bg-gray-50"
+                }`}
+              >
+                Past cohorts
+              </button>
+            </div>
           <button
             onClick={exportCsv}
             disabled={filtered.length === 0}
@@ -229,6 +275,7 @@ export default function CampusAmbassadors() {
           >
             Export CSV
           </button>
+          </div>
         </div>
 
         {stats && (
@@ -262,7 +309,7 @@ export default function CampusAmbassadors() {
             <BreakdownCard title="Graduation year" items={gradYearBreakdown} />
             <BreakdownCard title="How they heard" items={referralBreakdown} />
             <BreakdownCard title="Which link" items={pathBreakdown} />
-            <BreakdownCard title="Channel (utm_source)" items={utmBreakdown} />
+            <BreakdownCard title="Channel (referrer)" items={channelBreakdown} />
           </div>
         )}
 
@@ -296,7 +343,8 @@ export default function CampusAmbassadors() {
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   {["#", "Date", "Status", "Code", "Webinar", "Name", "Email", "WhatsApp", "College", "Course",
-                    "Year", "Grad Year", "Social", "Why them", "Source", "Link", "Channel"].map((h) => (
+                    "Year", "Grad Year", "Social", "Why them", "Source", "Link", "Channel",
+                    ...(showArchive ? ["Cohort"] : [])].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       {h}
                     </th>
@@ -311,7 +359,9 @@ export default function CampusAmbassadors() {
                     <td className="px-4 py-3">
                       <select
                         value={r.status}
-                        disabled={busyId === r.id}
+                        // Archived rows live in a different table; set-status
+                        // targets the live one and would match nothing.
+                        disabled={busyId === r.id || showArchive}
                         onChange={(e) => setStatus(r, e.target.value)}
                         className={`rounded-full border px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50 ${
                           STATUS_STYLES[r.status] ?? STATUS_STYLES.new
@@ -379,8 +429,11 @@ export default function CampusAmbassadors() {
                     <td className="px-4 py-3 text-gray-800">
                       {r.utm_source
                         ? `${r.utm_source}${r.utm_medium ? " / " + r.utm_medium : ""}`
-                        : dash(null)}
+                        : dash(channelOf(r))}
                     </td>
+                    {showArchive && (
+                      <td className="px-4 py-3 text-gray-800">{dash(r.drive)}</td>
+                    )}
                   </tr>
                 ))}
               </tbody>

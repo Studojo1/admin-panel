@@ -453,7 +453,8 @@ export async function getUser(id: string): Promise<AdminUser> {
 export async function updateUser(
   id: string,
   updates: {
-    role?: string;
+    // null explicitly clears the role (plain user); omit the key to leave it unchanged.
+    role?: string | null;
     banned?: boolean;
     ban_reason?: string;
     ban_expires?: string;

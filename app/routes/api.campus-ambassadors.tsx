@@ -84,6 +84,23 @@ async function ensureTable() {
   `);
 }
 
+// Closed drives are moved here so each new drive starts from an empty live
+// table. Created alongside the live table so ?archive=1 returns an empty list
+// rather than erroring in an environment where no drive has been closed yet.
+async function ensureArchiveTable() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS campus_ambassador_applications_archive (
+      LIKE campus_ambassador_applications INCLUDING DEFAULTS INCLUDING CONSTRAINTS
+    )
+  `);
+  await db.execute(
+    sql`ALTER TABLE campus_ambassador_applications_archive ADD COLUMN IF NOT EXISTS drive TEXT`
+  );
+  await db.execute(
+    sql`ALTER TABLE campus_ambassador_applications_archive ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ DEFAULT NOW()`
+  );
+}
+
 /**
  * Give an ambassador a referral code, if they do not have one already.
  *
@@ -185,45 +202,70 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (denied) return denied;
 
   await ensureTable();
+  await ensureArchiveTable();
 
   const url = new URL(request.url);
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "1000"), 2000);
   const offset = parseInt(url.searchParams.get("offset") || "0");
+  // ?archive=1 reads the closed drives instead of the live one. Past drives are
+  // moved wholesale into the archive table so the live table starts each drive
+  // empty; see campus_ambassador_applications_archive.drive for the label.
+  const archived = url.searchParams.get("archive") === "1";
 
   const [rows, statsResult] = await Promise.all([
     // The webinar counts come from a LEFT JOIN on a subquery rather than a
     // join onto the registrations table directly, so an ambassador with no
     // signups still appears (with zeroes) instead of dropping out of the list.
-    db.execute(sql`
-      SELECT a.id, a.full_name, a.whatsapp, a.email, a.college, a.course,
-             a.year_of_study, a.graduation_year, a.social_handle, a.why_you,
-             a.referral_source, a.status, a.ref_code, a.created_at,
-             a.source_path, a.utm_source, a.utm_medium, a.utm_campaign, a.referrer,
-             COALESCE(w.registrations, 0) AS webinar_registrations,
-             COALESCE(w.paid_count, 0)    AS webinar_paid,
-             COALESCE(w.revenue_paise, 0) AS webinar_revenue_paise
-      FROM campus_ambassador_applications a
-      LEFT JOIN (
-        SELECT ambassador_id,
-               COUNT(*)                                            AS registrations,
-               COUNT(*) FILTER (WHERE paid)                        AS paid_count,
-               COALESCE(SUM(amount_paise) FILTER (WHERE paid), 0)  AS revenue_paise
-        FROM webinar_registrations
-        WHERE ambassador_id IS NOT NULL
-        GROUP BY ambassador_id
-      ) w ON w.ambassador_id = a.id
-      ORDER BY a.created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `),
-    db.execute(sql`
-      SELECT
-        COUNT(*) AS total,
-        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS last_24_hours,
-        COUNT(*) FILTER (WHERE status = 'new') AS new_count,
-        COUNT(*) FILTER (WHERE status = 'shortlisted') AS shortlisted_count,
-        COUNT(*) FILTER (WHERE status = 'selected') AS selected_count
-      FROM campus_ambassador_applications
-    `),
+    archived
+      ? db.execute(sql`
+          SELECT id, full_name, whatsapp, email, college, course,
+                 year_of_study, graduation_year, social_handle, why_you,
+                 referral_source, status, created_at, drive,
+                 source_path, utm_source, utm_medium, utm_campaign, referrer
+          FROM campus_ambassador_applications_archive
+          ORDER BY created_at DESC
+          LIMIT ${limit} OFFSET ${offset}
+        `)
+      : db.execute(sql`
+        SELECT a.id, a.full_name, a.whatsapp, a.email, a.college, a.course,
+               a.year_of_study, a.graduation_year, a.social_handle, a.why_you,
+               a.referral_source, a.status, a.ref_code, a.created_at,
+               a.source_path, a.utm_source, a.utm_medium, a.utm_campaign, a.referrer,
+               COALESCE(w.registrations, 0) AS webinar_registrations,
+               COALESCE(w.paid_count, 0)    AS webinar_paid,
+               COALESCE(w.revenue_paise, 0) AS webinar_revenue_paise
+        FROM campus_ambassador_applications a
+        LEFT JOIN (
+          SELECT ambassador_id,
+                 COUNT(*)                                            AS registrations,
+                 COUNT(*) FILTER (WHERE paid)                        AS paid_count,
+                 COALESCE(SUM(amount_paise) FILTER (WHERE paid), 0)  AS revenue_paise
+          FROM webinar_registrations
+          WHERE ambassador_id IS NOT NULL
+          GROUP BY ambassador_id
+        ) w ON w.ambassador_id = a.id
+        ORDER BY a.created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `),
+    archived
+      ? db.execute(sql`
+          SELECT
+            COUNT(*) AS total,
+            0 AS last_24_hours,
+            COUNT(*) FILTER (WHERE status = 'new') AS new_count,
+            COUNT(*) FILTER (WHERE status = 'shortlisted') AS shortlisted_count,
+            COUNT(*) FILTER (WHERE status = 'selected') AS selected_count
+          FROM campus_ambassador_applications_archive
+        `)
+      : db.execute(sql`
+          SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS last_24_hours,
+            COUNT(*) FILTER (WHERE status = 'new') AS new_count,
+            COUNT(*) FILTER (WHERE status = 'shortlisted') AS shortlisted_count,
+            COUNT(*) FILTER (WHERE status = 'selected') AS selected_count
+          FROM campus_ambassador_applications
+        `),
   ]);
 
   return Response.json({

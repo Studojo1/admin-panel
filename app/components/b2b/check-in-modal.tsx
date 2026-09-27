@@ -33,7 +33,7 @@ import {
   type Stage,
   type Temperature,
 } from "~/lib/b2b-gtm";
-import { Choice, ConfirmStage, Field, Shell, Stepper, authedFetch, inputCls } from "./shared";
+import { Choice, ConfirmStage, Field, MicButton, Shell, Stepper, authedFetch, inputCls } from "./shared";
 
 export function CheckInModal({
   company,
@@ -245,14 +245,14 @@ export function CheckInModal({
     <>
       <Stepper labels={stepLabels} current={clampedStep} />
 
-      {/* Where we left off — a quiet reminder while logging. */}
-      {(company.last_log?.note || company.notes) && clampedStep === 0 && (
+      {/* Where we left off — the last real note, not a handoff event. */}
+      {(company.last_note || company.notes) && clampedStep === 0 && (
         <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 mb-4">
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
             Where we left things off
           </p>
           <p className="text-sm text-gray-700 line-clamp-3">
-            {company.last_log?.note || company.notes}
+            {company.last_note || company.notes}
           </p>
         </div>
       )}
@@ -430,6 +430,9 @@ export function CheckInModal({
               }
               className={inputCls}
             />
+            <div className="mt-2">
+              <MicButton onAppend={(t) => setNote((v) => (v ? v + " " + t : t))} />
+            </div>
             {reached && (
               <div className="mt-4">
                 <label className="block text-xs font-semibold text-gray-600 mb-1.5">
