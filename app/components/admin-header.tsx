@@ -23,7 +23,7 @@ const NAV_LINKS = [
   { to: "/email-sequences", label: "Emails" },
   { to: "/sensei", label: "Sensei" },
   { to: "/analytics", label: "Analytics" },
-  { to: "/utm-builder", label: "UTM Builder" },
+  { to: "/utm-builder", label: "UTM Links" },
   { to: "/coupons", label: "Coupons" },
   { to: "/b2b-gtm", label: "B2B GTM" },
   { to: "/career-coach", label: "Career Coach" },
