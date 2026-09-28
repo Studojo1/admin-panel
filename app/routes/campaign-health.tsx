@@ -45,7 +45,8 @@ interface StageTimes {
 
 interface FailureBreakdown {
   enrichment: number;  // lead enrichment failed — no email found
-  auth: number;        // Gmail OAuth token expired / invalid (last 7d only)
+  auth: number;        // Gmail auth failures, all time (now matches "Token refresh failed" too)
+  auth_last_7d?: number; // ...of which failed in the last 7 days (by failure time, not launch time)
   other: number;       // everything else
 }
 
@@ -70,6 +71,8 @@ interface CampaignData {
   id: number;
   name: string;
   status: "running" | "paused" | "cancelled" | "completed" | "draft";
+  pause_reason?: string | null;   // "gmail_auth" = the worker paused it: mailbox needs reconnecting
+  paused_by?: string | null;
   daily_limit: number;
   started_at: string | null;
   gmail_account: string | null;
@@ -693,11 +696,17 @@ function BreakingDetail({ u, onSelect }: { u: PaidUser; onSelect: (u: PaidUser) 
   // Derive specific issues to highlight
   const issues: { color: string; label: string; detail: string }[] = [];
 
-  if (fb?.auth > 0) {
+  if (c.pause_reason === "gmail_auth") {
+    issues.push({
+      color: "bg-red-100 border-red-400 text-red-800",
+      label: "Paused: Gmail needs reconnecting",
+      detail: "The worker paused this campaign because the mailbox lost access. Its unsent emails are kept; reconnecting Gmail resumes it. The user has been emailed a reconnect link.",
+    });
+  } else if (fb && (fb.auth_last_7d ?? fb.auth) > 0) {
     issues.push({
       color: "bg-red-100 border-red-400 text-red-800",
       label: "Gmail Auth Expired",
-      detail: `${fb.auth} emails failed — OAuth token invalid. User must reconnect Gmail.`,
+      detail: `${fb.auth_last_7d ?? fb.auth} auth failures in the last 7 days (${fb.auth} all time). User must reconnect Gmail.`,
     });
   }
   if (fb?.enrichment > 0) {
@@ -828,7 +837,7 @@ function BreakingDetail({ u, onSelect }: { u: PaidUser; onSelect: (u: PaidUser) 
 // ── Breaking campaigns table with expandable issue dropdown ──────────────────
 
 const ISSUE_DEFS = [
-  { key: "auth",       label: "Auth Expired",    color: "bg-red-100 text-red-700 border-red-300",         desc: "Gmail OAuth token had auth failures in the last 7 days. User likely needs to reconnect their Gmail account." },
+  { key: "auth",       label: "Auth Expired",    color: "bg-red-100 text-red-700 border-red-300",         desc: "Campaign paused for Gmail reconnect, or auth failures in the last 7 days. User needs to reconnect Gmail." },
   { key: "enrichment", label: "Enrichment",       color: "bg-orange-100 text-orange-700 border-orange-300", desc: "10+ leads could not be enriched with email addresses after 3 attempts. Lead quality or targeting may be too narrow." },
   { key: "bounce",     label: "High Bounce",      color: "bg-orange-100 text-orange-700 border-orange-300", desc: "Bounce rate exceeds 4% on 50+ sends. Repeated bounces damage domain sender reputation and can trigger spam filters." },
   { key: "no_reply",   label: "Zero Replies",     color: "bg-red-100 text-red-700 border-red-300",         desc: "50+ leads contacted with no responses (counting follow-ups). Emails may be landing in spam or targeting/messaging is off." },
@@ -846,7 +855,7 @@ function getIssueKeys(u: PaidUser): IssueKey[] {
   const s = c.stats;
   const fb = s.failure_breakdown;
   const contacted = s.leads_contacted;
-  if (fb && fb.auth > 0)                                                      keys.push("auth");
+  if (c.pause_reason === "gmail_auth" || (fb && (fb.auth_last_7d ?? fb.auth) > 0)) keys.push("auth");
   if (fb && fb.enrichment >= 10)                                              keys.push("enrichment");
   if (s.bounced > 0 && contacted >= 50 && s.bounced / contacted > 0.04)       keys.push("bounce");
   if (contacted > 50 && s.replied === 0 && (s.followups_replied || 0) === 0)  keys.push("no_reply");

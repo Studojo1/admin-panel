@@ -342,6 +342,22 @@ export interface OutreachOrderDetail {
   } | null;
 }
 
+export interface OutreachCampaignRow {
+  id: number;
+  name: string;
+  status: string;
+  pause_reason: string | null;
+  paused_by: string | null;
+  daily_limit: number | null;
+  created_at: string | null;
+  last_sent_at: string | null;
+  order_id: number | null;
+  orphan: boolean;
+  credits_reserved: number | null;
+  credits_released: number | null;
+  email_stats: { sent: number; replied: number; bounced: number; failed: number; unsent: number };
+}
+
 export interface OutreachUserDetail {
   user: {
     id: string;
@@ -364,6 +380,9 @@ export interface OutreachUserDetail {
     created_at: string | null;
   }>;
   orders: OutreachOrderDetail[];
+  /** Every campaign the user owns, including ones no order points at
+   *  (job-outreach-svc, post-payment audit P08). */
+  campaigns?: OutreachCampaignRow[];
   lead_summary: {
     total: number;
     with_email: number;
