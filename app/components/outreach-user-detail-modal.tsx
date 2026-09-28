@@ -280,6 +280,7 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
 }
 
 export function OutreachUserDetailModal({ userId, isOpen, onClose }: Props) {
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<OutreachUserDetail | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -412,6 +413,48 @@ export function OutreachUserDetailModal({ userId, isOpen, onClose }: Props) {
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  </section>
+                )}
+
+                {/* All campaigns. The order cards below only show the campaign
+                    each order points at; a second campaign used to overwrite
+                    that pointer and the first one kept sending unseen. */}
+                {(detail.campaigns?.length ?? 0) > 0 && (
+                  <section>
+                    <h3 className="mb-4 font-['Satoshi'] text-sm font-bold uppercase tracking-wide text-neutral-500">
+                      All campaigns ({detail.campaigns!.length})
+                    </h3>
+                    <div className="space-y-2">
+                      {detail.campaigns!.map((c) => (
+                        <div
+                          key={c.id}
+                          className={`rounded-xl border-2 p-3 ${c.orphan ? "border-red-300 bg-red-50" : "border-neutral-200 bg-white"}`}
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-['Satoshi'] text-sm font-bold text-neutral-900">#{c.id} {c.name}</span>
+                            <StatusBadge status={c.status} />
+                            {c.pause_reason && (
+                              <span className="font-['Satoshi'] text-xs text-amber-700">paused: {c.pause_reason === "gmail_auth" ? "Gmail needs reconnecting" : `by ${c.paused_by || c.pause_reason}`}</span>
+                            )}
+                            {c.orphan && (
+                              <span className="rounded-full bg-red-600 px-2 py-0.5 font-['Satoshi'] text-xs font-bold text-white">not on any order</span>
+                            )}
+                          </div>
+                          <p className="mt-1 font-['Satoshi'] text-xs text-neutral-600">
+                            {c.email_stats.sent} sent · {c.email_stats.replied} replied · {c.email_stats.bounced} bounced ·{" "}
+                            {c.email_stats.failed} failed · {c.email_stats.unsent} unsent
+                            {c.last_sent_at ? ` · last send ${fmtDate(c.last_sent_at)}` : ""}
+                            {c.credits_reserved != null ? ` · credits ${c.credits_reserved} held, ${c.credits_released ?? 0} returned` : ""}
+                          </p>
+                          <button
+                            onClick={() => navigate(`/outreach-campaign?campaign_id=${c.id}`)}
+                            className="mt-1 font-['Satoshi'] text-xs font-medium text-violet-600 hover:underline"
+                          >
+                            Open campaign
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </section>
                 )}
