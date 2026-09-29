@@ -261,7 +261,7 @@ export default function Coupons() {
                   value={maxUses}
                   onChange={(e) => setMaxUses(e.target.value)}
                   min="1"
-                  placeholder="Unlimited"
+                  placeholder="100 (every coupon needs a cap)"
                   className={inputCls}
                 />
               </Field>
