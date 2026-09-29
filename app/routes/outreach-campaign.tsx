@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { motion } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
@@ -232,7 +232,10 @@ export default function OutreachCampaignPage() {
                     )}
                   </div>
                   <div className="mt-1 font-['Satoshi'] text-sm text-neutral-500">
-                    Daily limit: {data.campaign.daily_limit} emails
+                    Daily limit: {data.campaign.daily_limit} emails ·{" "}
+                    <Link to={`/campaign-refund-check?campaign_id=${campaignId}`} className="font-medium text-violet-700 underline">
+                      Refund check
+                    </Link>
                   </div>
                 </div>
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
