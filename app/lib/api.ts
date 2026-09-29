@@ -193,6 +193,8 @@ export interface FunnelStage {
   users_reached: number;
   drop_off_from_prev: number | null;
   drop_off_pct_from_prev: number | null;
+  /** UC-Q40: set when the stage only counts orders created from this time. */
+  counted_since?: string | null;
 }
 
 export interface PeriodReplyRate {
@@ -245,6 +247,7 @@ export type FunnelStageKey =
   | "resume_uploaded"
   | "quiz_completed"
   | "leads_generated"
+  | "leads_viewed"
   | "payment_page_reached"
   | "payment_made"
   | "gmail_connected"
