@@ -12,6 +12,7 @@ const NAV_LINKS = [
   { to: "/outreach-orders", label: "Outreach Orders" },
   { to: "/campaign-health", label: "Campaign Health" },
   { to: "/campaign-refund-check", label: "Refund Check" },
+  { to: "/suppression", label: "Opt-outs" },
   { to: "/paid-users", label: "Paid Users" },
   { to: "/outreach", label: "Outreach Stats" },
   { to: "/chat-logs", label: "Chat Logs" },

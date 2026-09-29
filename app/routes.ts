@@ -18,6 +18,8 @@ export default [
   route("outreach-campaign", "routes/outreach-campaign.tsx"),
   route("campaign-refund-check", "routes/campaign-refund-check.tsx"),
   route("api/refund-check", "routes/api.refund-check.tsx"),
+  route("suppression", "routes/suppression.tsx"),
+  route("api/suppression", "routes/api.suppression.tsx"),
   route("outreach", "routes/outreach.tsx"),
   route("careers", "routes/careers.tsx"),
   route("settings", "routes/settings.tsx"),
