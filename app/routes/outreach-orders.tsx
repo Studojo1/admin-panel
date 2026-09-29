@@ -52,13 +52,14 @@ const STATUS_ORDER = [
   "completed",
 ];
 
-// 11-stage funnel (quiz_started removed — never had a backfill signal and
+// 12-stage funnel (quiz_started removed — never had a backfill signal and
 // adds no analytic value going forward). Keep in sync with FUNNEL_STAGES
 // in api/routes_admin.py. Used for the per-user "journey" dot-strip.
 const FUNNEL_STAGE_KEYS: { key: FunnelStageKey; short: string }[] = [
   { key: "resume_uploaded",       short: "Resume" },
   { key: "quiz_completed",        short: "Quiz" },
   { key: "leads_generated",       short: "Leads" },
+  { key: "leads_viewed",          short: "Viewed" }, // tracked since 27 Sep 2026 (UC-Q40)
   { key: "payment_page_reached",  short: "Pay➝" },
   { key: "payment_made",          short: "Paid" },
   { key: "gmail_connected",       short: "Gmail" },
@@ -75,6 +76,7 @@ const STAGE_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
   resume_uploaded:      { bg: "bg-gray-100",    text: "text-gray-700"    },
   quiz_completed:       { bg: "bg-orange-100",  text: "text-orange-700"  },
   leads_generated:      { bg: "bg-cyan-100",    text: "text-cyan-700"    },
+  leads_viewed:         { bg: "bg-sky-100",     text: "text-sky-700"     },
   payment_page_reached: { bg: "bg-yellow-100",  text: "text-yellow-700"  },
   payment_made:         { bg: "bg-lime-100",    text: "text-lime-700"    },
   gmail_connected:      { bg: "bg-violet-100",  text: "text-violet-700"  },
@@ -273,13 +275,21 @@ export default function OutreachOrders() {
   // count of distinct users who reached that stage plus drop-off vs the
   // previous active stage (computed server-side).
   const funnelStages = overview?.funnel ?? [];
-  const funnelLabels = funnelStages.map((s) => s.label);
+  // UC-Q40: leads_viewed_at only exists from 27 Sep 2026 05:00 UTC. A backend
+  // that date-gates the stage says so in counted_since and its label; an older
+  // backend counts every order, so flag that the bar is not comparable.
+  const funnelLabels = funnelStages.map((s) =>
+    s.stage === "leads_viewed" && !s.counted_since
+      ? `${s.label} (tracked from 27 Sep only)`
+      : s.label
+  );
   const funnelData = funnelStages.map((s) => s.users_reached);
   // Violet-fade for the main flow, amber/red for paused/done so the eye
   // separates the linear funnel from the terminal off-ramps.
   const funnelColors = funnelStages.map((s) => {
     if (s.stage === "campaign_paused") return "#f59e0b";
     if (s.stage === "campaign_completed") return "#10b981";
+    if (s.stage === "leads_viewed") return "#c4b5fd"; // newer-orders-only cohort (UC-Q40)
     return "#8b5cf6";
   });
 
@@ -363,6 +373,7 @@ export default function OutreachOrders() {
                 </h2>
                 <p className="mb-4 font-['Satoshi'] text-xs text-neutral-500">
                   Distinct users who reached each stage. Drop-off % is vs the previous main-flow stage.
+                  Leads Viewed (light bar) only counts orders created from 27 Sep 2026, when it started being recorded.
                 </p>
                 <div className="h-[420px]">
                   {funnelLabels.length > 0 ? (
@@ -391,6 +402,11 @@ export default function OutreachOrders() {
                                 const stage = funnelStages[ctx.dataIndex];
                                 if (!stage) return `${ctx.parsed.x} users`;
                                 const lines = [`${stage.users_reached} users`];
+                                if (stage.counted_since) {
+                                  lines.push(`Orders created since ${new Date(stage.counted_since).toLocaleString()}`);
+                                } else if (stage.stage === "leads_viewed") {
+                                  lines.push("Only recorded since 27 Sep 2026; older orders show as not viewed");
+                                }
                                 if (stage.drop_off_from_prev !== null && stage.drop_off_pct_from_prev !== null) {
                                   lines.push(
                                     `Drop-off: ${stage.drop_off_from_prev} (${stage.drop_off_pct_from_prev}%)`

@@ -12,7 +12,7 @@
  * cross-product page visits, anonymous reach).
  *
  * GET /api/journeys  ->  { stages: { [email]: { resume, quiz_started, quiz_done,
- *                          leads, payment_page, paid, gmail } } }  // ISO strings or null
+ *                          leads, leads_viewed, payment_page, paid, gmail } } }  // ISO strings or null
  */
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
@@ -31,6 +31,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         MIN(o.quiz_started_at)         AS quiz_started,
         MIN(o.quiz_completed_at)       AS quiz_done,
         MIN(o.leads_generated_at)      AS leads,
+        MIN(o.leads_viewed_at)         AS leads_viewed, -- recorded since 27 Sep 2026 (UC-Q40)
         MIN(o.payment_page_reached_at) AS payment_page,
         MIN(o.payment_made_at)         AS paid,
         MIN(o.gmail_connected_at)      AS gmail
@@ -44,7 +45,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       if (!r.email) continue;
       stages[r.email] = {
         resume: r.resume, quiz_started: r.quiz_started, quiz_done: r.quiz_done,
-        leads: r.leads, payment_page: r.payment_page, paid: r.paid, gmail: r.gmail,
+        leads: r.leads, leads_viewed: r.leads_viewed, payment_page: r.payment_page, paid: r.paid, gmail: r.gmail,
       };
     }
     return Response.json({ stages });

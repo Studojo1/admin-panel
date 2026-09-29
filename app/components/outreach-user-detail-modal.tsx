@@ -144,6 +144,7 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
                 ["resume_uploaded",       "Resume uploaded"],
                 ["quiz_completed",        "Quiz completed"],
                 ["leads_generated",       "Leads generated"],
+                ["leads_viewed",          "Leads viewed"], // recorded since 27 Sep 2026 (UC-Q40)
                 ["payment_page_reached",  "Payment page reached"],
                 ["payment_made",          "Payment made"],
                 ["gmail_connected",       "Gmail connected"],
