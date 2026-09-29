@@ -34,9 +34,14 @@ const STEPS = [
 
 type Row = Record<string, any> & { day: string };
 
-// Environment filter — events carry $host (studojo.com = prod, studojo.pro = staging).
+// Environment filter — browser events carry $host (studojo.com = prod,
+// studojo.pro = staging). Server copies from job-outreach-svc (posthog-python,
+// tagged source='server' since ST-N09) have no $host; only the prod backend has
+// a POSTHOG_KEY, so they count as prod. That keeps people whose browser event
+// was lost (19 resume uploads in 14 days) in the prod people counts.
+const SERVER_EVENT = "(properties.source = 'server' OR properties.$lib = 'posthog-python')";
 function envWhere(env: string) {
-  if (env === "prod") return "AND properties.$host LIKE '%studojo.com%'";
+  if (env === "prod") return `AND (properties.$host LIKE '%studojo.com%' OR ${SERVER_EVENT})`;
   if (env === "staging") return "AND properties.$host LIKE '%studojo.pro%'";
   return "";
 }
@@ -134,10 +139,13 @@ const DETAIL_EVENTS = [
   "checkout_opened", "checkout_abandoned", "payment_failed", "payment_confirmed",
   "back_to_leads_clicked",
 ];
+// People count both copies; totals count browser events only, because the
+// backend re-sends resume_uploaded, profile_quiz_completed, payment_confirmed,
+// campaign_started and coupon_applied under the same names (ST-N09).
 function detailHogql(tc: string, env: string) {
   const list = DETAIL_EVENTS.map((e) => `'${e}'`).join(",");
   return `
-    SELECT event, uniq(person_id) AS people, count() AS total
+    SELECT event, uniq(person_id) AS people, countIf(properties.$lib = 'web') AS total
     FROM events WHERE event IN (${list}) AND ${tc} ${envWhere(env)}
     GROUP BY event ORDER BY people DESC`;
 }
@@ -220,7 +228,8 @@ export default function FunnelPage() {
   const [checkout, setCheckout] = useState<Record<string, number>>({});
   const [detail, setDetail] = useState<{ event: string; people: number; total: number }[]>([]);
   const [timing, setTiming] = useState<Record<string, number>>({});
-  const [env, setEnv] = useState<"all" | "prod" | "staging">("all");
+  // Default to real users: staging QA shares the prod PostHog project (ST-N03).
+  const [env, setEnv] = useState<"all" | "prod" | "staging">("prod");
   const [dim, setDim] = useState<"none" | "device" | "country" | "source">("none");
   const [bdRows, setBdRows] = useState<any[]>([]);
   const [bdLoading, setBdLoading] = useState(false);
@@ -551,7 +560,7 @@ export default function FunnelPage() {
             {/* All tracked events */}
             <div className={`mb-8 p-5 md:p-6 ${card}`}>
               <h2 className="font-['Clash_Display'] text-xl font-bold mb-1">All tracked events</h2>
-              <p className="text-xs text-neutral-500 mb-4">Every semantic event · {rangeTitle.toLowerCase()}. People = unique users, Total = raw count.</p>
+              <p className="text-xs text-neutral-500 mb-4">Every semantic event · {rangeTitle.toLowerCase()}. People = unique users (browser + server copies), Total = browser events only.</p>
               {detail.length === 0 ? <p className="text-sm text-neutral-400 py-6 text-center">No events yet (new events start collecting after the latest deploy).</p> : (
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
