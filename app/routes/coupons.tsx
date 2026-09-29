@@ -5,6 +5,7 @@ import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/coupons";
+import { bannedCouponWord } from "~/lib/coupon-words";
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Coupons — Studojo Admin" }];
@@ -24,18 +25,27 @@ interface Coupon {
   distributor_name: string | null;
   is_active: boolean;
   created_at: string;
+  // OP-N13 human review. null = code from before review existed.
+  review_status: "pending" | "approved" | "rejected" | null;
+  created_by: string | null;
+  reviewed_by: string | null;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function randomCode(prefix = "") {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = prefix ? prefix.toUpperCase() + "" : "";
-  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
+  // Re-roll until the random part spells nothing on the banned list (OP-N13).
+  for (;;) {
+    let code = prefix ? prefix.toUpperCase() + "" : "";
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    if (!bannedCouponWord(code)) return code;
+  }
 }
 
-function couponStatus(c: Coupon): "active" | "expired" | "exhausted" | "inactive" {
+function couponStatus(c: Coupon): "pending" | "rejected" | "active" | "expired" | "exhausted" | "inactive" {
+  if (c.review_status === "pending") return "pending";
+  if (c.review_status === "rejected") return "rejected";
   if (!c.is_active) return "inactive";
   if (c.valid_until && new Date(c.valid_until) < new Date()) return "expired";
   if (c.max_uses != null && c.uses >= c.max_uses) return "exhausted";
@@ -65,6 +75,7 @@ export default function Coupons() {
   const { isAuthorized } = useAdminGuard();
 
   const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [me, setMe] = useState("");
   const [loading, setLoading] = useState(true);
 
   // Form state
@@ -87,6 +98,7 @@ export default function Coupons() {
     if (res.ok) {
       const data = await res.json();
       setCoupons(data.coupons ?? []);
+      setMe(data.me ?? "");
     }
     setLoading(false);
   }
@@ -96,6 +108,8 @@ export default function Coupons() {
     const val = parseFloat(discountValue);
     if (isNaN(val) || val <= 0) { toast.error("Enter a valid discount value"); return; }
     if (discountType === "percent" && val > 100) { toast.error("Percentage can't exceed 100"); return; }
+    const bad = bannedCouponWord(code) ?? bannedCouponWord(distributorName);
+    if (bad) { toast.error(`Code or source contains a banned word (${bad}). Pick a neutral code.`); return; }
 
     let expires_at: string | null = null;
     if (expiryPreset === "24h") expires_at = expiresInHours(24);
@@ -124,7 +138,7 @@ export default function Coupons() {
       return;
     }
 
-    toast.success(`Coupon ${code.toUpperCase()} created`);
+    toast.success(`Coupon ${code.toUpperCase()} created. Another admin must approve it before it works.`);
     setCode(randomCode());
     setDistributorName("");
     setMaxUses("");
@@ -141,6 +155,22 @@ export default function Coupons() {
     setCoupons((prev) => prev.filter((c) => c.id !== id));
   }
 
+  // OP-N13: approve / reject a pending code, or switch a live one off.
+  async function reviewCoupon(id: number, action: "approve" | "reject" | "deactivate", code: string) {
+    const res = await authedFetch("/api/coupons", {
+      method: "PATCH",
+      body: JSON.stringify({ id, action }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      toast.error(err.error ?? `Failed to ${action} coupon`);
+      return;
+    }
+    const verb = action === "approve" ? "approved and live" : action === "reject" ? "rejected" : "deactivated";
+    toast.success(`Coupon ${code} ${verb}`);
+    await loadCoupons();
+  }
+
   function copyCode(code: string) {
     navigator.clipboard.writeText(code).then(() => toast.success(`Copied ${code}`));
   }
@@ -153,8 +183,9 @@ export default function Coupons() {
     );
   }
 
+  const pending = coupons.filter((c) => couponStatus(c) === "pending");
   const active = coupons.filter((c) => couponStatus(c) === "active");
-  const inactive = coupons.filter((c) => couponStatus(c) !== "active");
+  const inactive = coupons.filter((c) => !["active", "pending"].includes(couponStatus(c)));
 
 
   return (
@@ -277,6 +308,10 @@ export default function Coupons() {
                 />
               </Field>
 
+              <p className="font-['Satoshi'] text-xs text-neutral-500">
+                New coupons start switched off. A second admin reads the code and approves it under Pending review before anyone can use it.
+              </p>
+
               <button
                 onClick={createCoupon}
                 disabled={creating}
@@ -288,6 +323,34 @@ export default function Coupons() {
           </div>
 
           {/* ── RIGHT: List ───────────────────────────────────────────────── */}
+          <div className="space-y-6">
+          {pending.length > 0 && (
+            <div className="rounded-xl border-2 border-amber-500 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+              <div className="border-b-2 border-amber-500 px-6 py-4">
+                <h2 className="font-['Clash_Display'] text-base font-semibold text-neutral-900">
+                  Pending review
+                  <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-['Satoshi'] text-xs font-semibold text-amber-700">
+                    {pending.length}
+                  </span>
+                </h2>
+                <p className="mt-1 font-['Satoshi'] text-xs text-neutral-500">
+                  Read each code out loud. Approve only if it is neutral and you would be happy to see it on a receipt.
+                </p>
+              </div>
+              <div className="divide-y divide-neutral-100">
+                {pending.map((c) => (
+                  <CouponRow
+                    key={c.id}
+                    coupon={c}
+                    onCopy={copyCode}
+                    onDelete={deleteCoupon}
+                    onReview={reviewCoupon}
+                    canApprove={!c.created_by || !me || c.created_by.toLowerCase() !== me.toLowerCase()}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           <div className="rounded-xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
             <div className="border-b-2 border-neutral-900 px-6 py-4 flex items-center justify-between">
               <h2 className="font-['Clash_Display'] text-base font-semibold text-neutral-900">
@@ -310,7 +373,7 @@ export default function Coupons() {
                 </p>
               )}
               {active.map((c) => (
-                <CouponRow key={c.id} coupon={c} onCopy={copyCode} onDelete={deleteCoupon} />
+                <CouponRow key={c.id} coupon={c} onCopy={copyCode} onDelete={deleteCoupon} onReview={reviewCoupon} />
               ))}
             </div>
 
@@ -329,6 +392,7 @@ export default function Coupons() {
               </>
             )}
           </div>
+          </div>
         </div>
       </main>
     </div>
@@ -341,10 +405,14 @@ function CouponRow({
   coupon: c,
   onCopy,
   onDelete,
+  onReview,
+  canApprove,
 }: {
   coupon: Coupon;
   onCopy: (code: string) => void;
   onDelete: (id: string, code: string) => void;
+  onReview?: (id: number, action: "approve" | "reject" | "deactivate", code: string) => void;
+  canApprove?: boolean;
 }) {
   const status = couponStatus(c);
 
@@ -353,6 +421,8 @@ function CouponRow({
     expired: "bg-neutral-100 text-neutral-500",
     exhausted: "bg-amber-100 text-amber-700",
     inactive: "bg-red-100 text-red-600",
+    pending: "bg-amber-100 text-amber-700",
+    rejected: "bg-red-100 text-red-600",
   }[status];
 
   const discountLabel =
@@ -398,8 +468,37 @@ function CouponRow({
           {expiryLabel}
           {c.distributor_name && ` · ${c.distributor_name}`}
           {createdLabel && ` · Created ${createdLabel}`}
+          {c.created_by && ` by ${c.created_by}`}
+          {c.reviewed_by && status !== "pending" && ` · Reviewed by ${c.reviewed_by}`}
         </p>
       </div>
+      {onReview && status === "pending" && (
+        <>
+          <button
+            onClick={() => onReview(c.id, "approve", c.code)}
+            disabled={!canApprove}
+            title={canApprove ? "Make this code live" : "Another admin has to approve a coupon you created"}
+            className="shrink-0 rounded border border-emerald-400 px-2 py-1 font-['Satoshi'] text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Approve
+          </button>
+          <button
+            onClick={() => onReview(c.id, "reject", c.code)}
+            className="shrink-0 rounded border border-red-300 px-2 py-1 font-['Satoshi'] text-xs font-semibold text-red-600 hover:bg-red-50"
+          >
+            Reject
+          </button>
+        </>
+      )}
+      {onReview && status === "active" && (
+        <button
+          onClick={() => onReview(c.id, "deactivate", c.code)}
+          title="Switch this code off without deleting its history"
+          className="shrink-0 rounded border border-neutral-300 px-2 py-1 font-['Satoshi'] text-xs text-neutral-500 hover:border-red-400 hover:text-red-600"
+        >
+          Deactivate
+        </button>
+      )}
       <button
         onClick={() => onCopy(c.code)}
         className="shrink-0 rounded border border-neutral-300 px-2 py-1 font-['Satoshi'] text-xs text-neutral-500 hover:border-violet-400 hover:text-violet-600"
