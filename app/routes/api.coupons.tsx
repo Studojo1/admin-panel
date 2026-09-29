@@ -50,7 +50,7 @@ export async function action({ request }: Route.ActionArgs) {
           ${code.toUpperCase().trim()},
           ${discount_type},
           ${discount_value},
-          ${max_uses ?? null},
+          ${max_uses ?? 100},
           NOW(),
           ${valid_until ?? null},
           ${distributor_name ?? null},
