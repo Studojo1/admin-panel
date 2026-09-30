@@ -2,19 +2,11 @@
 // with the secret from env (secret stays server-side); gated to admin/ops.
 import { sql } from "drizzle-orm";
 import type { Route } from "./+types/api.sensei";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 
 const BOB_API = process.env.BOB_API_URL || "http://bob-svc:8000/api/v1/bob";
 const SECRET = process.env.BOB_SUPERADMIN_SECRET || "";
-
-async function requireAdmin(request: Request): Promise<boolean> {
-  const user = await getUserFromRequest(request);
-  if (!user) return false;
-  const r = await db.execute(sql`SELECT role FROM "user" WHERE id = ${user.id} LIMIT 1`);
-  const role = r.rows[0]?.role as string | null;
-  return role === "admin" || role === "ops";
-}
 
 // Sensei support tickets land in the shared `tickets` table with source='sensei'
 // (written by the studojo frontend's /api/sensei-ticket). Read them straight

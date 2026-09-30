@@ -1,6 +1,6 @@
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import type { Route } from "./+types/api.coupons";
 import { bannedCouponWord } from "~/lib/coupon-words";
 
@@ -28,12 +28,7 @@ function ensureReviewColumns() {
 }
 
 // Coupons hand out money, so only admin/ops accounts may list or change them
-// (same role gate as /api/tickets).
-async function staffRole(userId: string): Promise<string | null> {
-  const r = await db.execute(sql`SELECT role FROM "user" WHERE id = ${userId} LIMIT 1`);
-  const role = r.rows[0]?.role as string | null;
-  return role === "admin" || role === "ops" ? role : null;
-}
+// (requireAdmin, same gate as every other /api route).
 
 const COLUMNS = sql`id, code, discount_type, discount_value, max_uses, uses,
            valid_from, valid_until, distributor_name, is_active, created_at,
@@ -41,9 +36,8 @@ const COLUMNS = sql`id, code, discount_type, discount_value, max_uses, uses,
 
 // GET /api/coupons
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await getUserFromRequest(request);
+  const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await staffRole(user.id))) return Response.json({ error: "Forbidden" }, { status: 403 });
   await ensureReviewColumns();
 
   const result = await db.execute(sql`
@@ -59,9 +53,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 // PATCH /api/coupons — review { id, action: "approve" | "reject" | "deactivate" }
 // DELETE /api/coupons — delete { id }
 export async function action({ request }: Route.ActionArgs) {
-  const user = await getUserFromRequest(request);
+  const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await staffRole(user.id))) return Response.json({ error: "Forbidden" }, { status: 403 });
   await ensureReviewColumns();
 
   if (request.method === "PATCH") {

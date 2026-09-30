@@ -21,6 +21,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Never ship an API route that answers without an admin login (AS-N01).
+      - name: API routes require admin
+        run: node scripts/check-api-auth.mjs
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -77,6 +81,10 @@ jobs:
 
       - name: Deploy to Kubernetes
         run: |
+          # Start the new pod before stopping the old one: with one replica,
+          # maxSurge=0 made every deploy a 503 window for admins (audit IN-N03).
+          kubectl patch deployment/${{ env.APP_NAME }} -n staging \
+            -p '{"spec":{"strategy":{"type":"RollingUpdate","rollingUpdate":{"maxSurge":1,"maxUnavailable":0}}}}'
           kubectl set image deployment/${{ env.APP_NAME }} ${{ env.APP_NAME }}=${{ env.REGISTRY }}/${{ env.APP_NAME }}:${{ env.IMAGE_TAG }} -n staging
           kubectl rollout status deployment/${{ env.APP_NAME }} -n staging --timeout=10m || {
             echo "Rollout failed or timed out. Checking pod status..."

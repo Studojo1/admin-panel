@@ -1,28 +1,13 @@
 import type { Route } from "./+types/api.partner-users";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 import { hashPassword } from "~/lib/auth.server";
 
 // GET /api/partner-users - List partner users
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const roleResult = await db.execute(
-    sql`SELECT role FROM "user" WHERE id = ${user.id} LIMIT 1`
-  );
-
-  if (roleResult.rows.length === 0) {
-    return Response.json({ error: "User not found" }, { status: 404 });
-  }
-
-  const role = roleResult.rows[0].role as string | null;
-  if (role !== "admin" && role !== "ops") {
-    return Response.json({ error: "Forbidden - Admin or Ops access required" }, { status: 403 });
-  }
+  const user = await requireAdmin(request);
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const url = new URL(request.url);
   const search = url.searchParams.get("search") || "";
@@ -64,23 +49,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 // POST /api/partner-users - Create partner user
 export async function action({ request }: Route.ActionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const roleResult = await db.execute(
-    sql`SELECT role FROM "user" WHERE id = ${user.id} LIMIT 1`
-  );
-
-  if (roleResult.rows.length === 0) {
-    return Response.json({ error: "User not found" }, { status: 404 });
-  }
-
-  const role = roleResult.rows[0].role as string | null;
-  if (role !== "admin" && role !== "ops") {
-    return Response.json({ error: "Forbidden - Admin or Ops access required" }, { status: 403 });
-  }
+  const user = await requireAdmin(request);
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
