@@ -1,30 +1,22 @@
 // GET   /api/tickets/:id — ticket detail + full thread
 // PATCH /api/tickets/:id — update status / assignee
 import type { Route } from "./+types/api.tickets.$id";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 
 const ALLOWED_STATUSES = ["open", "in_progress", "resolved", "wont_fix"];
 
-async function requireAdmin(request: Request) {
-  const user = await getUserFromRequest(request);
+async function staffAuth(request: Request) {
+  const user = await requireAdmin(request);
   if (!user) {
     return { error: Response.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const r = await db.execute(
-    sql`SELECT role, email FROM "user" WHERE id = ${user.id} LIMIT 1`,
-  );
-  const role = r.rows[0]?.role as string | null;
-  const email = r.rows[0]?.email as string | undefined;
-  if (role !== "admin" && role !== "ops") {
-    return { error: Response.json({ error: "Forbidden" }, { status: 403 }) };
-  }
-  return { user, email: email || user.id };
+  return { user, email: user.email || user.id };
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const auth = await requireAdmin(request);
+  const auth = await staffAuth(request);
   if ("error" in auth) return auth.error;
 
   const id = Number(params.id);
@@ -55,7 +47,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== "PATCH" && request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
-  const auth = await requireAdmin(request);
+  const auth = await staffAuth(request);
   if ("error" in auth) return auth.error;
 
   const id = Number(params.id);

@@ -7,19 +7,11 @@
 //         the super-admin secret never leaves this server.
 import { sql } from "drizzle-orm";
 import type { Route } from "./+types/api.sensei.chat.$chatId";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 
 const BOB_API = process.env.BOB_API_URL || "http://bob-svc:8000/api/v1/bob";
 const SECRET = process.env.BOB_SUPERADMIN_SECRET || "";
-
-async function requireAdmin(request: Request): Promise<boolean> {
-  const user = await getUserFromRequest(request);
-  if (!user) return false;
-  const r = await db.execute(sql`SELECT role FROM "user" WHERE id = ${user.id} LIMIT 1`);
-  const role = r.rows[0]?.role as string | null;
-  return role === "admin" || role === "ops";
-}
 
 function chatId(params: Record<string, string | undefined>): number | null {
   const raw = params.chatId || "";

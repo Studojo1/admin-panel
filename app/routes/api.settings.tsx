@@ -1,6 +1,6 @@
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import type { Route } from "./+types/api.settings";
 
 // Ensure the platform_settings table exists
@@ -16,7 +16,7 @@ async function ensureTable() {
 
 // GET /api/settings?keys=n8n_blog_api_key,...
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await getUserFromRequest(request);
+  const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   await ensureTable();
@@ -47,7 +47,7 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const user = await getUserFromRequest(request);
+  const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   await ensureTable();

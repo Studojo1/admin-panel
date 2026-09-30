@@ -2,7 +2,7 @@
 // Writes a ticket_messages row with author_type='admin', then fires the
 // event.ticket.replied routing key to email the user (best-effort).
 import type { Route } from "./+types/api.tickets.$id.messages";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 
@@ -52,20 +52,10 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
-  const user = await getUserFromRequest(request);
+  const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-  const roleRes = await db.execute(
-    sql`SELECT role, email, name FROM "user" WHERE id = ${user.id} LIMIT 1`,
-  );
-  const row = roleRes.rows[0] as
-    | { role?: string; email?: string; name?: string }
-    | undefined;
-  if (!row || (row.role !== "admin" && row.role !== "ops")) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  const adminEmail = row.email || user.id;
-  const adminName = row.name || row.email?.split("@")[0] || "studojo team";
+  const adminEmail = user.email || user.id;
+  const adminName = user.name || user.email?.split("@")[0] || "studojo team";
 
   const id = Number(params.id);
   if (!Number.isFinite(id) || id <= 0) {

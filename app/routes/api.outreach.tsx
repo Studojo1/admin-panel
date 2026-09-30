@@ -8,6 +8,7 @@
  */
 
 import type { Route } from "./+types/api.outreach";
+import { requireAdmin } from "~/lib/auth-helper.server";
 
 const JOB_OUTREACH_URL =
   process.env.JOB_OUTREACH_URL ??
@@ -16,6 +17,9 @@ const JOB_OUTREACH_URL =
     : "http://job-outreach-svc:8000");
 
 export async function loader({ request }: Route.LoaderArgs) {
+  // Checked here too, not only by job-outreach-svc: a proxy must not rely on
+  // the backend to be the only gate (audit AS-N01).
+  if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const authHeader = request.headers.get("Authorization");
   if (!authHeader) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
