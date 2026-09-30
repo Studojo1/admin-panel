@@ -98,6 +98,7 @@ export async function loader({ request }: Route.LoaderArgs) {
  * the credits the payment bought through the ledger. Nothing is decided here.
  */
 export async function action({ request }: Route.ActionArgs) {
+  if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const authHeader = request.headers.get("Authorization");
   if (!authHeader) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const body = (await request.json().catch(() => ({}))) as {
