@@ -7,7 +7,7 @@
 //
 // The PATCH /api/ops-alerts/:id route lives in api.ops-alerts.$id.tsx.
 import type { Route } from "./+types/api.ops-alerts";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 
@@ -108,16 +108,8 @@ export async function action({ request }: Route.ActionArgs) {
 
 // ── GET: list for admin UI ──────────────────────────────────────────────────
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await getUserFromRequest(request);
+  const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-  const roleResult = await db.execute(
-    sql`SELECT role FROM "user" WHERE id = ${user.id} LIMIT 1`,
-  );
-  const role = roleResult.rows[0]?.role as string | null;
-  if (role !== "admin" && role !== "ops") {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
 
   await ensureTable();
 

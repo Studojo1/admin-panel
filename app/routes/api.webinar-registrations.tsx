@@ -1,22 +1,7 @@
 import type { Route } from "./+types/api.webinar-registrations";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { adminOnly } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
-
-// Returns null if the request is from an admin/ops user, otherwise a Response
-// to return immediately.
-async function requireAdmin(request: Request): Promise<Response | null> {
-  const user = await getUserFromRequest(request);
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const roleResult = await db.execute(
-    sql`SELECT role FROM "user" WHERE id = ${user.id} LIMIT 1`
-  );
-  const role = roleResult.rows[0]?.role as string | null;
-  if (role !== "admin" && role !== "ops") {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return null;
-}
 
 async function ensureWebinarsTable() {
   await db.execute(sql`
@@ -35,7 +20,7 @@ async function ensureWebinarsTable() {
 //   { intent: "create", title, webinar_date?, webinar_time? }
 //   { intent: "activate", id }
 export async function action({ request }: Route.ActionArgs) {
-  const denied = await requireAdmin(request);
+  const denied = await adminOnly(request);
   if (denied) return denied;
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -123,7 +108,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const denied = await requireAdmin(request);
+  const denied = await adminOnly(request);
   if (denied) return denied;
 
   // The table is created lazily by the public form on first submit. Guard here
