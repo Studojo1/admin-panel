@@ -9,6 +9,7 @@
  * before refunding, so nothing here decides eligibility.
  */
 import type { Route } from "./+types/api.refund-check";
+import { requireAdmin } from "~/lib/auth-helper.server";
 
 const JOB_OUTREACH_URL =
   process.env.JOB_OUTREACH_URL ??
@@ -25,6 +26,7 @@ async function forward(res: Response) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const auth = request.headers.get("Authorization");
   if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const url = new URL(request.url);
@@ -40,6 +42,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
+  if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const auth = request.headers.get("Authorization");
   if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const body = (await request.json().catch(() => ({}))) as {
