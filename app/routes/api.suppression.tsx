@@ -11,6 +11,7 @@
  * (masking, deadlines, what gets deleted); this only validates shape.
  */
 import type { Route } from "./+types/api.suppression";
+import { requireAdmin } from "~/lib/auth-helper.server";
 
 const JOB_OUTREACH_URL =
   process.env.JOB_OUTREACH_URL ??
@@ -34,6 +35,9 @@ const unreachable = (e: unknown) =>
   Response.json({ detail: `Outreach service unreachable: ${(e as Error).message}` }, { status: 502 });
 
 export async function loader({ request }: Route.LoaderArgs) {
+  // Checked here too, not only by job-outreach-svc: a proxy must not rely on
+  // the backend to be the only gate (audit AS-N01).
+  if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const auth = request.headers.get("Authorization");
   if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const url = new URL(request.url);
@@ -61,6 +65,9 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
+  // Checked here too, not only by job-outreach-svc: a proxy must not rely on
+  // the backend to be the only gate (audit AS-N01).
+  if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const auth = request.headers.get("Authorization");
   if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const body = (await request.json().catch(() => ({}))) as {

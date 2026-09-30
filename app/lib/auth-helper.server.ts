@@ -144,3 +144,15 @@ export async function requireAdmin(request: Request): Promise<UserInfo | null> {
     return null;
   }
 }
+
+/**
+ * Same gate as requireAdmin, shaped for routes that return early:
+ *   const denied = await adminOnly(request);
+ *   if (denied) return denied;
+ * Returns null for an admin/ops user, else a 401 Response.
+ */
+export async function adminOnly(request: Request): Promise<Response | null> {
+  return (await requireAdmin(request))
+    ? null
+    : Response.json({ error: "Unauthorized" }, { status: 401 });
+}
