@@ -708,6 +708,11 @@ export interface PaidPayment {
   razorpay_payment_id: string | null;
   dodo_checkout_id: string | null;
   dodo_payment_id: string | null;
+  // PP-P05: refund state, from job-outreach-svc's payments list.
+  refunded_cents?: number;
+  refunded_at?: string | null;
+  refund_id?: string | null;
+  refundable?: boolean;
   outreach_order_status: string | null;
   created_at: string;
 }
@@ -746,3 +751,28 @@ export async function listPayments(
   return res.json();
 }
 
+export interface RefundResult {
+  order_id: number;
+  status: string;
+  refunded_cents: number;
+  currency: string;
+  refund_id: string;
+  campaigns_cancelled: number[];
+  credits_revoked: number;
+  credits_already_used: number;
+}
+
+/** Full refund of a payment through its provider (admin only, audit PP-P05). */
+export async function refundPayment(paymentId: number, reason: string): Promise<RefundResult> {
+  const token = await getToken();
+  if (!token) throw new Error("Please sign in again.");
+  const res = await fetch("/api/outreach", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ op: "refund_payment", payment_id: paymentId, reason }),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as any).detail || (data as any).error || `HTTP ${res.status}`);
+  return data as RefundResult;
+}
