@@ -28,16 +28,6 @@ export const ALLOWLIST = {
       mustContain: 'request.headers.get("x-alert-token")',
     },
   },
-  "api.refund-check.tsx": {
-    loader: {
-      reason: "proxy to job-outreach-svc, which verifies the admin JWT on every call; owned by the refund work (PP-P05), add requireAdmin there",
-      mustContain: 'request.headers.get("Authorization")',
-    },
-    action: {
-      reason: "proxy to job-outreach-svc, which verifies the admin JWT on every call; owned by the refund work (PP-P05), add requireAdmin there",
-      mustContain: 'request.headers.get("Authorization")',
-    },
-  },
 };
 
 // Blank out comments and string/template contents (keeping ${...} code) so
