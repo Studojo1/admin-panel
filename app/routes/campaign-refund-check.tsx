@@ -343,7 +343,6 @@ export default function CampaignRefundCheck() {
                 <p className="mb-3 font-['Satoshi'] text-sm text-neutral-800">
                   This refunds real money through {r.provider}, cancels the campaign and removes its {r.unsent_credits} unsent credits.
                   Only continue if the failure was on our side (condition 4).
-                  {r.provider === "dodo" && " Dodo partial refunds aren't automated: this will be refused, so refund it in the Dodo dashboard."}
                 </p>
                 <label htmlFor="refund-reason" className="mb-1 block font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-600">Reason (what failed on our side)</label>
                 <input

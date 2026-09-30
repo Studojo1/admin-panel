@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader, StatCard, SearchInput } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
-import { listPayments, type PaidPayment, type PaymentsStats } from "~/lib/api";
+import { listPayments, refundPayment, type PaidPayment, type PaymentsStats } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/paid-users";
 
@@ -81,6 +81,8 @@ const PROVIDER_STYLES: Record<string, { label: string; className: string }> = {
 const STATUS_STYLES: Record<string, string> = {
   paid: "bg-emerald-100 text-emerald-800 border-emerald-300",
   created: "bg-neutral-100 text-neutral-600 border-neutral-300",
+  refunding: "bg-amber-100 text-amber-800 border-amber-300",
+  refunded: "bg-red-100 text-red-800 border-red-300",
 };
 
 const ORDER_STATUS_STYLES: Record<string, string> = {
@@ -95,15 +97,119 @@ const ORDER_STATUS_STYLES: Record<string, string> = {
 const STATUS_FILTERS = [
   { value: "paid", label: "Paid" },
   { value: "abandoned", label: "Abandoned" },
+  { value: "refunded", label: "Refunded" },
   { value: "all", label: "All" },
 ] as const;
 
 interface DetailModalProps {
   payment: PaidPayment | null;
   onClose: () => void;
+  onRefunded: () => void;
 }
 
-function DetailModal({ payment, onClose }: DetailModalProps) {
+/**
+ * Full refund through Razorpay/Dodo (audit PP-P05). job-outreach-svc refunds
+ * at the provider first; only if the provider accepts does it cancel the
+ * student's unfinished campaigns, revoke the credits this payment bought
+ * through the ledger and record the refund. Credits already spent on delivered
+ * emails cannot be revoked and are reported back.
+ */
+function RefundPanel({ payment, onRefunded }: { payment: PaidPayment; onRefunded: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const refunded = payment.refunded_cents ?? 0;
+  const remaining = payment.amount_cents - refunded;
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const r = await refundPayment(payment.id, reason.trim());
+      toast.success(
+        `Refunded ${formatAmount(r.refunded_cents, r.currency)}. ${r.credits_revoked} credits revoked` +
+          (r.credits_already_used ? `, ${r.credits_already_used} already used` : "") +
+          (r.campaigns_cancelled.length ? `, ${r.campaigns_cancelled.length} campaign(s) cancelled.` : "."),
+      );
+      setOpen(false);
+      onRefunded();
+    } catch (err: any) {
+      toast.error(err.message || "Refund failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section title="Refund">
+      {refunded > 0 && (
+        <Row label="Refunded" value={`${formatAmount(refunded, payment.currency)}${payment.refunded_at ? ` on ${formatDate(payment.refunded_at)}` : ""}`} />
+      )}
+      {payment.refund_id && <Row label="Refund ID" value={payment.refund_id} mono small />}
+      {!payment.refundable ? (
+        <p className="font-['Satoshi'] text-sm text-neutral-500">
+          {payment.status === "refunded"
+            ? "This payment has been refunded in full."
+            : payment.status === "refunding"
+              ? "A refund of this payment is in progress."
+              : payment.provider === "coupon"
+                ? "Coupon orders carry no money to refund."
+                : "Only a paid Razorpay or Dodo payment can be refunded."}
+        </p>
+      ) : !open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-bold text-red-700 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+        >
+          Refund {formatAmount(remaining, payment.currency)}
+        </button>
+      ) : (
+        <div className="rounded-xl border-2 border-red-500 bg-red-50 p-4">
+          <p className="mb-3 font-['Satoshi'] text-sm text-neutral-800">
+            This refunds {formatAmount(remaining, payment.currency)} of real money to {payment.user_email} through{" "}
+            {payment.provider === "dodo" ? "Dodo" : "Razorpay"}, cancels their unfinished campaigns and removes the{" "}
+            {payment.credits_granted} credits this payment bought (credits already used on delivered emails stay).
+          </p>
+          <label htmlFor={`refund-reason-${payment.id}`} className="mb-1 block font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-600">
+            Reason
+          </label>
+          <input
+            id={`refund-reason-${payment.id}`}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. paid but no email was ever delivered"
+            className="mb-3 h-10 w-full rounded-xl border-2 border-neutral-900 bg-white px-3 font-['Satoshi'] text-sm"
+          />
+          <label className="mb-4 flex items-start gap-2 font-['Satoshi'] text-sm">
+            <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-1" />
+            I understand this moves real money and cannot be undone.
+          </label>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!confirmed || !reason.trim() || busy}
+              className="h-10 rounded-xl border-2 border-neutral-900 bg-red-600 px-4 font-['Satoshi'] text-sm font-bold text-white disabled:opacity-40"
+            >
+              {busy ? "Refunding…" : `Refund ${formatAmount(remaining, payment.currency)}`}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              disabled={busy}
+              className="h-10 rounded-xl border-2 border-neutral-900 bg-white px-4 font-['Satoshi'] text-sm font-bold"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function DetailModal({ payment, onClose, onRefunded }: DetailModalProps) {
   if (!payment) return null;
 
   const providerStyle = PROVIDER_STYLES[payment.provider] ?? PROVIDER_STYLES.coupon;
@@ -216,6 +322,8 @@ function DetailModal({ payment, onClose }: DetailModalProps) {
                   )}
               </Section>
 
+              <RefundPanel key={payment.id} payment={payment} onRefunded={onRefunded} />
+
               {/* Outreach */}
               <Section title="Outreach">
                 <Row
@@ -289,7 +397,7 @@ export default function PaidUsers() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"paid" | "abandoned" | "all">("paid");
+  const [statusFilter, setStatusFilter] = useState<"paid" | "abandoned" | "refunded" | "all">("paid");
   const [offset, setOffset] = useState(0);
   const [selectedPayment, setSelectedPayment] = useState<PaidPayment | null>(null);
   const limit = 50;
@@ -560,7 +668,14 @@ export default function PaidUsers() {
         </motion.div>
       </main>
 
-      <DetailModal payment={selectedPayment} onClose={() => setSelectedPayment(null)} />
+      <DetailModal
+        payment={selectedPayment}
+        onClose={() => setSelectedPayment(null)}
+        onRefunded={() => {
+          setSelectedPayment(null);
+          loadPayments();
+        }}
+      />
     </>
   );
 }
