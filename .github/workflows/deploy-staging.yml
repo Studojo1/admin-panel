@@ -79,6 +79,17 @@ jobs:
             --name ${{ secrets.AKS_CLUSTER_NAME }} \
             --overwrite-existing
 
+      - name: Secrets as secretKeyRef (audit ST-N07)
+        run: |
+          # Secrets reach the pod only as secretKeyRef, never as literal values
+          # in the Deployment spec. BOB_SUPERADMIN_SECRET was set by hand; it is
+          # adopted into app-secrets once (value kept) and referenced from then
+          # on. scripts/ci/secret_env.sh explains.
+          export NS=staging DEP=${{ env.APP_NAME }}
+          . scripts/ci/secret_env.sh
+          secret_adopt BOB_SUPERADMIN_SECRET bob-superadmin-secret
+          secret_audit
+
       - name: Deploy to Kubernetes
         run: |
           # Start the new pod before stopping the old one: with one replica,
