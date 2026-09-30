@@ -1,0 +1,21 @@
+# Runs on every pull request and every push to main/staging.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, staging]
+
+jobs:
+  test:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Every app/routes/api.*.tsx loader/action must require an admin login
+      # (audit AS-N01: /api/posthog and /api/settings shipped without one).
+      - run: node scripts/check-api-auth.mjs
+      - run: node --test scripts/check-api-auth.test.mjs

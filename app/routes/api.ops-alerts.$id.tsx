@@ -1,6 +1,6 @@
 // PATCH /api/ops-alerts/:id — acknowledge an alert.
 import type { Route } from "./+types/api.ops-alerts.$id";
-import { getUserFromRequest } from "~/lib/auth-helper.server";
+import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 
@@ -9,17 +9,9 @@ export async function action({ request, params }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const user = await getUserFromRequest(request);
+  const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-  const roleResult = await db.execute(
-    sql`SELECT role, email FROM "user" WHERE id = ${user.id} LIMIT 1`,
-  );
-  const role = roleResult.rows[0]?.role as string | null;
-  const email = (roleResult.rows[0]?.email as string | undefined) || user.id;
-  if (role !== "admin" && role !== "ops") {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const email = user.email || user.id;
 
   const id = Number(params.id);
   if (!Number.isFinite(id) || id <= 0) {
