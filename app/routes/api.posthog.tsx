@@ -9,6 +9,8 @@
  * POST /api/posthog?type=query          → /query/  (HogQL / FunnelsQuery)
  */
 
+import { requireAdmin } from "~/lib/auth-helper.server";
+
 const API_KEY = process.env.POSTHOG_PERSONAL_API_KEY ?? "";
 const PROJECT_ID = process.env.POSTHOG_PROJECT_ID ?? "150589";
 const BASE = `https://eu.posthog.com/api/projects/${PROJECT_ID}`;
@@ -21,6 +23,8 @@ function phHeaders() {
 }
 
 export async function loader({ request }: { request: Request }) {
+  const admin = await requireAdmin(request);
+  if (!admin) return Response.json({ error: "Unauthorized" }, { status: 401 });
   if (!API_KEY) {
     return Response.json({ error: "PostHog API key not configured" }, { status: 503 });
   }
@@ -126,6 +130,8 @@ export async function loader({ request }: { request: Request }) {
 }
 
 export async function action({ request }: { request: Request }) {
+  const admin = await requireAdmin(request);
+  if (!admin) return Response.json({ error: "Unauthorized" }, { status: 401 });
   if (!API_KEY) {
     return Response.json({ error: "PostHog API key not configured" }, { status: 503 });
   }
