@@ -90,6 +90,16 @@ jobs:
           secret_adopt BOB_SUPERADMIN_SECRET bob-superadmin-secret
           secret_audit
 
+      - name: Two replicas across nodes, with a PDB
+        run: |
+          # One replica went down for ~1.5 min on every node drain (AKS
+          # maintenance, 2026-10-01). Two pods on different nodes plus a PDB
+          # (minAvailable 1) keep one serving while a node drains.
+          kubectl patch deployment/${{ env.APP_NAME }} -n studojo --type=strategic -p \
+            '{"spec":{"replicas":2,"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"DoNotSchedule","labelSelector":{"matchLabels":{"app":"${{ env.APP_NAME }}"}}}]}}}}'
+          kubectl create pdb ${{ env.APP_NAME }} -n studojo --min-available=1 \
+            --selector=app=${{ env.APP_NAME }} --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Deploy to Kubernetes
         run: |
           # Start the new pod before stopping the old one: with one replica,
