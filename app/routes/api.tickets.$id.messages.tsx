@@ -1,51 +1,64 @@
 // POST /api/tickets/:id/messages — admin reply.
-// Writes a ticket_messages row with author_type='admin', then fires the
-// event.ticket.replied routing key to email the user (best-effort).
+// Writes a ticket_messages row with author_type='admin', then emails the user
+// from Studojo Support <studojo@gmail.com>. This used to POST an
+// event.ticket.replied event to emailer-service, which has no handler for it
+// (and now also requires X-Internal-Secret), so no reply was ever emailed.
 import type { Route } from "./+types/api.tickets.$id.messages";
 import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
+import { sendDirectGmail } from "~/lib/gmail-direct.server";
 import { sql } from "drizzle-orm";
 
-async function getEmailerServiceUrl(): Promise<string | null> {
-  // Admin panel doesn't have a getEmailerServiceUrl helper today; the
-  // emailer-service is reachable cluster-internally at
-  // http://emailer-service.<namespace>.svc.cluster.local:8087. The env
-  // var EMAILER_SERVICE_URL lets us override per-env.
-  return process.env.EMAILER_SERVICE_URL || null;
+function esc(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Same template as the frontend's renderTicketRepliedHtml. Signed by the team,
+// never by the replying admin's own email address.
+function renderTicketRepliedHtml(opts: {
+  ticket_id: number;
+  user_name: string;
+  reply_body: string;
+}): string {
+  const url = `https://studojo.com/tickets/${opts.ticket_id}`;
+  return `<!doctype html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#fafafa;padding:24px;color:#171717;">
+    <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:12px;padding:28px;">
+      <h2 style="margin:0 0 12px;font-size:20px;">Hey ${esc(opts.user_name)},</h2>
+      <p style="margin:0 0 18px;">The team replied on your support ticket #${opts.ticket_id}.</p>
+      <div style="background:#faf5ff;border-left:3px solid #7c3aed;padding:14px 16px;border-radius:6px;margin:0 0 24px;">
+        <p style="margin:0 0 6px;color:#737373;font-size:12px;">The Studojo team wrote</p>
+        <p style="margin:0;white-space:pre-wrap;">${esc(opts.reply_body)}</p>
+      </div>
+      <p style="text-align:center;margin:0 0 16px;">
+        <a href="${esc(url)}" style="display:inline-block;background:#7c3aed;color:#ffffff;padding:12px 24px;border-radius:8px;font-weight:600;text-decoration:none;">View ticket on Studojo</a>
+      </p>
+      <p style="font-size:12px;color:#737373;text-align:center;margin:0;">Reply from the support chat or your profile.</p>
+    </div>
+  </body></html>`;
 }
 
 async function notifyUserOfReply(opts: {
   ticket_id: number;
   user_email: string;
   user_name: string | null;
-  admin_name: string;
   reply_body: string;
-}): Promise<void> {
-  const base = await getEmailerServiceUrl();
-  if (!base) {
-    console.warn(
-      "[tickets] EMAILER_SERVICE_URL not configured; user-reply email skipped",
-    );
-    return;
-  }
-  try {
-    const res = await fetch(`${base}/v1/email/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        routing_key: "event.ticket.replied",
-        event: {
-          ...opts,
-          studojo_url: `https://studojo.com/`,
-        },
-      }),
-    });
-    if (!res.ok) {
-      console.error(`[tickets] emailer reply -> HTTP ${res.status}`);
-    }
-  } catch (e: any) {
-    console.error("[tickets] failed to notify user of reply:", e?.message);
-  }
+}): Promise<boolean> {
+  const ok = await sendDirectGmail({
+    to: opts.user_email,
+    subject: `Re: Studojo ticket #${opts.ticket_id}`,
+    html: renderTicketRepliedHtml({
+      ticket_id: opts.ticket_id,
+      user_name: opts.user_name || "there",
+      reply_body: opts.reply_body,
+    }),
+  });
+  if (!ok) console.error(`[tickets] reply email failed for ticket ${opts.ticket_id}`);
+  return ok;
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -55,7 +68,6 @@ export async function action({ request, params }: Route.ActionArgs) {
   const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const adminEmail = user.email || user.id;
-  const adminName = user.name || user.email?.split("@")[0] || "studojo team";
 
   const id = Number(params.id);
   if (!Number.isFinite(id) || id <= 0) {
@@ -99,13 +111,12 @@ export async function action({ request, params }: Route.ActionArgs) {
     WHERE id = ${id}
   `);
 
-  notifyUserOfReply({
+  const emailed = await notifyUserOfReply({
     ticket_id: id,
     user_email: ticket.user_email,
     user_name: ticket.user_name,
-    admin_name: adminName,
     reply_body: text,
   });
 
-  return Response.json({ message: mRes.rows[0] });
+  return Response.json({ message: mRes.rows[0], emailed });
 }
