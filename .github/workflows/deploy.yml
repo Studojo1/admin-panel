@@ -88,6 +88,8 @@ jobs:
           export NS=studojo DEP=${{ env.APP_NAME }}
           . scripts/ci/secret_env.sh
           secret_adopt BOB_SUPERADMIN_SECRET bob-superadmin-secret
+          # Ticket replies are emailed from studojo@gmail.com over SMTP (gmail-direct.server.ts).
+          secret_ref STUDOJO_GMAIL_APP_PASSWORD studojo-gmail-app-password
           secret_audit
 
       - name: Two replicas across nodes, with a PDB
