@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { posthogFetch } from "~/lib/posthog-client";
 
 /**
  * "Where users come from" — acquisition-source breakdown.
@@ -10,7 +11,7 @@ import { useEffect, useState } from "react";
  * Pass an IST date range (start/end as YYYY-MM-DD). Omit both for lifetime.
  */
 async function phQuery(query: string) {
-  const res = await fetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
     body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
   });

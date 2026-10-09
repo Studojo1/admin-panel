@@ -15,6 +15,7 @@ import {
   type UtmMedium,
 } from "~/lib/utm-dictionary";
 import type { Route } from "./+types/utm-builder";
+import { posthogFetch } from "~/lib/posthog-client";
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "UTM Links | Studojo Admin" }];
@@ -99,7 +100,7 @@ async function authed(path: string, init: RequestInit = {}) {
 }
 
 async function phQuery(query: string) {
-  const res = await fetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",

@@ -2,10 +2,11 @@ import { useEffect, useState, useCallback } from "react";
 import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
 import { SourceBreakdown } from "~/components/source-breakdown";
+import { posthogFetch } from "~/lib/posthog-client";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 async function phQuery(query: string) {
-  const res = await fetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
