@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
+import { posthogFetch } from "~/lib/posthog-client";
 
 async function phQuery(query: string) {
-  const res = await fetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
     body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
   });
@@ -12,7 +13,7 @@ async function phQuery(query: string) {
 }
 async function phGet(type: string, params: Record<string, string>) {
   const qs = new URLSearchParams({ type, ...params }).toString();
-  const res = await fetch(`/api/posthog?${qs}`, { credentials: "include" });
+  const res = await posthogFetch(`/api/posthog?${qs}`, { credentials: "include" });
   if (!res.ok) throw new Error(`PostHog ${type} ${res.status}`);
   return res.json();
 }

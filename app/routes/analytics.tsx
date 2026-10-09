@@ -18,6 +18,7 @@ import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { toast } from "sonner";
 import type { Route } from "./+types/analytics";
+import { posthogFetch } from "~/lib/posthog-client";
 
 ChartJS.register(
   CategoryScale,
@@ -38,7 +39,7 @@ export function meta(_: Route.MetaArgs) {
 // ── PostHog proxy helpers ──────────────────────────────────────────────────
 
 async function phQuery(query: object) {
-  const res = await fetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -50,7 +51,7 @@ async function phQuery(query: object) {
 
 async function phGet(type: string, params: Record<string, string> = {}) {
   const qs = new URLSearchParams({ type, ...params }).toString();
-  const res = await fetch(`/api/posthog?${qs}`, { credentials: "include" });
+  const res = await posthogFetch(`/api/posthog?${qs}`, { credentials: "include" });
   if (!res.ok) throw new Error(`PostHog ${type} failed: ${res.status}`);
   return res.json();
 }
