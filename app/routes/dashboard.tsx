@@ -9,6 +9,7 @@ import { AdminHeader, StatCard } from "~/components";
 import { SourceBreakdown } from "~/components/source-breakdown";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
+import { posthogFetch } from "~/lib/posthog-client";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
@@ -35,7 +36,7 @@ const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 const usd = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
 
 async function phQuery(query: string) {
-  const res = await fetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
     body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
   });
