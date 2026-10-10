@@ -36,7 +36,9 @@ export async function verifyToken(token: string): Promise<string | null> {
     // Return user ID from token
     return (payload.sub || payload.userId || payload.id) as string | null;
   } catch (error) {
-    console.error("Token verification failed:", error);
+    // Only the code: a claim error carries the whole token payload (name, email, phone).
+    const e = error as { code?: string; name?: string };
+    console.error("Token verification failed:", e?.code ?? e?.name ?? "unknown");
     return null;
   }
 }
