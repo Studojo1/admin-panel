@@ -1,17 +1,19 @@
 import { useEffect, useState, useCallback } from "react";
 import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
-import { SourceBreakdown } from "~/components/source-breakdown";
+import { ChannelSources } from "~/components/channel-sources";
+import { NeedsAttention } from "~/components/needs-attention";
 import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement,
   BarElement, Title, Tooltip, Legend, Filler,
 } from "chart.js";
 import { Line, Bar } from "react-chartjs-2";
+import { posthogFetch } from "~/lib/posthog-client";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
 async function phQuery(query: string) {
-  const res = await fetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
     body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
   });
@@ -66,12 +68,15 @@ export default function DailyDashboard() {
   const [daily, setDaily] = useState<Day[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [range, setRange] = useState<{ start: string; end: string } | null>(null);
 
   const load = useCallback(async (d: number) => {
     setLoading(true); setError("");
     try {
       const end = isoDate(new Date());
       const start = isoDate(new Date(Date.now() - (d - 1) * 86400000));
+      // The sources card uses this same range, and must still load when the queries below fail.
+      setRange({ start, end });
       const token = await getToken();
       const [dbRes, visRes] = await Promise.all([
         fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()),
@@ -171,6 +176,9 @@ export default function DailyDashboard() {
 
         {error && <div className="mb-6 rounded-2xl border-2 border-red-300 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
 
+        {/* Outside the loading switch: it does not depend on the date range and must show even when the numbers below fail. */}
+        <NeedsAttention className="mb-8" />
+
         {loading ? (
           <div className="flex justify-center py-24"><div className="h-8 w-8 animate-spin rounded-full border-[3px] border-violet-500 border-t-transparent" /></div>
         ) : (
@@ -215,6 +223,9 @@ export default function DailyDashboard() {
                 </table>
               </div>
             </div>
+            {/* Where the signups came from: channel funnel + signups by source per bucket */}
+            {range && <ChannelSources className="mt-8" start={range.start} end={range.end} group={group} />}
+
             {/* Trends + conversion metrics */}
             <div className="grid gap-6 lg:grid-cols-2 mt-8">
               <div className={`p-5 ${card}`}>
@@ -234,7 +245,6 @@ export default function DailyDashboard() {
 
             <p className="text-xs text-neutral-400 mt-4">Newest date first. Green = grew vs the day before; red = flat or down, deepening the longer it stays without growth. Visitors from PostHog (unique people/day); signups, orders, emails, replies, paid from Postgres. Instagram followers aren't in any system — add an IG integration or a manual entry if you want that row.</p>
 
-            <div className="mt-8"><SourceBreakdown start={isoDate(new Date(Date.now() - (days - 1) * 86400000))} end={isoDate(new Date())} /></div>
           </>
         )}
       </main>

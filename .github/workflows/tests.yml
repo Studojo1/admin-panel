@@ -19,6 +19,9 @@ jobs:
       # (audit AS-N01: /api/posthog and /api/settings shipped without one).
       - run: node scripts/check-api-auth.mjs
       - run: node --test scripts/check-api-auth.test.mjs
+      # The rules behind the "Needs attention" card on /daily: when lead
+      # discovery counts as failing, and why a paying customer got no email.
+      - run: node --test scripts/health-watch.test.mjs
       # Deploy workflows never write a secret into a Deployment as a literal
       # env value (audit ST-N07).
       - run: bash scripts/ci/check_no_literal_secrets.sh

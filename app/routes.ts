@@ -8,6 +8,8 @@ export default [
   route("journeys", "routes/user-journeys.tsx"),
   route("daily", "routes/daily-dashboard.tsx"),
   route("api/dashboard", "routes/api.dashboard.tsx"),
+  route("api/sources", "routes/api.sources.tsx"),
+  route("api/health-watch", "routes/api.health-watch.tsx"),
   route("api/overview", "routes/api.overview.tsx"),
   route("api/paid-emails", "routes/api.paid-emails.tsx"),
   route("assignments", "routes/assignments.tsx"),

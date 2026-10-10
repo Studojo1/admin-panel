@@ -2,10 +2,11 @@ import { useEffect, useState, useCallback } from "react";
 import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
 import { SourceBreakdown } from "~/components/source-breakdown";
+import { posthogFetch } from "~/lib/posthog-client";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 async function phQuery(query: string) {
-  const res = await fetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -96,21 +97,23 @@ function forkHogql(tc: string, env: string) {
   return `
     SELECT
       count() AS cohort,
-      countIf(careers OR coach OR assignment OR internships OR humanizer) AS any_other,
-      countIf(careers) AS careers,
-      countIf(coach) AS coach,
-      countIf(assignment) AS assignment,
-      countIf(internships) AS internships,
-      countIf(humanizer) AS humanizer
+      countIf(is_careers OR is_coach OR is_assignment OR is_internships OR is_humanizer) AS any_other,
+      countIf(is_careers) AS careers,
+      countIf(is_coach) AS coach,
+      countIf(is_assignment) AS assignment,
+      countIf(is_internships) AS internships,
+      countIf(is_humanizer) AS humanizer
     FROM (
+      -- Inner names differ from the outer aliases: ClickHouse resolves an alias before a
+      -- column, so a shared name nests one countIf inside another and the query is refused.
       SELECT person_id,
         max(event='$pageview' AND properties.$pathname LIKE '/outreach%') AS ro,
         max(event='resume_uploaded') AS ru,
-        max(event='$pageview' AND properties.$pathname LIKE '/careers%') AS careers,
-        max(event='$pageview' AND properties.$pathname LIKE '/cc%') AS coach,
-        max(event='$pageview' AND (properties.$pathname LIKE '/assignments%' OR properties.$pathname LIKE '/dojos/assignment%')) AS assignment,
-        max(event='$pageview' AND properties.$pathname LIKE '/dojos/internships%') AS internships,
-        max(event='$pageview' AND properties.$pathname LIKE '/dojos/humanizer%') AS humanizer
+        max(event='$pageview' AND properties.$pathname LIKE '/careers%') AS is_careers,
+        max(event='$pageview' AND properties.$pathname LIKE '/cc%') AS is_coach,
+        max(event='$pageview' AND (properties.$pathname LIKE '/assignments%' OR properties.$pathname LIKE '/dojos/assignment%')) AS is_assignment,
+        max(event='$pageview' AND properties.$pathname LIKE '/dojos/internships%') AS is_internships,
+        max(event='$pageview' AND properties.$pathname LIKE '/dojos/humanizer%') AS is_humanizer
       FROM events WHERE ${tc} ${envWhere(env)}
       GROUP BY person_id
     )
