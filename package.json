@@ -8,7 +8,7 @@
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
     "check:api-auth": "node scripts/check-api-auth.mjs",
-    "test": "node --test scripts/check-api-auth.test.mjs"
+    "test": "node --test scripts/check-api-auth.test.mjs scripts/health-watch.test.mjs"
   },
   "dependencies": {
     "@react-router/node": "7.12.0",
