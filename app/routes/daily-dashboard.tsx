@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
 import { ChannelSources } from "~/components/channel-sources";
+import { NeedsAttention } from "~/components/needs-attention";
 import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement,
   BarElement, Title, Tooltip, Legend, Filler,
@@ -171,6 +172,9 @@ export default function DailyDashboard() {
         </div>
 
         {error && <div className="mb-6 rounded-2xl border-2 border-red-300 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+
+        {/* Outside the loading switch: it does not depend on the date range and must show even when the numbers below fail. */}
+        <NeedsAttention className="mb-8" />
 
         {loading ? (
           <div className="flex justify-center py-24"><div className="h-8 w-8 animate-spin rounded-full border-[3px] border-violet-500 border-t-transparent" /></div>
