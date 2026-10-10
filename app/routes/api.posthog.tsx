@@ -107,6 +107,8 @@ export async function loader({ request }: { request: Request }) {
               properties.email_address,
               properties.error_type,
               properties.coupon_code,
+              properties.money_moved,
+              properties.currency,
               properties.question_number,
               properties.answer_type,
               properties.provider,
