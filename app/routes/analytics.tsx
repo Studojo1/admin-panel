@@ -1207,9 +1207,16 @@ function FunnelChart({
   );
 }
 
-// ev columns: [event, timestamp, $pathname, $current_url, file_type, tier, amount_cents, campaign_id, leads_found, enriched_count, email_address, error_type, coupon_code]
+// ev columns: [event, timestamp, $pathname, $current_url, file_type, tier, amount_cents, campaign_id, leads_found, enriched_count, email_address, error_type, coupon_code, money_moved, currency]
 function EventRow({ ev }: { ev: any[] }) {
-  const [event, timestamp, pathname, currentUrl, fileType, tier, amountCents, campaignId, leadsFound, enrichedCount, emailAddress, errorType, couponCode] = ev;
+  const [event, timestamp, pathname, currentUrl, fileType, tier, amountCents, campaignId, leadsFound, enrichedCount, emailAddress, errorType, couponCode, moneyMoved, currency] = ev;
+
+  // payment_confirmed also fires when credits cover the order. Only that copy
+  // carries money_moved = false, which PostHog returns as a boolean, as 0 or
+  // as text depending on how it typed the property.
+  const usedCredits = ["false", "0"].includes(String(moneyMoved).toLowerCase());
+  const code = String(currency || "INR").toUpperCase();
+  const symbol = code === "INR" ? "₹" : code === "USD" ? "$" : `${code} `;
 
   const labels: Record<string, { label: string; color: string; detail?: string }> = {
     "$pageview": { label: "Viewed page", color: "text-neutral-500 bg-neutral-100", detail: pathname || currentUrl?.replace(/^https?:\/\/[^/]+/, "") || "" },
@@ -1218,7 +1225,9 @@ function EventRow({ ev }: { ev: any[] }) {
     "profile_quiz_completed": { label: "Completed onboarding quiz", color: "text-blue-700 bg-blue-50" },
     "payment_order_created": { label: "Started checkout", color: "text-amber-700 bg-amber-50", detail: tier ? `tier: ${tier}` : "" },
     "coupon_applied": { label: "Applied coupon", color: "text-amber-700 bg-amber-50", detail: couponCode || "" },
-    "payment_confirmed": { label: "Paid ✓", color: "text-emerald-700 bg-emerald-50", detail: [tier, amountCents ? `₹${Math.round(amountCents / 100)}` : ""].filter(Boolean).join(" · ") },
+    "payment_confirmed": usedCredits
+      ? { label: "Used credits", color: "text-emerald-700 bg-emerald-50", detail: tier ? `tier: ${tier}` : "" }
+      : { label: "Paid ✓", color: "text-emerald-700 bg-emerald-50", detail: [tier, amountCents ? `${symbol}${Math.round(amountCents / 100)}` : ""].filter(Boolean).join(" · ") },
     "lead_discovery_started": { label: "Started lead search", color: "text-violet-700 bg-violet-50" },
     "lead_discovery_completed": { label: "Leads found", color: "text-violet-700 bg-violet-50", detail: leadsFound ? `${leadsFound} leads` : "" },
     "enrichment_started": { label: "Enrichment started", color: "text-violet-700 bg-violet-50" },
