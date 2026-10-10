@@ -73,7 +73,8 @@ export async function getToken(): Promise<string | null> {
       try {
         const payload = JSON.parse(atob(storedToken.split('.')[1]));
         const exp = payload.exp * 1000; // Convert to milliseconds
-        if (exp > Date.now()) {
+        // Refresh 30s early: a token sent in its last seconds can expire before the server checks it.
+        if (exp - Date.now() > 30_000) {
           return storedToken;
         } else {
           // Token expired, remove it
