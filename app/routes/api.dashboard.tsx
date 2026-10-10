@@ -39,8 +39,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       q(sql`SELECT DATE(reply_received_at + INTERVAL '330 minutes') AS day, COUNT(DISTINCT lead_id)::int AS n FROM emails_sent
             WHERE reply_received_at IS NOT NULL AND is_test = false
               AND DATE(reply_received_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
+      // Real money only: a zero-amount row is a credit or coupon order, not a payment.
       q(sql`SELECT DATE(created_at + INTERVAL '330 minutes') AS day, COUNT(*)::int AS n FROM payment_orders
-            WHERE status IN ('paid','completed')
+            WHERE status IN ('paid','completed') AND amount_cents > 0
               AND DATE(created_at + INTERVAL '330 minutes') BETWEEN ${start}::date AND ${end}::date GROUP BY day`),
       // Unique people reached = distinct leads who got an initial (non-followup) email.
       // Used as the denominator for reply rate so follow-ups don't dilute the %.
