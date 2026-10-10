@@ -68,12 +68,15 @@ export default function DailyDashboard() {
   const [daily, setDaily] = useState<Day[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [range, setRange] = useState<{ start: string; end: string } | null>(null);
 
   const load = useCallback(async (d: number) => {
     setLoading(true); setError("");
     try {
       const end = isoDate(new Date());
       const start = isoDate(new Date(Date.now() - (d - 1) * 86400000));
+      // The sources card uses this same range, and must still load when the queries below fail.
+      setRange({ start, end });
       const token = await getToken();
       const [dbRes, visRes] = await Promise.all([
         fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()),
@@ -221,7 +224,7 @@ export default function DailyDashboard() {
               </div>
             </div>
             {/* Where the signups came from: channel funnel + signups by source per bucket */}
-            <ChannelSources className="mt-8" start={isoDate(new Date(Date.now() - (days - 1) * 86400000))} end={isoDate(new Date())} group={group} />
+            {range && <ChannelSources className="mt-8" start={range.start} end={range.end} group={group} />}
 
             {/* Trends + conversion metrics */}
             <div className="grid gap-6 lg:grid-cols-2 mt-8">

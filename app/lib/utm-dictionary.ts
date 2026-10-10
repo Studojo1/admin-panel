@@ -120,6 +120,7 @@ export function validateLink(l: {
 const SOURCE_ALIASES: Record<string, string> = {
   ig: "instagram", instagram: "instagram", "l.instagram.com": "instagram",
   fb: "meta", facebook: "meta", meta: "meta", "m.facebook.com": "meta", "l.facebook.com": "meta",
+  an: "meta", msg: "meta", th: "meta", threads: "meta",
   li: "linkedin", linkedin: "linkedin", "lnkd.in": "linkedin",
   wa: "whatsapp", whatsapp: "whatsapp",
   yt: "youtube", youtube: "youtube",
@@ -130,6 +131,7 @@ const SOURCE_ALIASES: Record<string, string> = {
 
 const MEDIUM_ALIASES: Record<string, string> = {
   paid: "paid", cpc: "paid", ppc: "paid", paid_social: "paid", paidsocial: "paid",
+  "paid-social": "paid", ads: "paid", ad: "paid", cpm: "paid", sponsored: "paid", display: "paid",
   organic: "organic", social: "organic", bio: "organic", link_in_bio: "organic",
   nurture: "lifecycle", lifecycle: "lifecycle", drip: "lifecycle", newsletter: "lifecycle",
   dm: "dm", direct: "dm", community: "community", group: "community",
@@ -146,17 +148,19 @@ export function channelFromReferrer(referrer: string | null | undefined): { sour
   }
   if (!host) return { source: "direct", medium: "none" };
   // Our own pages and the Google sign-in return are not where anyone came from.
-  if (host.endsWith("studojo.com") || host.endsWith("studojo.pro") || host === "accounts.google.com")
+  if (host.endsWith("studojo.com") || host.endsWith("studojo.pro") || host === "accounts.google.com" || host === "accounts.youtube.com")
     return { source: "direct", medium: "none" };
   if (host.includes("linkedin")) return { source: "linkedin", medium: "organic" };
   if (host.includes("instagram")) return { source: "instagram", medium: "organic" };
-  if (host.includes("facebook")) return { source: "meta", medium: "organic" };
-  if (host.includes("whatsapp")) return { source: "whatsapp", medium: "dm" };
+  // messenger.com only: Telegram's Android app id is org.telegram.messenger.
+  if (host.includes("facebook") || host === "fb.me" || /(^|\.)messenger\.com$/.test(host)) return { source: "meta", medium: "organic" };
+  if (host.includes("whatsapp") || host === "wa.me" || host === "l.wl.co") return { source: "whatsapp", medium: "dm" };
   if (host.includes("youtube")) return { source: "youtube", medium: "organic" };
   if (host === "t.co" || host.includes("twitter") || host === "x.com") return { source: "x", medium: "organic" };
-  if (host.includes("chatgpt") || host.includes("openai") || host.includes("perplexity") || host.includes("gemini"))
+  if (/chatgpt|openai|perplexity|gemini|claude\.ai|copilot|deepseek|grok|notebooklm/.test(host))
     return { source: "ai_assistant", medium: "referral" };
-  if (/(^|\.)google\.|googlequicksearchbox|bing\.com|duckduckgo|search\.brave|yahoo\.|ecosia/.test(host))
+  // Search hosts only: docs.google.com, classroom.google.com and Google Play Services are not search.
+  if (/^(www\.|m\.)?google\.[a-z.]+$|googlequicksearchbox|bing\.com|duckduckgo|search\.brave|search\.yahoo\.|ecosia|qwant|yandex|baidu|startpage/.test(host))
     return { source: "search", medium: "organic" };
   return { source: host.replace(/^www\./, ""), medium: "referral" };
 }
@@ -237,10 +241,10 @@ export function channelOf(
     // Until 29 Sep 2026 the Google sign-in round trip overwrote the referrer,
     // so the real source of these signups is gone. Counting them as Direct
     // would hide that.
-    if (host.startsWith("accounts.google.")) return "unknown_signin";
+    if (host.startsWith("accounts.google.") || host === "accounts.youtube.com") return "unknown_signin";
     // Mail apps arrive untagged, and the search rule would otherwise claim
     // anything under google.* (the Gmail app is com.google.android.gm).
-    if (/(^|\.)mail\.|\.android\.gm$|outlook\.|protonmail/.test(host)) return "email";
+    if (/(^|\.)mail\.|\.android\.gm$|outlook\.|\.outlook$|\.mail$|protonmail/.test(host)) return "email";
     if (/(^|\.)threads\.(com|net)$/.test(host)) return "meta_organic";
     // LinkedIn's link shortener carries no "linkedin" in its name.
     if (host === "lnkd.in") return "linkedin";

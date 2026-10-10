@@ -30,21 +30,24 @@ const money = (inr: number, usd: number) => {
   return parts.join(" + ");
 };
 
-// First touch inside the range, per browser. Event properties, not person
-// properties: the person join made a 30 day query on this dashboard run for
-// minutes. studojo.com only, so the Sensei app and admin hosts stay out.
+// First touch inside the range, per person: a browser gets a new id at sign-in,
+// so counting ids counts every signup twice. coalesce goes inside argMin, which
+// skips NULLs, so all three values come from the same first page view. Event
+// properties, not person properties: the person join made a 30 day query on
+// this dashboard run for minutes. studojo.com only, so the Sensei app and admin
+// hosts stay out.
 function visitorsHogql(start: string, end: string) {
   const IST = "toDate(timestamp + INTERVAL 330 MINUTE)";
   return `
     SELECT src, med, ref, count() AS visitors FROM (
-      SELECT distinct_id,
-        lower(coalesce(argMin(properties.utm_source, timestamp), '')) AS src,
-        lower(coalesce(argMin(properties.utm_medium, timestamp), '')) AS med,
-        lower(coalesce(argMin(properties.$referring_domain, timestamp), '')) AS ref
+      SELECT person_id,
+        lower(argMin(coalesce(properties.utm_source, ''), timestamp)) AS src,
+        lower(argMin(coalesce(properties.utm_medium, ''), timestamp)) AS med,
+        lower(argMin(coalesce(properties.$referring_domain, ''), timestamp)) AS ref
       FROM events
       WHERE event = '$pageview' AND properties.$host IN ('studojo.com', 'www.studojo.com')
         AND ${IST} >= toDate('${start}') AND ${IST} <= toDate('${end}')
-      GROUP BY distinct_id
+      GROUP BY person_id
     )
     GROUP BY src, med, ref
     ORDER BY visitors DESC
@@ -72,7 +75,9 @@ async function loadVisitors(start: string, end: string): Promise<Partial<Record<
   const data = await res.json();
   const out: Partial<Record<ChannelKey, number>> = {};
   for (const r of (data.results ?? []) as any[][]) {
-    const key = channelOf(r[0], r[1], r[2]);
+    // A visit that starts on the Google sign-in return is someone coming back, not a lost source.
+    const raw = channelOf(r[0], r[1], r[2]);
+    const key = raw === "unknown_signin" ? "direct" : raw;
     out[key] = (out[key] ?? 0) + (+r[3] || 0);
   }
   return out;
@@ -91,21 +96,32 @@ function tint(v: number, max: number) {
   return "bg-violet-50 text-violet-900 font-semibold";
 }
 
+// First day on which every signup could carry a source: sources were saved from 19 Sep, and the Google
+// sign-in return stopped wiping them on 29 Sep. A per-source rate is only fair from here on.
+const RATE_FROM = "2026-09-29";
+
 export function ChannelSources({ start, end, group = 1, className = "" }: { start: string; end: string; group?: number; className?: string }) {
   const [data, setData] = useState<SourcesData | null>(null);
   const [error, setError] = useState("");
   const [visitors, setVisitors] = useState<Partial<Record<ChannelKey, number>> | null>(null);
   const [visitorsFailed, setVisitorsFailed] = useState(false);
+  const [rateVisitors, setRateVisitors] = useState<Partial<Record<ChannelKey, number>> | null>(null);
+  const rateStart = start > RATE_FROM ? start : RATE_FROM;
 
   useEffect(() => {
     let cancelled = false;
-    setData(null); setError(""); setVisitors(null); setVisitorsFailed(false);
+    setData(null); setError(""); setVisitors(null); setVisitorsFailed(false); setRateVisitors(null);
     loadSources(start, end)
       .then((d) => { if (!cancelled) setData(d); })
       .catch((e) => { if (!cancelled) setError(e?.message || "Could not load sources"); });
     loadVisitors(start, end)
-      .then((v) => { if (!cancelled) setVisitors(v); })
+      .then((v) => { if (!cancelled) { setVisitors(v); if (rateStart === start) setRateVisitors(v); } })
       .catch(() => { if (!cancelled) setVisitorsFailed(true); });
+    if (rateStart !== start && rateStart <= end) {
+      loadVisitors(rateStart, end)
+        .then((v) => { if (!cancelled) setRateVisitors(v); })
+        .catch(() => {});
+    }
     return () => { cancelled = true; };
   }, [start, end]);
 
@@ -134,8 +150,19 @@ export function ChannelSources({ start, end, group = 1, className = "" }: { star
     { visitors: 0, signups: 0, resumes: 0, leads: 0, paid: 0, inr: 0, usd: 0 },
   );
   const visitorCell = (n: number) => (visitorsFailed ? "n/a" : visitors === null ? "…" : fmt(n));
+  // Per-source rate over the days from RATE_FROM on, so signups and visits cover the same days.
+  const rateSignups = (k: ChannelKey) => data.daily.reduce((n, d) => n + (d.day >= rateStart ? d[k] ?? 0 : 0), 0);
+  const rateCell = (k: ChannelKey) => {
+    if (k === "unknown_signin" || k === "not_captured") return "";
+    const v = rateVisitors?.[k] ?? 0;
+    return v > 0 ? pct(rateSignups(k), v) : "";
+  };
+  const rateTotal = () => {
+    const v = CHANNELS.reduce((n, c) => n + (rateVisitors?.[c.key] ?? 0), 0);
+    return v > 0 ? pct(CHANNELS.reduce((n, c) => n + rateSignups(c.key), 0), v) : "";
+  };
   const withShare = (n: number, of: number) => (
-    <>{fmt(n)}{n > 0 && of > 0 && <span className="ml-1 text-xs font-normal text-neutral-400">{pct(n, of)}</span>}</>
+    <>{fmt(n)}{n > 0 && of > 0 && <>{" "}<span className="text-xs font-normal text-neutral-400">({pct(n, of)})</span></>}</>
   );
 
   // Same buckets as the daily grid above: chronological chunks of `group` days.
@@ -176,7 +203,7 @@ export function ChannelSources({ start, end, group = 1, className = "" }: { star
                 <th className="text-left px-4 py-3 font-semibold text-neutral-700 border-b border-neutral-200 min-w-[220px]">Source</th>
                 <th className={th}>Visitors</th>
                 <th className={th}>Signups</th>
-                <th className={th}>Visitor to signup</th>
+                <th className={th}>{rateStart === start ? "Visitor to signup" : `Visitor to signup, since ${niceDay(rateStart)}`}</th>
                 <th className={th}>Uploaded resume</th>
                 <th className={th}>Got leads</th>
                 <th className={th}>Paid</th>
@@ -188,7 +215,7 @@ export function ChannelSources({ start, end, group = 1, className = "" }: { star
                     <td className="px-4 py-2.5 font-medium text-neutral-900 border-b border-neutral-100 whitespace-nowrap">{r.label}</td>
                     <td className={`${td} text-neutral-600`}>{visitorCell(r.visitors)}</td>
                     <td className={`${td} font-bold text-neutral-900`}>{fmt(r.signups)}</td>
-                    <td className={`${td} text-neutral-600`}>{visitors && r.visitors > 0 ? pct(r.signups, r.visitors) : ""}</td>
+                    <td className={`${td} text-neutral-600`}>{rateCell(r.key)}</td>
                     <td className={`${td} font-semibold`}>{withShare(r.resumes, r.signups)}</td>
                     <td className={`${td} font-semibold`}>{withShare(r.leads, r.signups)}</td>
                     <td className={`${td} font-bold ${r.paid > 0 ? "bg-emerald-100 text-emerald-900" : "text-neutral-300"}`}>{withShare(r.paid, r.signups)}</td>
@@ -199,7 +226,7 @@ export function ChannelSources({ start, end, group = 1, className = "" }: { star
                   <td className="px-4 py-2.5 font-bold text-neutral-900 border-t-2 border-neutral-900">All sources</td>
                   <td className={`${td} border-t-2 border-t-neutral-900 font-bold`}>{visitorCell(total.visitors)}</td>
                   <td className={`${td} border-t-2 border-t-neutral-900 font-bold`}>{fmt(total.signups)}</td>
-                  <td className={`${td} border-t-2 border-t-neutral-900 font-bold`}>{visitors && total.visitors > 0 ? pct(total.signups, total.visitors) : ""}</td>
+                  <td className={`${td} border-t-2 border-t-neutral-900 font-bold`}>{rateTotal()}</td>
                   <td className={`${td} border-t-2 border-t-neutral-900 font-bold`}>{withShare(total.resumes, total.signups)}</td>
                   <td className={`${td} border-t-2 border-t-neutral-900 font-bold`}>{withShare(total.leads, total.signups)}</td>
                   <td className={`${td} border-t-2 border-t-neutral-900 font-bold`}>{withShare(total.paid, total.signups)}</td>
@@ -211,8 +238,9 @@ export function ChannelSources({ start, end, group = 1, className = "" }: { star
         )}
         <p className="px-5 py-3 text-xs text-neutral-400 border-t border-neutral-200">
           Source is the first touch saved at signup. Resume, leads, paid and revenue count what those same people have done since, real money only.
-          Visitors are browsers whose first page view in this period came from that source (studojo.com only), so a signup can belong to a visit from before the period.
-          "Unknown (lost at Google sign-in)" is signups before 29 Sep whose source was overwritten by the sign-in redirect. "Not captured" is signups from before sources were recorded (19 Sep).
+          Visitors are people whose first page view in this period came from that source (studojo.com only), so a signup can belong to a visit from before the period.
+          Visitor to signup compares signups and visitors over the same days, and only from 29 Sep, the first day every signup could carry a source.
+          "Unknown (lost at Google sign-in)" is signups before 29 Sep whose source was overwritten by the sign-in redirect. "Not captured" is signups with no source saved at signup, nearly all from before sources were recorded (19 Sep).
         </p>
       </div>
 

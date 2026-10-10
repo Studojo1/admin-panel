@@ -55,11 +55,15 @@ export async function loader({ request }: Route.LoaderArgs) {
              coalesce(sum(pay.usd), 0) AS usd
       FROM "user" u
       LEFT JOIN user_attribution a ON a.user_id = u.id
+        -- Only a record written at signup is the first touch. A row written at a later
+        -- login (old users get one the first time they sign in) is a return visit.
+        -- u.created_at is UTC without a time zone; a.created_at carries one.
+        AND a.created_at <= (u.created_at AT TIME ZONE 'UTC') + INTERVAL '1 hour'
       LEFT JOIN LATERAL (
         -- Real money only: a credit-covered or 100% coupon order is not revenue.
         SELECT count(*) AS n,
-               coalesce(sum(p.amount_cents) FILTER (WHERE upper(p.currency) = 'INR'), 0) / 100.0 AS inr,
-               coalesce(sum(p.amount_cents) FILTER (WHERE upper(p.currency) = 'USD'), 0) / 100.0 AS usd
+               coalesce(sum(p.amount_cents - coalesce(p.refunded_cents, 0)) FILTER (WHERE upper(p.currency) = 'INR'), 0) / 100.0 AS inr,
+               coalesce(sum(p.amount_cents - coalesce(p.refunded_cents, 0)) FILTER (WHERE upper(p.currency) = 'USD'), 0) / 100.0 AS usd
         FROM payment_orders p
         WHERE p.user_id = u.id AND p.status IN ('paid', 'completed') AND p.amount_cents > 0
       ) pay ON TRUE
