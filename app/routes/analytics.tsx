@@ -253,19 +253,21 @@ export default function Analytics() {
     try {
       const token = await getToken();
       const [statsRes, signupsRes, dailyEventsRes, , topRes] = await Promise.all([
-        // Visitors, payments, campaigns from events
+        // Visitors, campaigns from events
         safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT uniq(person_id) as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef}`,
+          query: `SELECT uniq(person_id) as visitors, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef}`,
         }),
-        // Total new signups + daily breakdown — via server-side proxy (avoids CORS)
+        // Signups and payments, total and per day, from Postgres. Payments are
+        // not counted from the payment_confirmed event: it also fires for
+        // credit-covered orders and more than once per sale.
         fetch(`/api/analytics?start=${startDate}&end=${endDate}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} })
           .then((r) => r.ok ? r.json() : { count: 0, daily: [] })
           .catch(() => ({ count: 0, daily: [] })),
-        // Daily visitors/payments/campaigns
+        // Daily visitors/campaigns
         safeQuery({
           kind: "HogQLQuery",
-          query: `SELECT toDate(timestamp) as day, uniqIf(person_id, event = '$pageview') as visitors, countIf(event = 'payment_confirmed') as payments, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef} GROUP BY day ORDER BY day ASC`,
+          query: `SELECT toDate(timestamp) as day, uniqIf(person_id, event = '$pageview') as visitors, countIf(event = 'campaign_started') as campaigns FROM events WHERE ${ef} GROUP BY day ORDER BY day ASC`,
         }),
         // (signups daily comes bundled in the signups_count response above)
         Promise.resolve(null),
@@ -276,26 +278,31 @@ export default function Analytics() {
         }),
       ]);
 
-      const row = statsRes?.results?.[0] ?? [0, 0, 0];
+      const row = statsRes?.results?.[0] ?? [0, 0];
       const signupCount = (signupsRes as any)?.count ?? 0;
-      setStats({ visitors: row[0] ?? 0, signups: signupCount, payments: row[1] ?? 0, campaigns: row[2] ?? 0 });
+      const paymentCount = (signupsRes as any)?.payments ?? 0;
+      setStats({ visitors: row[0] ?? 0, signups: signupCount, payments: paymentCount, campaigns: row[1] ?? 0 });
 
-      // Merge daily events + daily signups by date
-      const eventsMap: Record<string, { visitors: number; payments: number; campaigns: number }> = {};
+      // Merge daily events + daily signups and payments by date
+      const eventsMap: Record<string, { visitors: number; campaigns: number }> = {};
       for (const r of (dailyEventsRes?.results ?? [])) {
         const day = String(r[0]).split("T")[0];
-        eventsMap[day] = { visitors: r[1] ?? 0, payments: r[2] ?? 0, campaigns: r[3] ?? 0 };
+        eventsMap[day] = { visitors: r[1] ?? 0, campaigns: r[2] ?? 0 };
       }
+      // A day with a payment but no signup still arrives here, with signups 0.
       const signupsMap: Record<string, number> = {};
+      const paymentsMap: Record<string, number> = {};
       for (const r of ((signupsRes as any)?.daily ?? [])) {
-        signupsMap[String(r.day).split("T")[0]] = r.signups ?? 0;
+        const day = String(r.day).split("T")[0];
+        signupsMap[day] = r.signups ?? 0;
+        paymentsMap[day] = r.payments ?? 0;
       }
       const allDays = Array.from(new Set([...Object.keys(eventsMap), ...Object.keys(signupsMap)])).sort();
       setDaily(allDays.map((day) => ({
         day,
         visitors: eventsMap[day]?.visitors ?? 0,
         signups: signupsMap[day] ?? 0,
-        payments: eventsMap[day]?.payments ?? 0,
+        payments: paymentsMap[day] ?? 0,
         campaigns: eventsMap[day]?.campaigns ?? 0,
       })));
 
