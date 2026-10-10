@@ -189,3 +189,71 @@ export function normalizeTags(
   if (source === "email" && medium === "none") medium = "lifecycle";
   return { source, medium, tagged: true, known: isSource(source) && isMedium(medium) };
 }
+
+// ── Dashboard channels ─────────────────────────────────────────────────────
+// The handful of buckets the daily dashboard reports in. Campaign and content
+// detail stays on the UTM Links page; this answers "where did they come from".
+
+export const CHANNELS = [
+  { key: "meta_paid", label: "Meta ads (paid)" },
+  { key: "meta_organic", label: "Instagram / Facebook (free)" },
+  { key: "search", label: "Google and other search" },
+  { key: "google_paid", label: "Google ads (paid)" },
+  { key: "linkedin", label: "LinkedIn" },
+  { key: "direct", label: "Direct" },
+  { key: "email", label: "Email" },
+  { key: "whatsapp", label: "WhatsApp" },
+  { key: "ai_assistant", label: "AI assistants (ChatGPT etc.)" },
+  { key: "other", label: "Other" },
+  { key: "unknown_signin", label: "Unknown (lost at Google sign-in)" },
+  { key: "not_captured", label: "Not captured" },
+] as const;
+
+export type ChannelKey = (typeof CHANNELS)[number]["key"];
+
+/** Host from a referrer that may be a full URL, an android-app:// URI or a bare host. */
+function refHost(referrer: string | null | undefined): string {
+  const r = (referrer || "").trim().toLowerCase();
+  if (!r || r === "$direct") return "";
+  try {
+    return new URL(r).hostname;
+  } catch {
+    return /^[a-z0-9.-]+$/.test(r) ? r : "";
+  }
+}
+
+/**
+ * The dashboard channel for one visit or signup. Tags win over the referrer;
+ * an untagged visit is placed by where it came from.
+ */
+export function channelOf(
+  rawSource: string | null | undefined,
+  rawMedium: string | null | undefined,
+  referrer?: string | null,
+): ChannelKey {
+  const host = refHost(referrer);
+  const tagged = Boolean((rawSource || "").trim());
+  if (!tagged) {
+    // Until 29 Sep 2026 the Google sign-in round trip overwrote the referrer,
+    // so the real source of these signups is gone. Counting them as Direct
+    // would hide that.
+    if (host.startsWith("accounts.google.")) return "unknown_signin";
+    // Mail apps arrive untagged, and the search rule would otherwise claim
+    // anything under google.* (the Gmail app is com.google.android.gm).
+    if (/(^|\.)mail\.|\.android\.gm$|outlook\.|protonmail/.test(host)) return "email";
+    if (/(^|\.)threads\.(com|net)$/.test(host)) return "meta_organic";
+    // LinkedIn's link shortener carries no "linkedin" in its name.
+    if (host === "lnkd.in") return "linkedin";
+  }
+  const n = normalizeTags(rawSource, rawMedium, host ? `https://${host}` : null);
+  if (n.source === "meta") return n.medium === "paid" ? "meta_paid" : "meta_organic";
+  if (n.source === "instagram") return "meta_organic";
+  if (n.source === "google") return n.medium === "paid" ? "google_paid" : "search";
+  if (n.source === "search") return "search";
+  if (n.source === "linkedin") return "linkedin";
+  if (n.source === "direct") return "direct";
+  if (n.source === "email") return "email";
+  if (n.source === "whatsapp") return "whatsapp";
+  if (n.source === "ai_assistant") return "ai_assistant";
+  return "other";
+}
