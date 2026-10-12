@@ -15,9 +15,11 @@ export function addSecurityHeaders(response: Response): Response {
     headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   }
   // Basic CSP - can be customized per application
+  // Fonts are self-hosted (see app/fonts.css); the Fontshare hosts remain allowed only as a
+  // woff2 src fallback, so include cdn.fontshare.com (where the actual font files live) too.
   headers.set(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://api.fontshare.com; style-src 'self' 'unsafe-inline' https://api.fontshare.com; font-src 'self' https://api.fontshare.com; img-src 'self' data: https:"
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://api.fontshare.com; style-src 'self' 'unsafe-inline' https://api.fontshare.com https://cdn.fontshare.com; font-src 'self' https://api.fontshare.com https://cdn.fontshare.com; img-src 'self' data: https:"
   );
 
   return new Response(response.body, {

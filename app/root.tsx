@@ -11,14 +11,15 @@ import { ModalProvider } from "~/components/common/modal-context";
 
 import type { Route } from "./+types/root";
 import "./app.css";
+// Self-hosted Satoshi + Clash Display (@font-face -> /public/fonts/*.woff2, with the Fontshare
+// CDN kept only as a src fallback). Replaces the render-blocking external Fontshare stylesheet so
+// a Fontshare outage / CSP / network block can never blank the whole UI to serif again.
+import "./fonts.css";
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", href: "/favicon.png", type: "image/png" },
-  { rel: "preconnect", href: "https://api.fontshare.com" },
-  {
-    rel: "stylesheet",
-    href: "https://api.fontshare.com/v2/css?f[]=clash-display@400,500,600,700&f[]=satoshi@400,500,700,900&display=swap",
-  },
+  // Warm the fallback host (the .woff2 CDN) in case a self-hosted file ever misses.
+  { rel: "preconnect", href: "https://cdn.fontshare.com", crossOrigin: "anonymous" },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
