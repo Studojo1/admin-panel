@@ -174,7 +174,7 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <div className="mb-2 text-sm font-semibold text-neutral-800">Emails sent per day (US Eastern)</div>
           <div className="h-60">
             <Bar
@@ -189,7 +189,7 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
             />
           </div>
         </div>
-        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <div className="mb-2 text-sm font-semibold text-neutral-800">Schools replying per day (first human reply)</div>
           <div className="h-60">
             <Bar
@@ -207,11 +207,11 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <div className="mb-3 text-sm font-semibold text-neutral-800">Funnel (schools)</div>
           <Funnel rows={d.funnel} />
         </div>
-        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm overflow-x-auto">
+        <div className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm overflow-x-auto">
           <div className="mb-3 text-sm font-semibold text-neutral-800">By sender inbox</div>
           <table className="w-full text-sm">
             <thead>
@@ -320,11 +320,11 @@ function Pipeline({ rows, threads }: { rows: PipelineRow[]; threads: Record<stri
                     onClick={() => setOpen(isOpen ? null : r.school)}
                     className={`cursor-pointer border-t border-neutral-100 align-top hover:bg-violet-50/50 ${isOpen ? "bg-violet-50/60" : ""}`}
                   >
-                    <td className="px-3 py-2 font-medium text-neutral-900 whitespace-nowrap">
+                    <td className="px-3 py-2 font-medium text-neutral-900 min-w-[160px]">
                       <span className="mr-1 inline-block w-3 text-neutral-400">{isOpen ? "▾" : "▸"}</span>{r.school}
                     </td>
                     <td className="px-3 py-2"><Badge label={r.stage} /></td>
-                    <td className="px-3 py-2 text-neutral-700 min-w-[180px]">{r.contact}</td>
+                    <td className="px-3 py-2 min-w-[220px]"><Contact value={r.contact} /></td>
                     <td className="px-3 py-2">{r.inbox}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-neutral-600">{fmtIST(r.last_in)}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-neutral-600">{fmtIST(r.last_out)}</td>
@@ -345,6 +345,17 @@ function Pipeline({ rows, threads }: { rows: PipelineRow[]; threads: Record<stri
         </table>
       </div>
     </Section>
+  );
+}
+
+function Contact({ value }: { value: string }) {
+  const m = value.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  if (!m) return <span className="text-neutral-700">{value}</span>;
+  return (
+    <>
+      <div className="text-neutral-800">{m[1] || m[2]}</div>
+      {m[1] && <div className="text-[11px] text-neutral-500 [overflow-wrap:anywhere]">{m[2]}</div>}
+    </>
   );
 }
 
@@ -407,7 +418,7 @@ function OutreachTable({ rows }: { rows: OutreachRow[] }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search school, name, email, subject"
-            className="w-64 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm focus:border-violet-400 focus:outline-none"
+            className="w-full sm:w-64 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm focus:border-violet-400 focus:outline-none"
           />
           <select value={inbox} onChange={(e) => setInbox(e.target.value)} className="rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm">
             <option value="all">All inboxes</option>
