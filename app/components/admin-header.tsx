@@ -26,6 +26,7 @@ const NAV_LINKS = [
   { to: "/utm-builder", label: "UTM Links" },
   { to: "/coupons", label: "Coupons" },
   { to: "/b2b-gtm", label: "B2B GTM" },
+  { to: "/gtm", label: "GTM Dashboards" },
   { to: "/career-coach", label: "Career Coach" },
   { to: "/settings", label: "Settings" },
 ] as const;

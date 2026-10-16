@@ -60,5 +60,8 @@ export default [
   route("b2b-gtm/team/:who", "routes/b2b-gtm.team.$who.tsx"),
   route("b2b-gtm/:id", "routes/b2b-gtm.$id.tsx"),
   route("api/b2b-gtm", "routes/api.b2b-gtm.tsx"),
+  route("gtm", "routes/gtm.tsx"),
+  route("gtm/:slug", "routes/gtm.$slug.tsx"),
+  route("api/gtm-dashboards", "routes/api.gtm-dashboards.tsx"),
 ] satisfies RouteConfig;
 
