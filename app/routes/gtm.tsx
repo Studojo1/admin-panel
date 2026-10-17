@@ -74,7 +74,7 @@ export default function GtmDashboards() {
               {c.kpis && (
                 <div className="mt-4 grid grid-cols-3 gap-2 text-center">
                   <Mini label="Emails" value={c.kpis.total_sends} />
-                  <Mini label="Interested" value={c.kpis.schools_interested} />
+                  <Mini label="Positive" value={c.kpis.positive ?? c.kpis.schools_interested} />
                   <Mini label="Meetings" value={c.kpis.meetings_booked} />
                 </div>
               )}
