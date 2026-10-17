@@ -17,7 +17,7 @@ export function meta({}: Route.MetaArgs) {
 
 // Shape written by the campaign tooling (build_dashboard.py). Read-only here.
 type Kpis = Record<string, number>;
-type Msg = { at: string; direction: "in" | "out"; from: string; to: string; cc: string; subject: string; body: string; attachments: number };
+type Msg = { at: string; direction: "in" | "out"; from: string; to: string; cc: string; subject: string; body: string; attachments: number; auto?: boolean };
 type Meeting = { school: string; person: string; title: string; when_utc: string | null; local_tz: string; status: string; owner: string; notes: string; when_ist?: string; when_local?: string };
 type PipelineRow = { school: string; stage: string; next: string; contact: string; inbox: string; last_in: string | null; last_out: string | null; messages: number; people_emailed: number };
 type OutreachRow = { school: string; name: string; email: string; inbox: string; first_sent: string; subject: string; followups: number; status: string };
@@ -25,8 +25,12 @@ type Inbound = { at: string; school: string; from: string; inbox: string; catego
 type Dashboard = {
   slug: string; title: string; subtitle: string; period: { start: string; end: string }; generated_at: string;
   kpis: Kpis;
-  daily: { date: string; new: number; followups: number; replies: number; interested: number }[];
-  inboxes: { inbox: string; email: string; new: number; followups: number; schools: number; replied: number; interested: number; meetings: number }[];
+  // Headline cards and rates are computed by the campaign tooling, so a campaign can change its
+  // definitions (e.g. what counts as positive, which denominator) without a code change here.
+  cards?: { label: string; value: number | string; sub?: string }[];
+  rates?: { label: string; value: string; detail?: string }[];
+  daily: { date: string; new: number; followups: number; replies: number; interested: number; positive?: number }[];
+  inboxes: { inbox: string; email: string; new: number; followups: number; schools: number; replied: number; interested: number; positive?: number; meetings: number }[];
   funnel: { stage: string; count: number }[];
   meetings: Meeting[];
   pipeline: PipelineRow[];
@@ -164,6 +168,11 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
         </button>
       </div>
 
+      {d.cards ? (
+        <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+          {d.cards.map((c) => <Kpi key={c.label} label={c.label} value={c.value} sub={c.sub} />)}
+        </div>
+      ) : (
       <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <Kpi label="Emails sent" value={k.total_sends} sub={`${k.new_emails} new · ${k.followups} follow-ups`} />
         <Kpi label="Schools emailed" value={k.schools_contacted} sub={`${k.people_contacted} people`} />
@@ -172,6 +181,19 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
         <Kpi label="Meetings booked" value={k.meetings_booked} sub={`${k.meetings_held} held · ${k.meetings_pending} more agreed`} />
         <Kpi label="Bounces" value={k.bounces} sub={`${k.auto_reply_only} auto-reply only · ${k.schools_declined} declined`} />
       </div>
+      )}
+
+      {d.rates && d.rates.length > 0 && (
+        <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+          {d.rates.map((r) => (
+            <div key={r.label} className="rounded-xl border border-violet-100 bg-violet-50/50 px-4 py-3">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-violet-700">{r.label}</div>
+              <div className="mt-0.5 text-xl font-bold text-neutral-900">{r.value}</div>
+              {r.detail && <div className="text-xs text-neutral-500">{r.detail}</div>}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <div className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
@@ -190,14 +212,14 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
           </div>
         </div>
         <div className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-2 text-sm font-semibold text-neutral-800">Schools replying per day (first human reply)</div>
+          <div className="mb-2 text-sm font-semibold text-neutral-800">Replies per day (first human reply per school)</div>
           <div className="h-60">
             <Bar
               data={{
                 labels: d.daily.map((x) => niceDay(x.date)),
                 datasets: [
                   { label: "Replied", data: d.daily.map((x) => x.replies), backgroundColor: "#fbbf24" },
-                  { label: "Interested", data: d.daily.map((x) => x.interested), backgroundColor: "#10b981" },
+                  { label: "Positive", data: d.daily.map((x) => x.positive ?? x.interested), backgroundColor: "#10b981" },
                 ],
               }}
               options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom" } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
@@ -208,16 +230,16 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <div className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm font-semibold text-neutral-800">Funnel (schools)</div>
+          <div className="mb-3 text-sm font-semibold text-neutral-800">Funnel</div>
           <Funnel rows={d.funnel} />
         </div>
         <div className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm overflow-x-auto">
-          <div className="mb-3 text-sm font-semibold text-neutral-800">By sender inbox</div>
+          <div className="mb-3 text-sm font-semibold text-neutral-800">By sender inbox <span className="font-normal text-neutral-400">(rates over people emailed)</span></div>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-neutral-500">
                 <th className="py-1 pr-3">Inbox</th><th className="py-1 pr-3 text-right">New</th><th className="py-1 pr-3 text-right">Follow-ups</th>
-                <th className="py-1 pr-3 text-right">Schools</th><th className="py-1 pr-3 text-right">Replied</th><th className="py-1 pr-3 text-right">Interested</th><th className="py-1 text-right">Meetings</th>
+                <th className="py-1 pr-3 text-right">Schools</th><th className="py-1 pr-3 text-right">Replied</th><th className="py-1 pr-3 text-right">Positive</th><th className="py-1 text-right">Meetings</th>
               </tr>
             </thead>
             <tbody>
@@ -227,8 +249,8 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
                   <td className="py-2 pr-3 text-right">{r.new}</td>
                   <td className="py-2 pr-3 text-right">{r.followups}</td>
                   <td className="py-2 pr-3 text-right">{r.schools}</td>
-                  <td className="py-2 pr-3 text-right">{r.replied} <span className="text-[11px] text-neutral-400">{pct(r.replied, r.schools)}</span></td>
-                  <td className="py-2 pr-3 text-right">{r.interested} <span className="text-[11px] text-neutral-400">{pct(r.interested, r.schools)}</span></td>
+                  <td className="py-2 pr-3 text-right">{r.replied} <span className="text-[11px] text-neutral-400">{pct(r.replied, r.new)}</span></td>
+                  <td className="py-2 pr-3 text-right">{r.positive ?? r.interested} <span className="text-[11px] text-neutral-400">{pct(r.positive ?? r.interested, r.new)}</span></td>
                   <td className="py-2 text-right">{r.meetings}</td>
                 </tr>
               ))}
@@ -370,7 +392,7 @@ function Thread({ msgs }: { msgs: Msg[] }) {
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <div className="text-xs">
                 <span className={`mr-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${out ? "bg-violet-100 text-violet-700" : "bg-emerald-100 text-emerald-700"}`}>
-                  {out ? "Us" : "Them"}
+                  {out ? "Us" : m.auto ? "Auto-reply" : "Them"}
                 </span>
                 <span className="font-medium text-neutral-800">{m.from}</span>
               </div>
