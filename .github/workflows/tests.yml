@@ -18,6 +18,9 @@ jobs:
       # Every app/routes/api.*.tsx loader/action must require an admin login
       # (audit AS-N01: /api/posthog and /api/settings shipped without one).
       - run: node scripts/check-api-auth.mjs
+      # Every route file is listed in app/routes.ts: /api/journeys shipped unlisted and
+      # answered 404 for four months while its page quietly drew without it.
+      - run: node scripts/check-routes-registered.mjs
       - run: node --test scripts/check-api-auth.test.mjs
       # The rules behind the "Needs attention" card on /daily: when lead
       # discovery counts as failing, and why a paying customer got no email.

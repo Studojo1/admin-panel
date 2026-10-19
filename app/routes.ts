@@ -12,6 +12,7 @@ export default [
   route("api/health-watch", "routes/api.health-watch.tsx"),
   route("api/overview", "routes/api.overview.tsx"),
   route("api/paid-emails", "routes/api.paid-emails.tsx"),
+  route("api/journeys", "routes/api.journeys.tsx"),
   route("assignments", "routes/assignments.tsx"),
   route("dissertations", "routes/dissertations.tsx"),
   route("outreach-orders", "routes/outreach-orders.tsx"),
