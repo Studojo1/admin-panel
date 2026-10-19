@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { getToken } from "~/lib/api";
 import { AdminHeader } from "~/components";
 import { posthogFetch } from "~/lib/posthog-client";
@@ -28,6 +28,7 @@ const STEPS = [
   { key: "quiz_started", label: "Started quiz" },
   { key: "quiz_done", label: "Completed quiz" },
   { key: "leads", label: "Saw leads" },
+  { key: "pricing", label: "Saw pricing" },
   { key: "pay_click", label: "Tapped pay" },
   { key: "checkout", label: "Reached checkout" },
   { key: "paid", label: "Paid" },
@@ -44,22 +45,31 @@ const PRODUCTS = [
 
 // Only people PostHog has identified with an email = signed-up users. Anonymous
 // (no email) visitors are intentionally excluded — we don't track them here.
+// Activity is what the person did on the site. Server events carry no website host
+// (the campaign worker's email_sent and followup_sent, reminder nudges), so a customer
+// whose campaign is sending stays in PostHog without visiting. Those events still count
+// toward the steps; the page lists only people with at least one site event.
+const SITE = "isNotNull(properties.$host) AND properties.$host != ''";
+const LIST_LIMIT = 2000;
 function listHogql(days: number, env: string) {
   return `
     SELECT person_id,
       any(person.properties.email) AS email,
-      min(timestamp) AS first_seen,
-      max(timestamp) AS last_seen,
-      count() AS events,
+      minIf(timestamp, ${SITE}) AS first_seen,
+      maxIf(timestamp, ${SITE}) AS last_seen,
+      countIf(${SITE}) AS events,
       maxIf(1, event='$pageview' AND properties.$pathname LIKE '/outreach%') AS reached,
       maxIf(1, event='resume_uploaded') AS resume,
       maxIf(1, event='quiz_started') AS quiz_started,
-      maxIf(1, event='quiz_question_answered' AND toInt(properties.question_number) >= 13) AS quiz_done,
+      -- Q12 and Q13 left the quiz in June, so no answer reaches 13: completion is its own event (as on /funnel).
+      maxIf(1, event='profile_quiz_completed') AS quiz_done,
       max(if(event='quiz_question_answered', toInt(properties.question_number), 0)) AS quiz_qmax,
       maxIf(1, event='leads_loaded') AS leads,
+      maxIf(1, event='pricing_viewed' OR (event='$pageview' AND properties.$pathname LIKE '/outreach/enrichment%')) AS pricing,
       maxIf(1, event='pay_now_clicked') AS pay_click,
       maxIf(1, event='checkout_opened') AS checkout,
-      maxIf(1, event='payment_confirmed') AS paid,
+      -- No paid flag from payment_confirmed: it also fires for 100% coupon and credits-only orders,
+      -- and for test payments on studojo.pro. Money comes from /api/paid-emails (payment_orders).
       maxIf(1, event='$pageview' AND (properties.$pathname LIKE '/careers%' OR properties.$pathname LIKE '/jrs%')) AS p_resume,
       maxIf(1, event='$pageview' AND properties.$pathname LIKE '/dojos/internships%') AS p_intern,
       maxIf(1, event='$pageview' AND properties.$pathname LIKE '/cc%') AS p_coach,
@@ -69,20 +79,72 @@ function listHogql(days: number, env: string) {
       any(person.properties.$initial_utm_medium) AS utm_medium,
       any(person.properties.$initial_utm_campaign) AS utm_campaign,
       any(person.properties.$initial_referring_domain) AS ref_domain,
-      any(properties.$device_type) AS device,
-      any(properties.$geoip_country_name) AS country
+      anyIf(properties.$device_type, ${SITE}) AS device,
+      anyIf(properties.$geoip_country_name, ${SITE}) AS country
     FROM events WHERE timestamp >= now() - INTERVAL ${days} DAY ${envWhere(env)}
     GROUP BY person_id
     HAVING email != '' AND email IS NOT NULL
-    ORDER BY last_seen DESC LIMIT 300`;
+    ORDER BY last_seen DESC LIMIT ${LIST_LIMIT}`;
 }
 
+type Payment = { email: string; at: string; currency: string; amount_cents: number; refunded_cents: number; plan_id: string | null; status: string };
 type Row = {
   pid: string; email: string; first: string; last: string; events: number;
   flags: Record<string, number>; products: Record<string, number>; qmax: number;
   device: string; country: string;
   utmSource: string; utmMedium: string; utmCampaign: string; refDomain: string;
+  // Money from payment_orders: every real-money payment of this person, any date.
+  payments: Payment[];
+  // Got the product without paying: a 100% coupon order, or a campaign run on credits.
+  free: boolean;
+  // A team account (admin or ops role, or a studojo.com address): its orders are tests.
+  team: boolean;
+  // Payments did not load, and the order went through: neither paid nor free can be said.
+  moneyUnknown: boolean;
 };
+
+const kept = (p: Payment) => p.amount_cents - p.refunded_cents;
+// "₹1,825", "$20", "₹2,065.50"
+function fmtAmount(cents: number, cur: string): string {
+  const n = (cents / 100).toLocaleString(cur === "INR" ? "en-IN" : "en-US", { minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2 });
+  return cur === "INR" ? `₹${n}` : cur === "USD" ? `$${n}` : `${cur} ${n}`;
+}
+// Money kept across payments, rupees first: "₹1,825 + $20"
+function fmtMoney(payments: Payment[]): string {
+  const byCur = new Map<string, number>();
+  for (const p of payments) if (kept(p) > 0) byCur.set(p.currency, (byCur.get(p.currency) ?? 0) + kept(p));
+  return [...byCur]
+    .sort(([a], [b]) => (a === "INR" ? -1 : b === "INR" ? 1 : a.localeCompare(b)))
+    .map(([cur, cents]) => fmtAmount(cents, cur))
+    .join(" + ");
+}
+// "email_200" -> "200 emails"; anything else as stored.
+function planLabel(id: string | null): string {
+  const m = /^(email|linkedin|both)_(\d+)$/.exec(id ?? "");
+  if (!m) return id ?? "";
+  return `${m[2]} ${m[1] === "email" ? "emails" : m[1] === "linkedin" ? "LinkedIn credits" : "emails + LinkedIn"}`;
+}
+// "30 Sep", or "30 Sep 2025" outside this year. Fixed names: locales disagree on "Sep" and "Sept".
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const fmtDay = (t: string) => {
+  const d = new Date(t);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : ""}`;
+};
+// "₹1,825 for 200 emails on 30 Sep", "…, refunded ₹825"
+const describePayment = (p: Payment) =>
+  `${fmtAmount(p.amount_cents, p.currency)}${p.plan_id ? ` for ${planLabel(p.plan_id)}` : ""} on ${fmtDay(p.at)}` +
+  (p.refunded_cents ? `, refunded ${fmtAmount(p.refunded_cents, p.currency)}` : "");
+
+// Fetch an admin endpoint and keep its status, so a failure is shown instead of
+// silently drawing the page without its data (/api/journeys returned 404 for four months).
+async function getJson(url: string, headers: Record<string, string>) {
+  try {
+    const r = await fetch(url, { credentials: "include", headers });
+    return { ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) };
+  } catch {
+    return { ok: false, status: 0, body: {} as any };
+  }
+}
 const fmtTime = (t: string) => new Date(t).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const ago = (t: string) => {
   const s = (Date.now() - new Date(t).getTime()) / 1000;
@@ -114,42 +176,75 @@ export default function UserJourneys() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<string | null>(null);
+  const [allPayments, setAllPayments] = useState<Payment[]>([]);
+  const [paymentsLoaded, setPaymentsLoaded] = useState(false);
+  const [teamEmails, setTeamEmails] = useState<Set<string>>(new Set());
+  const [automatedOnly, setAutomatedOnly] = useState(0);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  // Only the latest load may draw: a slow 30-day reply must not land under the 7-day header.
+  const loadSeq = useRef(0);
   const [timeline, setTimeline] = useState<Record<string, any[]>>({});
   const [tlLoading, setTlLoading] = useState(false);
 
   const load = useCallback(async (d: number, e: string) => {
-    setLoading(true); setError(""); setOpen(null);
+    const my = ++loadSeq.current;
+    setLoading(true); setError(""); setOpen(null); setWarnings([]);
     try {
       const token = await getToken();
-      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+      const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const [res, paidRes, stageRes] = await Promise.all([
         phQuery(listHogql(d, e)),
-        fetch(`/api/paid-emails`, { credentials: "include", headers: authHeaders }).then((r) => r.json()).catch(() => ({ emails: [] })),
-        fetch(`/api/journeys`, { credentials: "include", headers: authHeaders }).then((r) => r.json()).catch(() => ({ stages: {} })),
+        getJson(`/api/paid-emails`, authHeaders),
+        getJson(`/api/journeys`, authHeaders),
       ]);
-      const paidSet = new Set<string>((paidRes.emails ?? []).map((x: string) => (x || "").toLowerCase()));
+      if (my !== loadSeq.current) return;
+      const warn: string[] = [];
+      if (!paidRes.ok) warn.push(`Payments did not load (HTTP ${paidRes.status || "error"}), so nobody is shown as paid or free.`);
+      if (!stageRes.ok) warn.push(`Order steps did not load (HTTP ${stageRes.status || "error"}), so steps come from website tracking only and some may be missing.`);
+      if ((res.results ?? []).length >= LIST_LIMIT) warn.push(`Only the ${LIST_LIMIT.toLocaleString("en-US")} most recently active people are shown.`);
+      setWarnings(warn);
+      setPaymentsLoaded(paidRes.ok);
+      const payments: Payment[] = paidRes.body.payments ?? [];
+      setAllPayments(payments);
+      const paymentsOf = new Map<string, Payment[]>();
+      for (const p of payments) paymentsOf.set(p.email, [...(paymentsOf.get(p.email) ?? []), p]);
+      const lower = (xs: string[] | undefined) => new Set<string>((xs ?? []).map((x) => (x || "").toLowerCase()));
+      const freeSet = lower(paidRes.body.free);
+      const teamSet = lower(paidRes.body.team);
+      setTeamEmails(teamSet);
       // Authoritative server-side funnel stages (immune to client event loss).
-      const dbStages: Record<string, any> = stageRes.stages ?? {};
+      const dbStages: Record<string, any> = stageRes.body.stages ?? {};
       const cols = res.columns ?? [];
       const idx = (n: string) => cols.indexOf(n);
-      setRows((res.results ?? []).map((r: any[]) => {
+      const built: Row[] = (res.results ?? []).map((r: any[]) => {
         const email = r[idx("email")] || "";
         const lc = email.toLowerCase();
-        const ph = { reached: +r[idx("reached")], resume: +r[idx("resume")], quiz_started: +r[idx("quiz_started")], quiz_done: +r[idx("quiz_done")], leads: +r[idx("leads")], pay_click: +r[idx("pay_click")], checkout: +r[idx("checkout")], paid: +r[idx("paid")] };
-        // DB stage timestamps win over PostHog. payment_page_reached (order
-        // created) authoritatively implies both "tapped pay" and "reached checkout".
+        const ph = { reached: +r[idx("reached")], resume: +r[idx("resume")], quiz_started: +r[idx("quiz_started")], quiz_done: +r[idx("quiz_done")], leads: +r[idx("leads")], pricing: +r[idx("pricing")], pay_click: +r[idx("pay_click")], checkout: +r[idx("checkout")] };
+        // DB stage timestamps win over PostHog. payment_page_reached is stamped when the
+        // pricing page opens, so it means "saw pricing" only. A payment_orders row (created
+        // when they tap pay) is the server's record of tapping pay; whether the payment
+        // window then opened is only in PostHog (checkout_opened).
         const db = dbStages[lc] || {};
         const dbf = (v: any) => (v ? 1 : 0);
+        const pays = paymentsOf.get(lc) ?? [];
+        const paidMoney = pays.some((p) => kept(p) > 0);
+        // An order that went through with no money kept: a 100% coupon, a campaign run on
+        // credits, or a payment refunded in full. payment_made_at alone is never proof of money.
+        const free = paidRes.ok && !paidMoney && (pays.length > 0 || freeSet.has(lc) || !!db.paid || !!db.launched);
+        const moneyUnknown = !paidRes.ok && (!!db.paid || !!db.launched);
         const flags: Record<string, number> = {
           reached: ph.reached,
           resume: dbf(db.resume) || ph.resume,
           quiz_started: dbf(db.quiz_started) || ph.quiz_started,
           quiz_done: dbf(db.quiz_done) || ph.quiz_done,
           leads: dbf(db.leads) || ph.leads,
-          pay_click: dbf(db.payment_page) || ph.pay_click,
-          checkout: dbf(db.payment_page) || ph.checkout,
-          paid: dbf(db.paid) || (lc && paidSet.has(lc) ? 1 : 0) || ph.paid,
+          pricing: dbf(db.payment_page) || ph.pricing,
+          pay_click: dbf(db.checkout) || ph.pay_click,
+          checkout: ph.checkout,
+          paid: paidMoney ? 1 : 0,
         };
+        // Getting the product without paying still means they went through checkout.
+        if (free || moneyUnknown) flags.checkout = 1;
         // Monotonic backfill: the funnel is strictly ordered, so reaching a
         // later step proves every earlier step happened. Fill them in so a
         // genuinely-passed step is never shown as a gap (purple, not grey).
@@ -172,10 +267,34 @@ export default function UserJourneys() {
           utmCampaign: r[idx("utm_campaign")] || "",
           refDomain: r[idx("ref_domain")] || "",
           flags,
+          payments: pays,
+          free,
+          team: teamSet.has(lc),
+          moneyUnknown,
           products: { p_resume: +r[idx("p_resume")], p_intern: +r[idx("p_intern")], p_coach: +r[idx("p_coach")], p_assign: +r[idx("p_assign")], p_human: +r[idx("p_human")] },
         };
-      }));
-    } catch (e: any) { setError(e?.message || "Failed"); } finally { setLoading(false); }
+      });
+      // One row per email: PostHog can hold two persons for one address. The list is newest
+      // first, so the kept row has the latest visit; the other adds its steps and tools.
+      const byEmail = new Map<string, Row>();
+      for (const r of built) {
+        const k = r.email.toLowerCase();
+        const c = byEmail.get(k);
+        if (!c) { byEmail.set(k, r); continue; }
+        for (const st of STEPS) c.flags[st.key] = c.flags[st.key] || r.flags[st.key];
+        for (const pr of PRODUCTS) c.products[pr.key] = c.products[pr.key] || r.products[pr.key];
+        c.events += r.events;
+        c.qmax = Math.max(c.qmax, r.qmax);
+        if (r.first && r.events && (!c.first || !c.events || r.first < c.first)) c.first = r.first;
+      }
+      const people = [...byEmail.values()];
+      setAutomatedOnly(people.filter((r) => r.events === 0).length);
+      setRows(people.filter((r) => r.events > 0));
+    } catch (e: any) {
+      if (my === loadSeq.current) setError(e?.message || "Failed");
+    } finally {
+      if (my === loadSeq.current) setLoading(false);
+    }
   }, []);
   useEffect(() => { load(days, env); }, [days, env, load]);
 
@@ -198,6 +317,24 @@ export default function UserJourneys() {
 
   const furthest = (f: Record<string, number>) => { let i = -1; STEPS.forEach((s, k) => { if (f[s.key]) i = k; }); return i; };
   const filtered = rows.filter((r) => !search || r.email.toLowerCase().includes(search.toLowerCase()) || r.pid.includes(search));
+
+  // Money in the selected window, from every payment on record (not only the people listed:
+  // someone can pay without PostHog knowing their email). A person who paid before the
+  // window is still a customer, but adds nothing to this window's revenue.
+  // Team accounts' orders are tests, so they are left out of the money and the counts.
+  const since = Date.now() - days * 86_400_000;
+  const inWindow = (p: Payment) => kept(p) > 0 && new Date(p.at).getTime() >= since;
+  const windowPayments = allPayments.filter((p) => inWindow(p) && !teamEmails.has(p.email));
+  const listed = new Set(rows.map((r) => r.email.toLowerCase()));
+  const notListed = new Set(windowPayments.filter((p) => !listed.has(p.email)).map((p) => p.email)).size;
+  const customers = rows.filter((r) => !r.team);
+  const paidEarlier = customers.filter((r) => r.flags.paid && !r.payments.some(inWindow)).length;
+  const freeOrders = customers.filter((r) => r.free && r.payments.length === 0).length;
+  const teamRows = rows.length - customers.length;
+  // This admin reads one site's database: admin.studojo.pro the test site's, every other host studojo.com's.
+  const dbSite = typeof window !== "undefined" && window.location.hostname.endsWith("studojo.pro") ? "staging" : "prod";
+  const dbSiteName = dbSite === "staging" ? "studojo.pro" : "studojo.com";
+  const moneyHere = env === "all" || env === dbSite;
 
   const card = "rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]";
   const propSummary = (e: any) => {
@@ -238,24 +375,82 @@ export default function UserJourneys() {
         ) : (
           <div className={`overflow-hidden ${card}`}>
             <div className="px-5 py-3 border-b-2 border-neutral-900 bg-neutral-50 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-['Clash_Display'] text-lg font-bold">{filtered.length} signed-up users</h2>
+              <h2 className="font-['Clash_Display'] text-lg font-bold">{filtered.length} signed-up users active on the site in the last {days} days</h2>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-neutral-500">
                 <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-violet-500" />reached step</span>
                 <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-400 ring-2 ring-red-200" />dropped here</span>
                 <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-neutral-200" />never reached</span>
-                <span className="text-neutral-400">· funnel from server-side DB stages · click a row for the path</span>
+                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />paid</span>
+                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-white ring-2 ring-emerald-400" />got it free</span>
+                <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-300" />refunded</span>
+                <span className="text-neutral-400">· steps from server records, money from payments · click a row for the path</span>
               </div>
             </div>
+            {paymentsLoaded && (moneyHere ? (
+              <div className="px-5 py-2.5 border-b border-neutral-100 flex flex-wrap items-center gap-2 text-xs">
+                <span className={`inline-block rounded-full px-2.5 py-0.5 font-bold ${windowPayments.length ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 text-neutral-600"}`}>
+                  {windowPayments.length
+                    ? `Outreach revenue in the last ${days} days: ${fmtMoney(windowPayments)} from ${windowPayments.length} payment${windowPayments.length === 1 ? "" : "s"}${notListed ? `, ${notListed} by people not listed here` : ""}`
+                    : `No outreach payments in the last ${days} days`}
+                </span>
+                <span className="inline-block rounded-full px-2.5 py-0.5 font-semibold bg-white text-emerald-700 ring-1 ring-emerald-200">{paidEarlier} of these paid before this window</span>
+                <span className="inline-block rounded-full px-2.5 py-0.5 font-semibold bg-neutral-100 text-neutral-600">{freeOrders} got it free (coupon or credits)</span>
+                {teamRows > 0 && <span className="inline-block rounded-full px-2.5 py-0.5 font-semibold bg-neutral-100 text-neutral-500">{teamRows} team account{teamRows === 1 ? "" : "s"}, not counted</span>}
+              </div>
+            ) : (
+              <div className="px-5 py-2.5 border-b border-neutral-100 text-xs text-neutral-600">
+                Revenue shows for {dbSiteName} only, the site whose payments this admin reads. Pick All or {dbSiteName} to see it.
+              </div>
+            ))}
+            {automatedOnly > 0 && (
+              <div className="px-5 py-2 border-b border-neutral-100 text-xs text-neutral-500">
+                {automatedOnly} more signed-up {automatedOnly === 1 ? "person" : "people"} had only automated events in this window (their campaign's emails, reminders) and {automatedOnly === 1 ? "is" : "are"} not listed.
+              </div>
+            )}
+            {warnings.map((w) => <div key={w} className="px-5 py-2 border-b border-amber-200 bg-amber-50 text-xs text-amber-800">{w}</div>)}
             <div className="divide-y divide-neutral-100">
               {filtered.map((r) => {
                 const fi = furthest(r.flags);
                 const paid = r.flags.paid === 1;
+                const refunded = !paid && r.payments.length > 0;
+                const finished = paid || r.free || r.team || r.moneyUnknown; // nothing dropped to show
                 const usedProducts = PRODUCTS.filter((p) => r.products[p.key]);
-                const dropLabel = paid
-                  ? "Converted"
-                  : fi >= 0
-                    ? (fi < STEPS.length - 1 ? `Dropped before: ${STEPS[fi + 1].label}` : "Reached last step")
-                    : usedProducts.length > 0 ? "Other tools only" : "Signed up only";
+                const lastPay = r.payments.filter((p) => kept(p) > 0).slice(-1)[0];
+                // In the window the pill shows that window's money, so the rows add up to the revenue line.
+                const nowPays = r.payments.filter(inWindow);
+                const paidNow = paid && nowPays.length > 0;
+                const dropLabel = r.team
+                  ? "Team account"
+                  : paidNow
+                    ? `Paid ${fmtMoney(nowPays)} · ${fmtDay(nowPays[nowPays.length - 1].at)}`
+                    : paid
+                      ? `Paid earlier · ${fmtMoney(r.payments)} · ${fmtDay(lastPay.at)}`
+                      : refunded
+                        ? "Paid, then refunded"
+                        : r.free
+                          ? "Got it free · no charge"
+                          : r.moneyUnknown
+                            ? "Order went through · payments not loaded"
+                            : fi >= 0
+                              ? (fi < STEPS.length - 1 ? `Dropped before: ${STEPS[fi + 1].label}` : "Reached last step")
+                              : usedProducts.length > 0 ? "Other tools only" : "Signed up only";
+                const pillCls = r.team
+                  ? "bg-neutral-100 text-neutral-500"
+                  : paidNow
+                    ? "bg-emerald-100 text-emerald-800"
+                    : paid
+                      ? "bg-white text-emerald-700 ring-1 ring-emerald-200"
+                      : refunded
+                        ? "bg-amber-50 text-amber-800"
+                        : r.free || r.moneyUnknown || fi < 0
+                          ? "bg-neutral-100 text-neutral-600"
+                          : "bg-red-50 text-red-700";
+                const pillTitle = [
+                  r.team ? "Admin or ops role, or a studojo.com address: its orders are tests, not revenue." : "",
+                  ...r.payments.map(describePayment),
+                  !r.payments.length && r.free ? "The order went through without money: a 100% coupon, or a campaign run on credits." : "",
+                  r.moneyUnknown ? "Payments did not load, so this order cannot be shown as paid or free." : "",
+                ].filter(Boolean).join("\n") || undefined;
                 const src = source(r);
                 return (
                   <div key={r.pid}>
@@ -288,17 +483,28 @@ export default function UserJourneys() {
                           const done = r.flags[s.key];
                           let cls: string, title: string;
                           if (done) { cls = s.key === "paid" ? "bg-emerald-500" : "bg-violet-500"; title = `${s.label} ✓`; }
-                          else if (k === fi + 1 && !paid) { cls = "bg-red-400 ring-2 ring-red-200"; title = `${s.label} — dropped here`; }
-                          else { cls = "bg-neutral-200"; title = `${s.label} — never reached`; }
+                          else if (s.key === "paid" && refunded) { cls = "bg-amber-300"; title = "Paid, then refunded"; }
+                          else if (s.key === "paid" && r.free) { cls = "bg-white ring-2 ring-emerald-400"; title = "Got it without paying (100% coupon or credits)"; }
+                          else if (k === fi + 1 && !finished) { cls = "bg-red-400 ring-2 ring-red-200"; title = `${s.label}: dropped here`; }
+                          else { cls = "bg-neutral-200"; title = `${s.label}: never reached`; }
                           return <span key={s.key} title={title} className={`h-2.5 w-2.5 rounded-full ${cls}`} />;
                         })}
                       </div>
-                      <div className="w-48 text-right">
-                        <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${paid ? "bg-emerald-100 text-emerald-700" : fi < 0 ? "bg-neutral-100 text-neutral-500" : "bg-red-50 text-red-700"}`}>{dropLabel}</span>
+                      <div className="w-60 text-right">
+                        <span title={pillTitle} className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${pillCls}`}>{dropLabel}</span>
                       </div>
                     </button>
                     {open === r.pid && (
                       <div className="bg-neutral-50 px-5 py-4 border-t border-neutral-100">
+                        {(r.payments.length > 0 || r.free || r.team) && (
+                          <div className="mb-3 text-[12px] text-neutral-700">
+                            <span className="font-semibold">Payments: </span>
+                            {r.payments.length
+                              ? r.payments.map(describePayment).join(" · ")
+                              : r.free ? "none. The order went through on a 100% coupon or on credits." : "none."}
+                            {r.team && <span className="text-neutral-500"> Team account: its orders are tests, not revenue.</span>}
+                          </div>
+                        )}
                         {tlLoading && !timeline[r.pid] ? (
                           <div className="flex justify-center py-4"><div className="h-5 w-5 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" /></div>
                         ) : (timeline[r.pid] ?? []).length === 0 ? (
