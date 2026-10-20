@@ -259,6 +259,7 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
         </div>
       </div>
 
+      {d.meetings?.length > 0 && (
       <Section title="Meetings" hint="Times in IST and the prospect's local time.">
         <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white shadow-sm">
           <table className="w-full text-sm">
@@ -284,10 +285,11 @@ function DashboardBody({ d, updatedAt, onReload }: { d: Dashboard; updatedAt: st
           </table>
         </div>
       </Section>
+      )}
 
-      <Pipeline rows={d.pipeline} threads={d.threads} />
-      <OutreachTable rows={d.outreach} />
-      <InboundLog rows={d.inbound} />
+      {d.pipeline?.length > 0 && <Pipeline rows={d.pipeline} threads={d.threads || {}} />}
+      {d.outreach?.length > 0 && <OutreachTable rows={d.outreach} />}
+      {d.inbound?.length > 0 && <InboundLog rows={d.inbound} />}
 
       {d.notes?.length > 0 && (
         <Section title="Notes">
@@ -324,7 +326,7 @@ function Funnel({ rows }: { rows: { stage: string; count: number }[] }) {
 function Pipeline({ rows, threads }: { rows: PipelineRow[]; threads: Record<string, Msg[]> }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
-    <Section title="Replies pipeline" hint="Every school that replied. Click a row to read the full email thread.">
+    <Section title="Replies pipeline" hint={Object.keys(threads).length ? "Every school that replied. Click a row to read the full email thread." : "Every school that replied."}>
       <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white shadow-sm">
         <table className="w-full text-sm">
           <thead className="bg-neutral-50">
@@ -339,11 +341,11 @@ function Pipeline({ rows, threads }: { rows: PipelineRow[]; threads: Record<stri
               return (
                 <Fragment key={r.school}>
                   <tr
-                    onClick={() => setOpen(isOpen ? null : r.school)}
+                    onClick={() => threads[r.school]?.length && setOpen(isOpen ? null : r.school)}
                     className={`cursor-pointer border-t border-neutral-100 align-top hover:bg-violet-50/50 ${isOpen ? "bg-violet-50/60" : ""}`}
                   >
                     <td className="px-3 py-2 font-medium text-neutral-900 min-w-[160px]">
-                      <span className="mr-1 inline-block w-3 text-neutral-400">{isOpen ? "▾" : "▸"}</span>{r.school}
+                      <span className="mr-1 inline-block w-3 text-neutral-400">{threads[r.school]?.length ? (isOpen ? "▾" : "▸") : ""}</span>{r.school}
                     </td>
                     <td className="px-3 py-2"><Badge label={r.stage} /></td>
                     <td className="px-3 py-2 min-w-[220px]"><Contact value={r.contact} /></td>
