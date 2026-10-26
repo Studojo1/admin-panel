@@ -56,6 +56,8 @@ export default [
   route("api/webinar-registrations", "routes/api.webinar-registrations.tsx"),
   route("campus-ambassadors", "routes/campus-ambassadors.tsx"),
   route("api/campus-ambassadors", "routes/api.campus-ambassadors.tsx"),
+  route("ugc-applicants", "routes/ugc-applicants.tsx"),
+  route("api/ugc-applicants", "routes/api.ugc-applicants.tsx"),
   route("b2b-gtm", "routes/b2b-gtm.tsx"),
   route("b2b-gtm/team/:who", "routes/b2b-gtm.team.$who.tsx"),
   route("b2b-gtm/:id", "routes/b2b-gtm.$id.tsx"),
