@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { toast } from "sonner";
 import { AdminHeader } from "~/components";
@@ -11,8 +11,27 @@ export function meta({}: Route.MetaArgs) {
 }
 
 // Applications to the Creator Program (LinkedIn UGC) from studojo.com/creators.
-// The team filters them, reads every answer, sets a status, keeps notes and
-// exports from here. Reads and saves go through /api/ugc-applicants.
+// The team follows the page's funnel and the applicants' share links, filters
+// the applicants, reads every answer, sets a status, keeps notes and exports
+// from here. Reads and saves go through /api/ugc-applicants.
+
+// The share buttons on the form's success screen.
+const CHANNELS = ["linkedin", "whatsapp", "copy"] as const;
+type Channel = (typeof CHANNELS)[number];
+
+interface ClickCounts {
+  linkedin: number;
+  whatsapp: number;
+  copy: number;
+  // Every click, including any from a button other than the three above.
+  total: number;
+}
+
+// One applicant's share link, all time.
+interface ShareStats {
+  clicks: ClickCounts;
+  visitors: number;
+}
 
 interface Applicant {
   id: number;
@@ -24,10 +43,14 @@ interface Applicant {
   year_of_study: string;
   graduation_year: string | null;
   city: string | null;
-  linkedin_url: string;
-  followers: string;
-  post_frequency: string;
-  last_posted: string;
+  // False when they said they have no LinkedIn: every LinkedIn answer is then null.
+  has_linkedin: boolean;
+  linkedin_url: string | null;
+  connections: string | null;
+  // Asked by the first version of the form, instead of connections.
+  followers: string | null;
+  post_frequency: string | null;
+  last_posted: string | null;
   best_post_url: string | null;
   crossed_1k: string | null;
   field: string;
@@ -36,6 +59,7 @@ interface Applicant {
   looking_for: string;
   topics: string[];
   avoid_topics: string | null;
+  // The stories and tone were asked by the first version of the form only.
   story_work: string | null;
   story_setback: string | null;
   story_lesson: string | null;
@@ -48,18 +72,53 @@ interface Applicant {
   consent_at: string;
   status: string;
   team_notes: string | null;
+  // Their own code, carried by their share links as ?ref=.
+  share_code: string | null;
+  // The code of the share link they applied through, if any.
+  came_from_code: string | null;
   source_path: string | null;
   utm_source: string | null;
   utm_medium: string | null;
   utm_campaign: string | null;
   referrer: string | null;
   created_at: string;
+  // Null when the numbers could not be counted.
+  share: ShareStats | null;
 }
 
 interface Counts {
   total: number;
   last_24_hours: number;
   by_status: Record<string, number>;
+}
+
+const RANGES = [
+  { key: "7d", label: "7 days" },
+  { key: "30d", label: "30 days" },
+  { key: "all", label: "All time" },
+] as const;
+type RangeKey = (typeof RANGES)[number]["key"];
+const DEFAULT_RANGE: RangeKey = "30d";
+
+// The funnel and sharing numbers for one range, as api.ugc-applicants.tsx
+// counts them. Visitors are unique browsers.
+interface Analytics {
+  range: RangeKey;
+  funnel: Record<"view" | "start" | "step2" | "step3" | "step4" | "submit" | "applications", number>;
+  no_linkedin: { shown: number; continued: number; created: number; applications: number };
+  sources: {
+    // Traffic not from share links, by utm_source (null: none).
+    rows: { source: string | null; visitors: number; applications: number }[];
+    share_links: { visitors: number; applications: number };
+  };
+  sharing: {
+    channels: { channel: Channel | "other"; clicks: number; sharers: number; visitors: number; applications: number }[];
+    clicks: number;
+    sharers: number;
+    visitors: number;
+    applications: number;
+  };
+  top_sharers: { id: number; full_name: string; share_code: string; clicks: ClickCounts; visitors: number; applications: number }[];
 }
 
 // The review states and the notes limit, as enforced by api.ugc-applicants.tsx.
@@ -101,44 +160,127 @@ const FIELDS = [
   "Other",
 ] as const;
 const CAN_COMMIT = ["Yes, 3 posts a week for 4 weeks", "I can do 1-2 posts a week", "Not right now"] as const;
-const FOLLOWERS = ["Under 100", "100-300", "300-500", "500-1,000", "1,000-5,000", "5,000+"] as const;
+const CONNECTIONS = ["Under 100", "100-300", "300-500", "500-1,000", "1,000+"] as const;
 const LAST_POSTED = ["In the last week", "In the last month", "1-6 months ago", "More than 6 months ago", "Never"] as const;
+const CROSSED_1K = ["Yes", "No"] as const;
+// Answers only the first version of the form offered. Listed in the filters
+// only when someone gave them.
+const OLD_FOLLOWERS = ["Under 100", "100-300", "300-500", "500-1,000", "1,000-5,000", "5,000+"] as const;
+const OLD_CROSSED_1K = ["Not sure"] as const;
 
-type FilterKey = "status" | "field" | "can_commit" | "followers" | "last_posted";
+// Old follower counts sit in the connections filter under values of their own,
+// so "Under 100" followers never matches "Under 100" connections.
+const FOLLOWERS_VALUE = "followers:";
 
-const FILTERS: { key: FilterKey; label: string; all: string; known: readonly string[] }[] = [
-  { key: "status", label: "Status", all: "All statuses", known: STATUSES },
-  { key: "field", label: "Field", all: "All fields", known: FIELDS },
-  { key: "can_commit", label: "Can commit", all: "Any answer", known: CAN_COMMIT },
-  { key: "followers", label: "Followers", all: "Any number", known: FOLLOWERS },
-  { key: "last_posted", label: "Last posted", all: "Any time", known: LAST_POSTED },
+function connectionsValue(r: Applicant): string | null {
+  if (!r.has_linkedin) return null;
+  if (r.connections) return r.connections;
+  return r.followers ? FOLLOWERS_VALUE + r.followers : null;
+}
+
+type FilterKey = "status" | "field" | "can_commit" | "linkedin" | "connections" | "crossed_1k" | "last_posted" | "came_via";
+
+interface FilterDef {
+  key: FilterKey;
+  label: string;
+  all: string;
+  known: readonly string[];
+  legacy?: readonly string[];
+  value: (r: Applicant) => string | null;
+  optionLabel?: (value: string) => string;
+}
+
+const FILTERS: FilterDef[] = [
+  { key: "status", label: "Status", all: "All statuses", known: STATUSES, value: (r) => r.status, optionLabel: (v) => STATUS_LABELS[v] ?? v },
+  { key: "field", label: "Field", all: "All fields", known: FIELDS, value: (r) => r.field },
+  { key: "can_commit", label: "Can commit", all: "Any answer", known: CAN_COMMIT, value: (r) => r.can_commit },
+  {
+    key: "linkedin",
+    label: "LinkedIn",
+    all: "Everyone",
+    known: ["yes", "no"],
+    value: (r) => (r.has_linkedin ? "yes" : "no"),
+    optionLabel: (v) => (v === "no" ? "No LinkedIn" : "Has LinkedIn"),
+  },
+  {
+    key: "connections",
+    label: "Connections",
+    all: "Any number",
+    known: CONNECTIONS,
+    legacy: OLD_FOLLOWERS.map((f) => FOLLOWERS_VALUE + f),
+    value: connectionsValue,
+    optionLabel: (v) => (v.startsWith(FOLLOWERS_VALUE) ? `${v.slice(FOLLOWERS_VALUE.length)} followers (old form)` : v),
+  },
+  { key: "crossed_1k", label: "Post over 1k", all: "Any answer", known: CROSSED_1K, legacy: OLD_CROSSED_1K, value: (r) => r.crossed_1k },
+  { key: "last_posted", label: "Last posted", all: "Any time", known: LAST_POSTED, value: (r) => r.last_posted },
+  {
+    key: "came_via",
+    label: "Share link",
+    all: "Any way in",
+    known: ["yes", "no"],
+    value: (r) => (r.came_from_code ? "yes" : "no"),
+    optionLabel: (v) => (v === "yes" ? "Came via a share link" : "Did not"),
+  },
 ];
 
-const NO_FILTERS: Record<FilterKey, string> = {
-  status: "",
-  field: "",
-  can_commit: "",
-  followers: "",
-  last_posted: "",
-};
+const NO_FILTERS = Object.fromEntries(FILTERS.map((f) => [f.key, ""])) as Record<FilterKey, string>;
 
-// The three story prompts on the form, in the form's order.
+// The three story prompts on the first version of the form, in its order.
 const STORIES: { key: "story_work" | "story_setback" | "story_lesson"; title: string }[] = [
   { key: "story_work", title: "An internship, job or project they've done" },
   { key: "story_setback", title: "A rejection, or a time something didn't go to plan" },
   { key: "story_lesson", title: "Something they learned the hard way" },
 ];
 
-// Every column, stories included, in the order the form asks for them.
-const CSV_COLUMNS: (keyof Applicant)[] = [
-  "id", "created_at", "status",
-  "full_name", "email", "whatsapp", "college", "course", "year_of_study", "graduation_year", "city",
-  "linkedin_url", "followers", "post_frequency", "last_posted", "best_post_url", "crossed_1k",
-  "field", "target_roles", "dream_companies", "looking_for", "topics", "avoid_topics",
-  "story_work", "story_setback", "story_lesson", "tone",
-  "can_commit", "studojo_ok", "why_join", "referral_source", "referred_by", "consent_at",
-  "team_notes", "source_path", "utm_source", "utm_medium", "utm_campaign", "referrer",
+const CHANNEL_LABELS: Record<Channel | "other", string> = {
+  linkedin: "LinkedIn",
+  whatsapp: "WhatsApp",
+  copy: "Copy link",
+  other: "Other or untagged",
+};
+
+// The steps of the public form, top to bottom.
+const FUNNEL_STAGES: { key: keyof Analytics["funnel"]; label: string; note?: string }[] = [
+  { key: "view", label: "Opened the page", note: "/creators or /ugc" },
+  { key: "start", label: "Started the form" },
+  { key: "step2", label: "Reached step 2", note: "Your LinkedIn" },
+  { key: "step3", label: "Reached step 3", note: "Where you're headed" },
+  { key: "step4", label: "Reached step 4", note: "Last bit" },
+  { key: "submit", label: "Submitted" },
+  { key: "applications", label: "Applications saved", note: "Counted from the applications" },
 ];
+
+// The link the success screen's "Copy link" button hands out (frontend
+// app/routes/creators.tsx). Visits and applications through it are credited
+// to the applicant whose code it carries.
+function shareLink(code: string): string {
+  return `https://studojo.com/creators?ref=${encodeURIComponent(code)}&utm_source=copy&utm_medium=share&utm_campaign=creator_program`;
+}
+
+// Who brought whom, from the share codes.
+type CameVia = { sharer: Applicant } | { code: string };
+
+interface ShareLinks {
+  cameVia: (a: Applicant) => CameVia | null;
+  broughtIn: (a: Applicant) => Applicant[];
+}
+
+function shareLinks(rows: Applicant[]): ShareLinks {
+  const byCode = new Map<string, Applicant>();
+  const brought = new Map<string, Applicant[]>();
+  for (const r of rows) {
+    if (r.share_code) byCode.set(r.share_code, r);
+    if (r.came_from_code) brought.set(r.came_from_code, [...(brought.get(r.came_from_code) ?? []), r]);
+  }
+  return {
+    cameVia: (a) => {
+      if (!a.came_from_code) return null;
+      const sharer = byCode.get(a.came_from_code);
+      return sharer && sharer.id !== a.id ? { sharer } : { code: a.came_from_code };
+    },
+    broughtIn: (a) => (a.share_code ? (brought.get(a.share_code) ?? []).filter((r) => r.id !== a.id) : []),
+  };
+}
 
 function toDate(value: string | null): Date | null {
   if (!value) return null;
@@ -158,6 +300,15 @@ function formatClock(value: string | null): string {
 
 function formatDateTime(value: string | null): string {
   return toDate(value) ? `${formatDay(value)}, ${formatClock(value)}` : value || "Not recorded";
+}
+
+const fmt = (n: number) => n.toLocaleString("en-US");
+
+// part as a share of whole: one decimal under 10%, whole numbers above.
+function pct(part: number, whole: number): string {
+  if (!whole) return "n/a";
+  const p = (part / whole) * 100;
+  return `${p > 0 && p < 9.95 ? p.toFixed(1) : Math.round(p)}%`;
 }
 
 // Applicant answers only become links when they are https. The form stores
@@ -186,7 +337,7 @@ function cleanNotes(value: string): string {
 }
 
 // Quoted on every cell, with quotes doubled, so commas and line breaks in the
-// stories stay inside their cell. Spreadsheet apps run a cell that starts with
+// answers stay inside their cell. Spreadsheet apps run a cell that starts with
 // = + - or @ as a formula, and these cells hold whatever applicants typed, so
 // such cells get a leading apostrophe and open as plain text.
 function csvCell(value: unknown): string {
@@ -195,10 +346,44 @@ function csvCell(value: unknown): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-function downloadCsv(rows: Applicant[]) {
+// Every answer in the order the forms ask for them (old form answers
+// included), then the share link numbers and the attribution.
+type CsvColumn = [header: string, value: (r: Applicant, links: ShareLinks) => unknown];
+const answer = (key: keyof Applicant): CsvColumn => [key, (r) => r[key]];
+
+const CSV_COLUMNS: CsvColumn[] = [
+  answer("id"), answer("created_at"), answer("status"),
+  answer("full_name"), answer("email"), answer("whatsapp"), answer("college"), answer("course"),
+  answer("year_of_study"), answer("graduation_year"), answer("city"),
+  ["has_linkedin", (r) => (r.has_linkedin ? "Yes" : "No")],
+  answer("linkedin_url"), answer("connections"), answer("followers"), answer("post_frequency"),
+  answer("last_posted"), answer("best_post_url"), answer("crossed_1k"),
+  answer("field"), answer("target_roles"), answer("dream_companies"), answer("looking_for"),
+  answer("topics"), answer("avoid_topics"),
+  answer("story_work"), answer("story_setback"), answer("story_lesson"), answer("tone"),
+  answer("can_commit"), answer("studojo_ok"), answer("why_join"), answer("referral_source"),
+  answer("referred_by"), answer("consent_at"),
+  answer("came_from_code"),
+  ["came_via_name", (r, links) => {
+    const via = links.cameVia(r);
+    return via && "sharer" in via ? via.sharer.full_name : "";
+  }],
+  answer("share_code"),
+  ["share_link", (r) => (r.share_code ? shareLink(r.share_code) : "")],
+  ["share_clicks_linkedin", (r) => r.share?.clicks.linkedin],
+  ["share_clicks_whatsapp", (r) => r.share?.clicks.whatsapp],
+  ["share_clicks_copy", (r) => r.share?.clicks.copy],
+  ["share_clicks_total", (r) => r.share?.clicks.total],
+  ["visitors_via_their_link", (r) => r.share?.visitors],
+  ["applied_via_their_link", (r, links) => (r.share_code ? links.broughtIn(r).length : "")],
+  answer("team_notes"), answer("source_path"), answer("utm_source"), answer("utm_medium"),
+  answer("utm_campaign"), answer("referrer"),
+];
+
+function downloadCsv(rows: Applicant[], links: ShareLinks) {
   const lines = [
-    CSV_COLUMNS.map(csvCell).join(","),
-    ...rows.map((row) => CSV_COLUMNS.map((key) => csvCell(row[key])).join(",")),
+    CSV_COLUMNS.map(([header]) => csvCell(header)).join(","),
+    ...rows.map((row) => CSV_COLUMNS.map(([, value]) => csvCell(value(row, links))).join(",")),
   ];
   // The byte order mark makes Excel read the file as UTF-8.
   const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
@@ -210,6 +395,18 @@ function downloadCsv(rows: Applicant[]) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function getJson(url: string) {
+  const token = await getToken();
+  if (!token) throw new Error("Not authenticated");
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
+  });
+  if (res.status === 401) throw new Error("this needs an admin or ops login");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 async function postAction(body: Record<string, unknown>) {
@@ -224,6 +421,15 @@ async function postAction(body: Record<string, unknown>) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success("Share link copied");
+  } catch {
+    toast.error("Could not copy. Select the link and copy it instead.");
+  }
 }
 
 function withId(set: Set<number>, id: number, present: boolean): Set<number> {
@@ -248,27 +454,33 @@ export default function UgcApplicants() {
   // nothing typed is lost by collapsing it.
   const [noteDrafts, setNoteDrafts] = useState<Record<number, string>>({});
   const [savingNotes, setSavingNotes] = useState<Set<number>>(new Set());
+  // The funnel and sharing numbers, for the range picked above them.
+  const [range, setRange] = useState<RangeKey>(DEFAULT_RANGE);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  // Only the latest request for the numbers may set them.
+  const analyticsRequest = useRef(0);
+  // An applicant opened from elsewhere on the page, scrolled to once shown.
+  const [scrollTo, setScrollTo] = useState<number | null>(null);
 
   useEffect(() => {
     if (isPending || !isAuthorized) return;
     let cancelled = false;
+    const request = ++analyticsRequest.current;
 
     const load = async () => {
       setLoading(true);
       setLoadError(null);
       try {
-        const token = await getToken();
-        if (!token) throw new Error("Not authenticated");
-        const res = await fetch("/api/ugc-applicants", {
-          headers: { Authorization: `Bearer ${token}` },
-          credentials: "include",
-        });
-        if (res.status === 401) throw new Error("this needs an admin or ops login");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const data = await getJson(`/api/ugc-applicants?range=${DEFAULT_RANGE}`);
         if (cancelled) return;
         setRows(data.applicants || []);
         setCounts(data.counts || null);
+        if (request === analyticsRequest.current) {
+          setAnalytics(data.analytics ?? null);
+          setAnalyticsError(data.analytics ? null : data.analytics_error || "unknown error");
+        }
       } catch (e: any) {
         if (!cancelled) setLoadError(e.message || "Failed to load");
       } finally {
@@ -282,14 +494,21 @@ export default function UgcApplicants() {
     };
   }, [isPending, isAuthorized]);
 
+  const links = useMemo(() => shareLinks(rows), [rows]);
+
   // Each filter's choices, with how many applicants gave that answer.
   const filterOptions = useMemo(() => {
     const out = {} as Record<FilterKey, { value: string; count: number }[]>;
     for (const f of FILTERS) {
       const tally = new Map<string, number>();
-      for (const r of rows) tally.set(r[f.key], (tally.get(r[f.key]) ?? 0) + 1);
-      const extra = [...tally.keys()].filter((v) => !f.known.includes(v)).sort();
-      out[f.key] = [...f.known, ...extra].map((value) => ({ value, count: tally.get(value) ?? 0 }));
+      for (const r of rows) {
+        const v = f.value(r);
+        if (v) tally.set(v, (tally.get(v) ?? 0) + 1);
+      }
+      const legacy = (f.legacy ?? []).filter((v) => tally.has(v) && !f.known.includes(v));
+      const listed = new Set([...f.known, ...legacy]);
+      const extra = [...tally.keys()].filter((v) => !listed.has(v)).sort();
+      out[f.key] = [...f.known, ...legacy, ...extra].map((value) => ({ value, count: tally.get(value) ?? 0 }));
     }
     return out;
   }, [rows]);
@@ -298,12 +517,21 @@ export default function UgcApplicants() {
     const q = search.trim().toLowerCase();
     return rows.filter(
       (r) =>
-        FILTERS.every((f) => !filters[f.key] || r[f.key] === filters[f.key]) &&
+        FILTERS.every((f) => !filters[f.key] || f.value(r) === filters[f.key]) &&
         (!q || [r.full_name, r.email, r.college].some((v) => (v || "").toLowerCase().includes(q)))
     );
   }, [rows, filters, search]);
 
   const filtersActive = search.trim() !== "" || FILTERS.some((f) => filters[f.key] !== "");
+
+  useEffect(() => {
+    if (scrollTo === null) return;
+    const row = document.getElementById(`ugc-applicant-${scrollTo}`);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "start" });
+    row.querySelector<HTMLButtonElement>("button[aria-expanded]")?.focus({ preventScroll: true });
+    setScrollTo(null);
+  }, [scrollTo, filtered]);
 
   function clearFilters() {
     setFilters(NO_FILTERS);
@@ -312,6 +540,41 @@ export default function UgcApplicants() {
 
   function toggle(id: number) {
     setExpanded((prev) => withId(prev, id, !prev.has(id)));
+  }
+
+  // Opens an applicant named elsewhere on the page (a sharer, or someone who
+  // came through a link) and scrolls to them, clearing filters that hide them.
+  function openApplicant(id: number) {
+    if (!rows.some((r) => r.id === id)) return;
+    if (!filtered.some((r) => r.id === id)) clearFilters();
+    setExpanded((prev) => withId(prev, id, true));
+    setScrollTo(id);
+  }
+
+  async function changeRange(next: RangeKey) {
+    if (next === range && analytics) return;
+    const shown = analytics?.range ?? range;
+    setRange(next);
+    const request = ++analyticsRequest.current;
+    setAnalyticsLoading(true);
+    try {
+      const data = await getJson(`/api/ugc-applicants?range=${next}&only=analytics`);
+      if (request !== analyticsRequest.current) return;
+      if (!data.analytics) throw new Error(data.analytics_error || "unknown error");
+      setAnalytics(data.analytics);
+      setAnalyticsError(null);
+    } catch (e: any) {
+      if (request !== analyticsRequest.current) return;
+      if (analytics) {
+        // Keep the numbers on screen and the range they belong to.
+        setRange(shown);
+        toast.error(`Could not load the numbers for that range: ${e.message || "unknown error"}`);
+      } else {
+        setAnalyticsError(e.message || "unknown error");
+      }
+    } finally {
+      if (request === analyticsRequest.current) setAnalyticsLoading(false);
+    }
   }
 
   // A click anywhere on a row opens it, except on its links and controls, or
@@ -371,7 +634,19 @@ export default function UgcApplicants() {
   }
   if (!isAuthorized) return null;
 
-  const columns = ["", "Applied", "Applicant", "Field", "LinkedIn", "Followers", "Posting", "Can commit", "Studojo posts", "Status"];
+  const columns: { label: string; title?: string }[] = [
+    { label: "" },
+    { label: "Applied" },
+    { label: "Applicant" },
+    { label: "Field" },
+    { label: "LinkedIn" },
+    { label: "Connections" },
+    { label: "Posting" },
+    { label: "Post over 1k", title: "Has any of their posts crossed 1,000 impressions?" },
+    { label: "Can commit" },
+    { label: "Studojo posts" },
+    { label: "Status" },
+  ];
 
   return (
     <div className="min-h-screen bg-[#F5F5F0]">
@@ -388,9 +663,9 @@ export default function UgcApplicants() {
           </div>
           <button
             type="button"
-            onClick={() => downloadCsv(filtered)}
+            onClick={() => downloadCsv(filtered, links)}
             disabled={filtered.length === 0}
-            title="Downloads the applicants shown below, with every answer"
+            title="Downloads the applicants shown below, with every answer and their share link numbers"
             className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-1.5 text-sm font-semibold text-gray-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
           >
             Download CSV
@@ -416,9 +691,20 @@ export default function UgcApplicants() {
           </div>
         )}
 
+        {!loading && !loadError && (
+          <FunnelAndSharing
+            analytics={analytics}
+            error={analyticsError}
+            loading={analyticsLoading}
+            range={range}
+            onRangeChange={changeRange}
+            onOpenApplicant={openApplicant}
+          />
+        )}
+
         {!loading && rows.length > 0 && (
           <div className="mb-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
               <div>
                 <label htmlFor="ugc-search" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
                   Search
@@ -449,7 +735,7 @@ export default function UgcApplicants() {
                     <option value="">{f.all}</option>
                     {filterOptions[f.key].map((o) => (
                       <option key={o.value} value={o.value}>
-                        {(f.key === "status" ? STATUS_LABELS[o.value] : undefined) ?? o.value} ({o.count})
+                        {f.optionLabel ? f.optionLabel(o.value) : o.value} ({o.count})
                       </option>
                     ))}
                   </select>
@@ -500,12 +786,13 @@ export default function UgcApplicants() {
             <table className="w-full text-sm">
               <thead className="border-b border-gray-200 bg-gray-50">
                 <tr>
-                  {columns.map((h, i) => (
+                  {columns.map((c, i) => (
                     <th
-                      key={h || i}
+                      key={c.label || i}
+                      title={c.title}
                       className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
                     >
-                      {h}
+                      {c.label}
                     </th>
                   ))}
                 </tr>
@@ -516,11 +803,13 @@ export default function UgcApplicants() {
                   const linkedin = httpsUrl(r.linkedin_url);
                   const savedNotes = r.team_notes ?? "";
                   const draft = noteDrafts[r.id];
+                  const via = links.cameVia(r);
                   return (
                     <Fragment key={r.id}>
                       <tr
+                        id={`ugc-applicant-${r.id}`}
                         onClick={(e) => onRowClick(e, r.id)}
-                        className={`cursor-pointer align-top ${open ? "bg-violet-50/60" : "hover:bg-gray-50"}`}
+                        className={`scroll-mt-8 cursor-pointer align-top ${open ? "bg-violet-50/60" : "hover:bg-gray-50"}`}
                       >
                         <td className="py-3 pl-3 pr-0">
                           <button
@@ -556,29 +845,55 @@ export default function UgcApplicants() {
                           <div className="text-xs text-gray-400">
                             {r.course}, {r.year_of_study}
                           </div>
-                        </td>
-                        <td className="px-3 py-3 text-gray-800">{r.field}</td>
-                        <td className="whitespace-nowrap px-3 py-3">
-                          {linkedin ? (
-                            <a
-                              href={linkedin}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900"
-                            >
-                              Profile
-                            </a>
-                          ) : (
-                            <span className="text-xs text-gray-400" title={r.linkedin_url}>
-                              Not a link
-                            </span>
+                          {via && (
+                            <div className="mt-1 text-xs text-gray-500">
+                              Came via <CameViaName via={via} onOpen={openApplicant} />
+                            </div>
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-gray-800">{r.followers}</td>
-                        <td className="px-3 py-3 text-gray-800">
-                          <div>{r.post_frequency}</div>
-                          <div className="text-xs text-gray-500">Last posted: {r.last_posted}</div>
-                        </td>
+                        <td className="px-3 py-3 text-gray-800">{r.field}</td>
+                        {r.has_linkedin ? (
+                          <>
+                            <td className="whitespace-nowrap px-3 py-3">
+                              {linkedin ? (
+                                <a
+                                  href={linkedin}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900"
+                                >
+                                  Profile
+                                </a>
+                              ) : (
+                                <span className="text-xs text-gray-400" title={r.linkedin_url ?? undefined}>
+                                  {r.linkedin_url ? "Not a link" : "Not answered"}
+                                </span>
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-gray-800">
+                              {r.connections ? (
+                                r.connections
+                              ) : r.followers ? (
+                                <>
+                                  <div>{r.followers}</div>
+                                  <div className="text-xs text-gray-400">followers, old form</div>
+                                </>
+                              ) : (
+                                <span className="text-xs text-gray-400">Not answered</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-gray-800">
+                              <div>{orBlank(r.post_frequency)}</div>
+                              <div className="text-xs text-gray-500">Last posted: {r.last_posted ?? "not answered"}</div>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-gray-800">{orBlank(r.crossed_1k)}</td>
+                          </>
+                        ) : (
+                          <td colSpan={4} className="px-3 py-3">
+                            <NoLinkedinPill />
+                            <span className="ml-2 text-xs text-gray-400">LinkedIn questions skipped</span>
+                          </td>
+                        )}
                         <td className="px-3 py-3 text-gray-800">{r.can_commit}</td>
                         <td className="px-3 py-3 text-gray-800">{r.studojo_ok}</td>
                         <td className="px-3 py-3">
@@ -610,6 +925,9 @@ export default function UgcApplicants() {
                             <div className="sticky left-0 w-[100cqw] px-4 py-5">
                               <ApplicantDetail
                                 applicant={r}
+                                via={via}
+                                broughtIn={links.broughtIn(r)}
+                                onOpenApplicant={openApplicant}
                                 notes={draft ?? savedNotes}
                                 notesDirty={draft !== undefined && cleanNotes(draft) !== savedNotes}
                                 savingNotes={savingNotes.has(r.id)}
@@ -639,6 +957,421 @@ function CountTile({ label, value, note }: { label: string; value: number; note?
       <p className="mt-1 text-3xl font-bold text-gray-900">{value}</p>
       {note && <p className="mt-1 text-xs text-gray-400">{note}</p>}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Funnel and sharing
+// ---------------------------------------------------------------------------
+
+function FunnelAndSharing({
+  analytics,
+  error,
+  loading,
+  range,
+  onRangeChange,
+  onOpenApplicant,
+}: {
+  analytics: Analytics | null;
+  error: string | null;
+  loading: boolean;
+  range: RangeKey;
+  onRangeChange: (range: RangeKey) => void;
+  onOpenApplicant: (id: number) => void;
+}) {
+  return (
+    <section aria-labelledby="ugc-funnel-title" className="mb-8">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 id="ugc-funnel-title" className="text-lg font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
+            Funnel and sharing
+          </h2>
+          <p className="mt-0.5 text-sm text-gray-500">
+            From the public page. People are counted once per browser.
+          </p>
+        </div>
+        <div role="group" aria-label="Range for the funnel and sharing numbers" className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5 shadow-sm">
+          {RANGES.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              aria-pressed={range === r.key}
+              onClick={() => onRangeChange(r.key)}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+                range === r.key ? "bg-violet-600 text-white" : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!analytics ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+          Could not load the funnel and sharing numbers: {error || "unknown error"}{" "}
+          <button
+            type="button"
+            onClick={() => onRangeChange(range)}
+            className="font-medium underline underline-offset-2"
+          >
+            {loading ? "Trying again..." : "Try again"}
+          </button>
+        </div>
+      ) : (
+        // While another range loads, the current numbers stay, dimmed.
+        <div aria-busy={loading} className={`space-y-4 transition-opacity ${loading ? "opacity-50" : ""}`}>
+          <FunnelCard funnel={analytics.funnel} />
+          <div className="grid gap-4 lg:grid-cols-3">
+            <SharingCard sharing={analytics.sharing} className="lg:col-span-2" />
+            <NoLinkedinCard data={analytics.no_linkedin} />
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            <SourcesCard sources={analytics.sources} />
+            <TopSharersCard sharers={analytics.top_sharers} onOpenApplicant={onOpenApplicant} className="lg:col-span-2" />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Card({ title, note, className = "", children }: { title: string; note?: ReactNode; className?: string; children: ReactNode }) {
+  return (
+    <section className={`min-w-0 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm ${className}`}>
+      <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+      {note && <p className="mt-0.5 text-xs text-gray-500">{note}</p>}
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+// A bar from a left baseline: length is value against max, rounded at its end.
+function Bar({ value, max, thin = false }: { value: number; max: number; thin?: boolean }) {
+  const width = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div className={`${thin ? "h-1.5" : "h-4"} rounded-sm bg-gray-100`} aria-hidden="true">
+      <div
+        className={`h-full ${thin ? "rounded-r-[3px]" : "rounded-r-[4px]"} bg-violet-500`}
+        style={{ width: value > 0 ? `max(${width}%, 3px)` : 0 }}
+      />
+    </div>
+  );
+}
+
+function FunnelCard({ funnel }: { funnel: Analytics["funnel"] }) {
+  const max = Math.max(0, ...FUNNEL_STAGES.map((s) => funnel[s.key]));
+  // The step of the form that loses the biggest share of the people who
+  // reached the one before it.
+  let biggestDrop = -1;
+  let lowestKept = 1;
+  FUNNEL_STAGES.forEach((s, i) => {
+    if (i === 0 || s.key === "applications") return;
+    const before = funnel[FUNNEL_STAGES[i - 1].key];
+    if (before > 0 && funnel[s.key] / before < lowestKept) {
+      lowestKept = funnel[s.key] / before;
+      biggestDrop = i;
+    }
+  });
+
+  return (
+    <Card
+      title="Funnel"
+      note={
+        funnel.view > 0
+          ? `${pct(funnel.applications, funnel.view)} of the people who opened the page applied.`
+          : "Nobody has opened the page in this range yet."
+      }
+    >
+      <ol className="space-y-3">
+        {FUNNEL_STAGES.map((s, i) => {
+          const value = funnel[s.key];
+          const before = i > 0 ? funnel[FUNNEL_STAGES[i - 1].key] : null;
+          return (
+            <li
+              key={s.key}
+              title={
+                before === null
+                  ? `${fmt(value)} ${value === 1 ? "person" : "people"}`
+                  : s.key === "applications"
+                    ? `${fmt(value)} ${value === 1 ? "application" : "applications"} saved in this range`
+                    : `${fmt(value)} of ${fmt(before)} (${pct(value, before)}) went on from "${FUNNEL_STAGES[i - 1].label}"`
+              }
+              className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-4 gap-y-1.5 sm:grid-cols-[13rem_minmax(0,1fr)_4rem_8.5rem]"
+            >
+              <div className="min-w-0 text-sm font-medium text-gray-800">
+                {s.label}
+                {i === biggestDrop && (
+                  <span className="ml-2 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-semibold text-amber-800">
+                    Biggest drop
+                  </span>
+                )}
+                {s.note && <span className="block text-xs font-normal text-gray-400">{s.note}</span>}
+              </div>
+              <div className="order-last col-span-3 sm:order-none sm:col-span-1">
+                <Bar value={value} max={max} />
+              </div>
+              <div className="text-right text-sm font-semibold tabular-nums text-gray-900">{fmt(value)}</div>
+              <div className="text-right text-xs tabular-nums text-gray-500">
+                {before === null ? (
+                  "Starting point"
+                ) : s.key === "applications" ? (
+                  // Saved applications are counted from the table, not from page
+                  // events, so they can outnumber tracked submits (blocked storage,
+                  // older applications). A percentage of the step before would mislead.
+                  "All in this range"
+                ) : (
+                  <>
+                    <span className="font-semibold text-gray-800">{pct(value, before)}</span> of the step before
+                  </>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </Card>
+  );
+}
+
+function Figure({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+      <p className="text-2xl font-bold text-gray-900">{fmt(value)}</p>
+      <p className="text-xs text-gray-500">{label}</p>
+    </div>
+  );
+}
+
+function SharingCard({ sharing, className }: { sharing: Analytics["sharing"]; className?: string }) {
+  const channels = sharing.channels.filter(
+    (c) => c.channel !== "other" || c.clicks || c.visitors || c.applications
+  );
+  return (
+    <Card
+      title="Share links"
+      note={'The "Know someone with great stories?" buttons applicants see once they have applied. Each link carries the applicant\'s code.'}
+      className={className}
+    >
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Figure label="Share button clicks" value={sharing.clicks} />
+        <Figure label="Applicants who shared" value={sharing.sharers} />
+        <Figure label="Visitors from share links" value={sharing.visitors} />
+        <Figure label="Applied from a share link" value={sharing.applications} />
+      </div>
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[30rem] text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-[11px] uppercase tracking-wide text-gray-500">
+              <th className="py-2 pr-3 text-left font-semibold">Channel</th>
+              <th className="px-2 py-2 text-right font-semibold" title="Clicks on this share button">Clicks</th>
+              <th className="px-2 py-2 text-right font-semibold" title="Applicants who clicked this button at least once">Sharers</th>
+              <th className="px-2 py-2 text-right font-semibold" title="Unique visitors who opened a link shared this way">Visitors</th>
+              <th className="py-2 pl-2 text-right font-semibold" title="Applications from people who arrived through a link shared this way">Applied</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {channels.map((c) => (
+              <tr key={c.channel}>
+                <td className="py-2 pr-3 font-medium text-gray-800">{CHANNEL_LABELS[c.channel]}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-gray-800">{fmt(c.clicks)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-gray-800">{fmt(c.sharers)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-gray-800">{fmt(c.visitors)}</td>
+                <td className="py-2 pl-2 text-right font-semibold tabular-nums text-gray-900">{fmt(c.applications)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function NoLinkedinCard({ data }: { data: Analytics["no_linkedin"] }) {
+  const ofWarned = (n: number) => (data.shown > 0 ? `${pct(n, data.shown)} of those warned` : null);
+  const lines: { label: string; value: number; note?: string | null }[] = [
+    { label: "Saw the warning", value: data.shown },
+    { label: "Went to create a LinkedIn profile", value: data.created, note: ofWarned(data.created) },
+    { label: "Carried on without LinkedIn", value: data.continued, note: ofWarned(data.continued) },
+    { label: "Applied without LinkedIn", value: data.applications, note: "Counted from the applications" },
+  ];
+  return (
+    <Card title="No LinkedIn" note="The popup saying the chance of being selected drastically decreases without LinkedIn.">
+      <dl className="space-y-3">
+        {lines.map((l) => (
+          <div key={l.label} className="flex items-baseline justify-between gap-3">
+            <dt className="text-sm text-gray-700">
+              {l.label}
+              {l.note && <span className="block text-xs text-gray-400">{l.note}</span>}
+            </dt>
+            <dd className="text-lg font-bold tabular-nums text-gray-900">{fmt(l.value)}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  );
+}
+
+const SOURCES_SHOWN = 8;
+
+function SourcesCard({ sources }: { sources: Analytics["sources"] }) {
+  const all = [
+    ...sources.rows.map((r) => ({
+      key: `utm:${r.source ?? ""}`,
+      label: r.source ?? "No UTM tag",
+      hint: r.source ? `utm_source=${r.source}` : "Direct visits, search, and links without a utm_source",
+      visitors: r.visitors,
+      applications: r.applications,
+    })),
+    ...(sources.share_links.visitors || sources.share_links.applications
+      ? [
+          {
+            key: "share",
+            label: "Applicant share links",
+            hint: "Links applicants shared from the success screen. The Share links card splits them by channel.",
+            ...sources.share_links,
+          },
+        ]
+      : []),
+  ].sort((a, b) => b.visitors - a.visitors || b.applications - a.applications);
+  // Past a handful of sources, the rest fold into one line.
+  const list = all.length > SOURCES_SHOWN ? all.slice(0, SOURCES_SHOWN - 1) : all;
+  const rest = all.slice(list.length);
+  if (rest.length) {
+    list.push({
+      key: "rest",
+      label: `${rest.length} more sources`,
+      hint: rest.map((r) => r.label).join(", "),
+      visitors: rest.reduce((n, r) => n + r.visitors, 0),
+      applications: rest.reduce((n, r) => n + r.applications, 0),
+    });
+  }
+  const max = Math.max(0, ...list.map((r) => r.visitors));
+
+  return (
+    <Card title="Where they came from" note="By utm_source on the link they opened. Share links are counted on their own.">
+      {list.length === 0 ? (
+        <p className="text-sm text-gray-400">No visits or applications in this range yet.</p>
+      ) : (
+        <div>
+          <div className="grid grid-cols-[minmax(0,1fr)_3.75rem_3.5rem_3.5rem] gap-x-2 border-b border-gray-200 pb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+            <span>Source</span>
+            <span className="text-right">Visitors</span>
+            <span className="text-right">Applied</span>
+            <span className="text-right" title="Applied as a share of visitors">Rate</span>
+          </div>
+          <ul className="divide-y divide-gray-100">
+            {list.map((r) => (
+              <li key={r.key} className="grid grid-cols-[minmax(0,1fr)_3.75rem_3.5rem_3.5rem] items-center gap-x-2 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm text-gray-800" title={r.hint}>
+                    {r.label}
+                  </div>
+                  <div className="mt-1">
+                    <Bar value={r.visitors} max={max} thin />
+                  </div>
+                </div>
+                <span className="text-right text-sm tabular-nums text-gray-800">{fmt(r.visitors)}</span>
+                <span className="text-right text-sm font-semibold tabular-nums text-gray-900">{fmt(r.applications)}</span>
+                <span className="text-right text-xs tabular-nums text-gray-500">{pct(r.applications, r.visitors)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function TopSharersCard({
+  sharers,
+  onOpenApplicant,
+  className,
+}: {
+  sharers: Analytics["top_sharers"];
+  onOpenApplicant: (id: number) => void;
+  className?: string;
+}) {
+  return (
+    <Card
+      title="Top sharers"
+      note="Applicants whose links did the most in this range: applications first, then visitors, then clicks. Click a name to open them."
+      className={className}
+    >
+      {sharers.length === 0 ? (
+        <p className="text-sm text-gray-400">Nobody has shared their link in this range yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[34rem] text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 text-[11px] uppercase tracking-wide text-gray-500">
+                <th className="py-2 pr-3 text-left font-semibold">Applicant</th>
+                <th className="px-2 py-2 text-right font-semibold" title="Share on LinkedIn clicks">LinkedIn</th>
+                <th className="px-2 py-2 text-right font-semibold" title="Share on WhatsApp clicks">WhatsApp</th>
+                <th className="px-2 py-2 text-right font-semibold" title="Copy link clicks">Copy link</th>
+                <th className="px-2 py-2 text-right font-semibold" title="Unique visitors who opened their link">Visitors</th>
+                <th className="py-2 pl-2 text-right font-semibold" title="People who applied through their link">Applied</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {sharers.map((s) => (
+                <tr key={s.id}>
+                  <td className="py-2 pr-3">
+                    <button
+                      type="button"
+                      onClick={() => onOpenApplicant(s.id)}
+                      title={`Open applicant #${s.id}`}
+                      className="text-left font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900"
+                    >
+                      {s.full_name}
+                    </button>
+                    <span className="ml-2 font-mono text-xs text-gray-400">{s.share_code}</span>
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-800">{fmt(s.clicks.linkedin)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-800">{fmt(s.clicks.whatsapp)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-800">{fmt(s.clicks.copy)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-800">{fmt(s.visitors)}</td>
+                  <td className="py-2 pl-2 text-right font-semibold tabular-nums text-gray-900">{fmt(s.applications)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One applicant
+// ---------------------------------------------------------------------------
+
+function NoLinkedinPill() {
+  return (
+    <span className="inline-flex items-center whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700">
+      No LinkedIn
+    </span>
+  );
+}
+
+// The sharer whose link brought someone in, as a button that opens them; or
+// the code itself when no applicant has it.
+function CameViaName({ via, onOpen }: { via: CameVia; onOpen: (id: number) => void }) {
+  if ("sharer" in via) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpen(via.sharer.id)}
+        className="font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900"
+      >
+        {via.sharer.full_name}
+      </button>
+    );
+  }
+  return (
+    <span>
+      code <span className="font-mono">{via.code}</span> <span className="text-gray-400">(no applicant has this code)</span>
+    </span>
   );
 }
 
@@ -678,8 +1411,99 @@ function orBlank(value: string | null, blank = "Not answered"): ReactNode {
   return value && value.trim() ? value : <span className="text-gray-400">{blank}</span>;
 }
 
+function SharePanel({
+  applicant: a,
+  broughtIn,
+  onOpenApplicant,
+}: {
+  applicant: Applicant;
+  broughtIn: Applicant[];
+  onOpenApplicant: (id: number) => void;
+}) {
+  if (!a.share_code) {
+    return (
+      <Panel title="Their share link">
+        <p className="text-sm text-gray-400">No share code. They applied before share links were added.</p>
+      </Panel>
+    );
+  }
+  const link = shareLink(a.share_code);
+  const clicks = a.share?.clicks;
+  const otherClicks = clicks ? clicks.total - clicks.linkedin - clicks.whatsapp - clicks.copy : 0;
+  const unavailable = <span className="text-gray-400">Not available right now</span>;
+
+  return (
+    <Panel title="Their share link">
+      <div className="grid gap-5 md:grid-cols-3">
+        <dl className="space-y-3">
+          <Answer label="Share code">
+            <span className="font-mono">{a.share_code}</span>
+          </Answer>
+          <Answer label="Link">
+            <span className="block font-mono text-xs text-gray-700">{link}</span>
+            <button
+              type="button"
+              onClick={() => copyText(link)}
+              aria-label={`Copy ${a.full_name}'s share link`}
+              className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+            >
+              Copy link
+            </button>
+            <span className="mt-1 block text-xs text-gray-400">Opening it counts as a visit through their link.</span>
+          </Answer>
+        </dl>
+        <dl className="space-y-3">
+          <Answer label="Share button clicks, all time">
+            {clicks ? (
+              <span className="mt-1 grid grid-cols-3 gap-2">
+                {CHANNELS.map((c) => (
+                  <span key={c} className="rounded-lg bg-gray-50 px-2 py-1.5">
+                    <span className="block text-lg font-bold tabular-nums text-gray-900">{fmt(clicks[c])}</span>
+                    <span className="block text-[11px] text-gray-500">{CHANNEL_LABELS[c]}</span>
+                  </span>
+                ))}
+              </span>
+            ) : (
+              unavailable
+            )}
+            {otherClicks > 0 && <span className="mt-1 block text-xs text-gray-400">And {fmt(otherClicks)} from other buttons</span>}
+          </Answer>
+          <Answer label="Visitors through their link, all time">
+            {a.share ? <span className="text-lg font-bold tabular-nums text-gray-900">{fmt(a.share.visitors)}</span> : unavailable}
+          </Answer>
+        </dl>
+        <dl>
+          <Answer label={`Applied through their link (${broughtIn.length})`}>
+            {broughtIn.length ? (
+              <ul className="mt-1 space-y-1">
+                {broughtIn.map((b) => (
+                  <li key={b.id}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenApplicant(b.id)}
+                      className="font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900"
+                    >
+                      {b.full_name}
+                    </button>
+                    <span className="ml-2 text-xs text-gray-400">{formatDay(b.created_at)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="text-gray-400">No one yet</span>
+            )}
+          </Answer>
+        </dl>
+      </div>
+    </Panel>
+  );
+}
+
 function ApplicantDetail({
   applicant: a,
+  via,
+  broughtIn,
+  onOpenApplicant,
   notes,
   notesDirty,
   savingNotes,
@@ -687,6 +1511,9 @@ function ApplicantDetail({
   onNotesSave,
 }: {
   applicant: Applicant;
+  via: CameVia | null;
+  broughtIn: Applicant[];
+  onOpenApplicant: (id: number) => void;
   notes: string;
   notesDirty: boolean;
   savingNotes: boolean;
@@ -699,6 +1526,7 @@ function ApplicantDetail({
   const tooLong = notes.length > NOTES_MAX;
   const utmParts = [a.utm_source, a.utm_medium, a.utm_campaign];
   const utm = utmParts.some(Boolean) ? utmParts.map((v) => v || "none").join(" / ") : null;
+  const stories = STORIES.filter((s) => a[s.key]);
 
   return (
     <div className="space-y-4">
@@ -724,18 +1552,28 @@ function ApplicantDetail({
         </Panel>
 
         <Panel title="LinkedIn">
-          <dl className="space-y-3">
-            <Answer label="Profile">
-              {linkedin ? <ExternalLink href={linkedin}>{linkedin}</ExternalLink> : orBlank(a.linkedin_url)}
-            </Answer>
-            <Answer label="A post they're proud of">
-              {bestPost ? <ExternalLink href={bestPost}>Open the post</ExternalLink> : orBlank(a.best_post_url)}
-            </Answer>
-            <Answer label="Followers">{a.followers}</Answer>
-            <Answer label="How often they post">{a.post_frequency}</Answer>
-            <Answer label="Last posted">{a.last_posted}</Answer>
-            <Answer label="A post crossed 1,000 impressions">{orBlank(a.crossed_1k)}</Answer>
-          </dl>
+          {a.has_linkedin ? (
+            <dl className="space-y-3">
+              <Answer label="Profile">
+                {linkedin ? <ExternalLink href={linkedin}>{linkedin}</ExternalLink> : orBlank(a.linkedin_url)}
+              </Answer>
+              <Answer label="A post they're proud of">
+                {bestPost ? <ExternalLink href={bestPost}>Open the post</ExternalLink> : orBlank(a.best_post_url)}
+              </Answer>
+              {(a.connections || !a.followers) && <Answer label="Connections">{orBlank(a.connections)}</Answer>}
+              {a.followers && <Answer label="Followers (old form)">{a.followers}</Answer>}
+              <Answer label="How often they post">{orBlank(a.post_frequency)}</Answer>
+              <Answer label="Last posted">{orBlank(a.last_posted)}</Answer>
+              <Answer label="A post crossed 1,000 impressions">{orBlank(a.crossed_1k)}</Answer>
+            </dl>
+          ) : (
+            <div>
+              <NoLinkedinPill />
+              <p className="mt-2 text-sm text-gray-700">
+                They said they don't have a LinkedIn profile, so the LinkedIn questions were skipped.
+              </p>
+            </div>
+          )}
         </Panel>
 
         <Panel title="Where they're headed">
@@ -767,31 +1605,36 @@ function ApplicantDetail({
             )}
           </Answer>
           <Answer label="Would rather not post about">{orBlank(a.avoid_topics)}</Answer>
-          <Answer label="Tone">{orBlank(a.tone)}</Answer>
+          {a.tone && <Answer label="Tone (old form)">{a.tone}</Answer>}
           <Answer label="Can post 3 times a week for 4 weeks">{a.can_commit}</Answer>
           <Answer label="1 in 3 posts about Studojo">{a.studojo_ok}</Answer>
         </dl>
       </Panel>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        {STORIES.map((s) => (
-          <Panel key={s.key} title={s.title}>
-            {a[s.key] ? (
+      {/* Stories are asked for after shortlisting now; applications from the
+          first version of the form still have them. */}
+      {stories.length > 0 && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          {stories.map((s) => (
+            <Panel key={s.key} title={`${s.title} (old form)`}>
               <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800 [overflow-wrap:anywhere]">{a[s.key]}</p>
-            ) : (
-              <p className="text-sm text-gray-400">Not answered</p>
-            )}
-          </Panel>
-        ))}
-      </div>
+            </Panel>
+          ))}
+        </div>
+      )}
 
       <Panel title="Why they want to join">
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800 [overflow-wrap:anywhere]">{a.why_join}</p>
       </Panel>
 
+      <SharePanel applicant={a} broughtIn={broughtIn} onOpenApplicant={onOpenApplicant} />
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Panel title="How they heard">
           <dl className="space-y-3">
+            <Answer label="Came via a share link">
+              {via ? <CameViaName via={via} onOpen={onOpenApplicant} /> : <span className="text-gray-400">No</span>}
+            </Answer>
             <Answer label="Source">{orBlank(a.referral_source)}</Answer>
             <Answer label="Referred by">{orBlank(a.referred_by)}</Answer>
           </dl>
