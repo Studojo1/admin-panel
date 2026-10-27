@@ -7,10 +7,11 @@ import { getToken } from "~/lib/api";
 import type { Route } from "./+types/ugc-applicants";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: "UGC applicants - Admin Panel" }];
+  return [{ title: "Growth Fellowship - Admin Panel" }];
 }
 
-// Applications to the Creator Program (LinkedIn UGC) from studojo.com/creators.
+// Applications to the Growth Fellowship from studojo.com/fellowship-growth
+// (also served at /creators and /ugc).
 // The team follows the page's funnel and the applicants' share links, filters
 // the applicants, reads every answer, sets a status, keeps notes and exports
 // from here. Reads and saves go through /api/ugc-applicants.
@@ -53,6 +54,10 @@ interface Applicant {
   last_posted: string | null;
   best_post_url: string | null;
   crossed_1k: string | null;
+  // The Growth Fellowship questions; empty or null on earlier applications.
+  fellowship_goals: string[];
+  intern_interest: string | null;
+  network_share: string | null;
   field: string;
   target_roles: string;
   dream_companies: string | null;
@@ -225,6 +230,48 @@ const FILTERS: FilterDef[] = [
 
 const NO_FILTERS = Object.fromEntries(FILTERS.map((f) => [f.key, ""])) as Record<FilterKey, string>;
 
+// Who stands out, for picking fellows quickly. Every signal is a quick filter;
+// the score adds up the ones that say most about reach and commitment.
+type HighlightKey =
+  | "conn500" | "conn1000" | "crossed1k" | "weekly" | "recent" | "bestPost"
+  | "commit" | "intern" | "brought" | "shareOk" | "referred";
+
+const BIG_OLD_FOLLOWERS = ["500-1,000", "1,000-5,000", "5,000+"];
+const has500 = (r: Applicant) =>
+  r.connections === "500-1,000" || r.connections === "1,000+" || BIG_OLD_FOLLOWERS.includes(r.followers ?? "");
+const has1000 = (r: Applicant) => r.connections === "1,000+" || r.followers === "1,000-5,000" || r.followers === "5,000+";
+
+const HIGHLIGHTS: { key: HighlightKey; label: string; points: number; test: (r: Applicant, links: ShareLinks) => boolean }[] = [
+  { key: "conn500", label: "500+ connections", points: 2, test: has500 },
+  { key: "conn1000", label: "1,000+ connections", points: 1, test: has1000 },
+  { key: "crossed1k", label: "A post crossed 1K impressions", points: 3, test: (r) => r.crossed_1k === "Yes" },
+  { key: "weekly", label: "Posts every week", points: 2, test: (r) => r.post_frequency === "Every week or more" },
+  {
+    key: "recent",
+    label: "Posted in the last month",
+    points: 1,
+    test: (r) => r.last_posted === "In the last week" || r.last_posted === "In the last month",
+  },
+  { key: "bestPost", label: "Shared a post they're proud of", points: 1, test: (r) => Boolean(r.best_post_url) },
+  { key: "commit", label: "Can post 3 a week", points: 2, test: (r) => r.can_commit === "Yes, 3 posts a week for 4 weeks" },
+  { key: "intern", label: "Wants the growth internship", points: 1, test: (r) => r.intern_interest === "Yes, I'd love that" },
+  { key: "brought", label: "Brought others in", points: 2, test: (r, links) => links.broughtIn(r).length > 0 },
+  { key: "shareOk", label: "OK to share their profile", points: 0, test: (r) => r.network_share === "Yes, share my profile" },
+  { key: "referred", label: "Came via a referral", points: 0, test: (r) => Boolean(r.came_from_code) },
+];
+
+const MAX_SCORE = HIGHLIGHTS.reduce((s, h) => s + h.points, 0);
+
+/** The stand-out score and the signals behind it ("1,000+" replaces "500+"). */
+function standOut(r: Applicant, links: ShareLinks) {
+  const hits = HIGHLIGHTS.filter((h) => h.test(r, links));
+  const has1k = hits.some((h) => h.key === "conn1000");
+  return {
+    score: hits.reduce((s, h) => s + h.points, 0),
+    reasons: hits.filter((h) => !(h.key === "conn500" && has1k)).map((h) => h.label),
+  };
+}
+
 // The three story prompts on the first version of the form, in its order.
 const STORIES: { key: "story_work" | "story_setback" | "story_lesson"; title: string }[] = [
   { key: "story_work", title: "An internship, job or project they've done" },
@@ -241,10 +288,10 @@ const CHANNEL_LABELS: Record<Channel | "other", string> = {
 
 // The steps of the public form, top to bottom.
 const FUNNEL_STAGES: { key: keyof Analytics["funnel"]; label: string; note?: string }[] = [
-  { key: "view", label: "Opened the page", note: "/creators or /ugc" },
+  { key: "view", label: "Opened the page", note: "/fellowship-growth (or /creators, /ugc)" },
   { key: "start", label: "Started the form" },
-  { key: "step2", label: "Reached step 2", note: "Your LinkedIn" },
-  { key: "step3", label: "Reached step 3", note: "Where you're headed" },
+  { key: "step2", label: "Reached step 2", note: "Your LinkedIn today" },
+  { key: "step3", label: "Reached step 3", note: "What you want from the fellowship" },
   { key: "step4", label: "Reached step 4", note: "Last bit" },
   { key: "submit", label: "Submitted" },
   { key: "applications", label: "Applications saved", note: "Counted from the applications" },
@@ -254,7 +301,7 @@ const FUNNEL_STAGES: { key: keyof Analytics["funnel"]; label: string; note?: str
 // app/routes/creators.tsx). Visits and applications through it are credited
 // to the applicant whose code it carries.
 function shareLink(code: string): string {
-  return `https://studojo.com/creators?ref=${encodeURIComponent(code)}&utm_source=copy&utm_medium=share&utm_campaign=creator_program`;
+  return `https://studojo.com/fellowship-growth?ref=${encodeURIComponent(code)}&utm_source=copy&utm_medium=share&utm_campaign=growth_fellowship`;
 }
 
 // Who brought whom, from the share codes.
@@ -358,6 +405,9 @@ const CSV_COLUMNS: CsvColumn[] = [
   ["has_linkedin", (r) => (r.has_linkedin ? "Yes" : "No")],
   answer("linkedin_url"), answer("connections"), answer("followers"), answer("post_frequency"),
   answer("last_posted"), answer("best_post_url"), answer("crossed_1k"),
+  answer("fellowship_goals"), answer("intern_interest"), answer("network_share"),
+  ["stand_out_score", (r, links) => standOut(r, links).score],
+  ["stand_out_reasons", (r, links) => standOut(r, links).reasons],
   answer("field"), answer("target_roles"), answer("dream_companies"), answer("looking_for"),
   answer("topics"), answer("avoid_topics"),
   answer("story_work"), answer("story_setback"), answer("story_lesson"), answer("tone"),
@@ -390,7 +440,7 @@ function downloadCsv(rows: Applicant[], links: ShareLinks) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `studojo-ugc-applicants-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `studojo-growth-fellowship-applicants-${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -463,6 +513,9 @@ export default function UgcApplicants() {
   const analyticsRequest = useRef(0);
   // An applicant opened from elsewhere on the page, scrolled to once shown.
   const [scrollTo, setScrollTo] = useState<number | null>(null);
+  // Stand-out quick filters (all must match) and the sort order.
+  const [quick, setQuick] = useState<Set<HighlightKey>>(new Set());
+  const [sortBy, setSortBy] = useState<"newest" | "standout">("newest");
 
   useEffect(() => {
     if (isPending || !isAuthorized) return;
@@ -515,14 +568,19 @@ export default function UgcApplicants() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return rows.filter(
+    const picked = HIGHLIGHTS.filter((h) => quick.has(h.key));
+    const list = rows.filter(
       (r) =>
         FILTERS.every((f) => !filters[f.key] || f.value(r) === filters[f.key]) &&
+        picked.every((h) => h.test(r, links)) &&
         (!q || [r.full_name, r.email, r.college].some((v) => (v || "").toLowerCase().includes(q)))
     );
-  }, [rows, filters, search]);
+    if (sortBy !== "standout") return list;
+    const score = new Map(list.map((r) => [r.id, standOut(r, links).score]));
+    return [...list].sort((a, b) => score.get(b.id)! - score.get(a.id)! || (a.created_at < b.created_at ? 1 : -1));
+  }, [rows, filters, search, quick, sortBy, links]);
 
-  const filtersActive = search.trim() !== "" || FILTERS.some((f) => filters[f.key] !== "");
+  const filtersActive = search.trim() !== "" || quick.size > 0 || FILTERS.some((f) => filters[f.key] !== "");
 
   useEffect(() => {
     if (scrollTo === null) return;
@@ -536,6 +594,16 @@ export default function UgcApplicants() {
   function clearFilters() {
     setFilters(NO_FILTERS);
     setSearch("");
+    setQuick(new Set());
+  }
+
+  function toggleQuick(key: HighlightKey) {
+    setQuick((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   function toggle(id: number) {
@@ -638,6 +706,7 @@ export default function UgcApplicants() {
     { label: "" },
     { label: "Applied" },
     { label: "Applicant" },
+    { label: "Score", title: `Stand-out score out of ${MAX_SCORE}, from the reach and commitment signals they show (the tags under their name)` },
     { label: "Field" },
     { label: "LinkedIn" },
     { label: "Connections" },
@@ -655,21 +724,26 @@ export default function UgcApplicants() {
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
-              UGC applicants
+              Growth Fellowship applicants
             </h1>
             <p className="mt-1 text-sm text-gray-500">
-              Applications to the Creator Program from studojo.com/creators. Click a row to read every answer.
+              Applications to the Studojo Growth Fellowship from studojo.com/fellowship-growth. Click a row to read every answer.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => downloadCsv(filtered, links)}
-            disabled={filtered.length === 0}
-            title="Downloads the applicants shown below, with every answer and their share link numbers"
-            className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-1.5 text-sm font-semibold text-gray-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
-          >
-            Download CSV
-          </button>
+          <div className="flex items-center gap-4">
+            <a href="#funnel-and-sharing" className="text-sm font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900">
+              Funnel and sharing
+            </a>
+            <button
+              type="button"
+              onClick={() => downloadCsv(filtered, links)}
+              disabled={filtered.length === 0}
+              title="Downloads the applicants shown below, with every answer and their share link numbers"
+              className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-1.5 text-sm font-semibold text-gray-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
+            >
+              Download CSV
+            </button>
+          </div>
         </div>
 
         {counts && (
@@ -691,15 +765,46 @@ export default function UgcApplicants() {
           </div>
         )}
 
-        {!loading && !loadError && (
-          <FunnelAndSharing
-            analytics={analytics}
-            error={analyticsError}
-            loading={analyticsLoading}
-            range={range}
-            onRangeChange={changeRange}
-            onOpenApplicant={openApplicant}
-          />
+        {!loading && rows.length > 0 && (
+          <section className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" aria-label="Who stands out">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">Who stands out</h2>
+                <p className="text-xs text-gray-500">Click to filter. Pick several to see people who match all of them.</p>
+              </div>
+              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Sort
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as "newest" | "standout")}
+                  className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-gray-900"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="standout">Stand-out score</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {HIGHLIGHTS.map((h) => {
+                const on = quick.has(h.key);
+                const n = rows.filter((r) => h.test(r, links)).length;
+                return (
+                  <button
+                    key={h.key}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggleQuick(h.key)}
+                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                      on ? "border-violet-600 bg-violet-600 text-white" : "border-gray-300 bg-white text-gray-800 hover:border-violet-400"
+                    }`}
+                  >
+                    {h.label}
+                    <span className={`ml-2 tabular-nums ${on ? "text-violet-100" : "text-gray-400"}`}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         )}
 
         {!loading && rows.length > 0 && (
@@ -765,7 +870,7 @@ export default function UgcApplicants() {
           <div className="rounded-2xl border border-gray-200 bg-white p-12 text-center shadow-sm">
             <p className="text-sm font-medium text-gray-700">No applications yet.</p>
             <p className="mt-1 text-sm text-gray-400">
-              Applications from studojo.com/creators will show up here as they come in.
+              Applications from studojo.com/fellowship-growth will show up here as they come in.
             </p>
           </div>
         ) : filtered.length === 0 ? (
@@ -804,6 +909,7 @@ export default function UgcApplicants() {
                   const savedNotes = r.team_notes ?? "";
                   const draft = noteDrafts[r.id];
                   const via = links.cameVia(r);
+                  const so = standOut(r, links);
                   return (
                     <Fragment key={r.id}>
                       <tr
@@ -850,6 +956,20 @@ export default function UgcApplicants() {
                               Came via <CameViaName via={via} onOpen={openApplicant} />
                             </div>
                           )}
+                          {so.reasons.length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                              {so.reasons.slice(0, 3).map((reason) => (
+                                <span key={reason} className="whitespace-nowrap rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800">
+                                  {reason}
+                                </span>
+                              ))}
+                              {so.reasons.length > 3 && <span className="text-[11px] text-gray-400">+{so.reasons.length - 3} more</span>}
+                            </div>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <span className="text-sm font-bold tabular-nums text-gray-900">{so.score}</span>
+                          <span className="text-xs text-gray-400"> / {MAX_SCORE}</span>
                         </td>
                         <td className="px-3 py-3 text-gray-800">{r.field}</td>
                         {r.has_linkedin ? (
@@ -927,6 +1047,7 @@ export default function UgcApplicants() {
                                 applicant={r}
                                 via={via}
                                 broughtIn={links.broughtIn(r)}
+                                standOutReasons={so.reasons}
                                 onOpenApplicant={openApplicant}
                                 notes={draft ?? savedNotes}
                                 notesDirty={draft !== undefined && cleanNotes(draft) !== savedNotes}
@@ -944,6 +1065,17 @@ export default function UgcApplicants() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {!loading && !loadError && (
+          <FunnelAndSharing
+            analytics={analytics}
+            error={analyticsError}
+            loading={analyticsLoading}
+            range={range}
+            onRangeChange={changeRange}
+            onOpenApplicant={openApplicant}
+          />
         )}
       </main>
     </div>
@@ -980,7 +1112,7 @@ function FunnelAndSharing({
   onOpenApplicant: (id: number) => void;
 }) {
   return (
-    <section aria-labelledby="ugc-funnel-title" className="mb-8">
+    <section id="funnel-and-sharing" aria-labelledby="ugc-funnel-title" className="mt-8 scroll-mt-28">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="ugc-funnel-title" className="text-lg font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
@@ -1503,6 +1635,7 @@ function ApplicantDetail({
   applicant: a,
   via,
   broughtIn,
+  standOutReasons,
   onOpenApplicant,
   notes,
   notesDirty,
@@ -1513,6 +1646,7 @@ function ApplicantDetail({
   applicant: Applicant;
   via: CameVia | null;
   broughtIn: Applicant[];
+  standOutReasons: string[];
   onOpenApplicant: (id: number) => void;
   notes: string;
   notesDirty: boolean;
@@ -1585,6 +1719,29 @@ function ApplicantDetail({
           </dl>
         </Panel>
       </div>
+
+      <Panel title="Growth Fellowship">
+        <dl className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Answer label="Why they stand out">
+            {standOutReasons.length ? (
+              <span className="mt-1 flex flex-wrap gap-1">
+                {standOutReasons.map((reason) => (
+                  <span key={reason} className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-800">
+                    {reason}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="text-gray-400">Nothing yet</span>
+            )}
+          </Answer>
+          <Answer label="Wants from the fellowship">
+            {a.fellowship_goals.length ? a.fellowship_goals.join(", ") : <span className="text-gray-400">Not asked (earlier form)</span>}
+          </Answer>
+          <Answer label="Growth internship at Studojo">{orBlank(a.intern_interest, "Not asked (earlier form)")}</Answer>
+          <Answer label="Share profile with people hiring">{orBlank(a.network_share, "Not asked (earlier form)")}</Answer>
+        </dl>
+      </Panel>
 
       <Panel title="What they'd post">
         <dl className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

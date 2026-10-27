@@ -57,6 +57,8 @@ export default [
   route("campus-ambassadors", "routes/campus-ambassadors.tsx"),
   route("api/campus-ambassadors", "routes/api.campus-ambassadors.tsx"),
   route("ugc-applicants", "routes/ugc-applicants.tsx"),
+  // The Growth Fellowship name for the same page.
+  route("fellowship", "routes/ugc-applicants.tsx", { id: "fellowship" }),
   route("api/ugc-applicants", "routes/api.ugc-applicants.tsx"),
   route("b2b-gtm", "routes/b2b-gtm.tsx"),
   route("b2b-gtm/team/:who", "routes/b2b-gtm.team.$who.tsx"),
