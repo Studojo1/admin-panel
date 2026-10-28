@@ -255,7 +255,8 @@ const HIGHLIGHTS: { key: HighlightKey; label: string; points: number; test: (r: 
   { key: "bestPost", label: "Shared a post they're proud of", points: 1, test: (r) => Boolean(r.best_post_url) },
   { key: "commit", label: "Can post 3 a week", points: 2, test: (r) => r.can_commit === "Yes, 3 posts a week for 4 weeks" },
   { key: "intern", label: "Wants the growth internship", points: 1, test: (r) => r.intern_interest === "Yes, I'd love that" },
-  { key: "brought", label: "Brought others in", points: 2, test: (r, links) => links.broughtIn(r).length > 0 },
+  // A filter and a tag, but not scored (owner's call, 28 Oct 2026).
+  { key: "brought", label: "Brought others in", points: 0, test: (r, links) => links.broughtIn(r).length > 0 },
   { key: "shareOk", label: "OK to share their profile", points: 0, test: (r) => r.network_share === "Yes, share my profile" },
   { key: "referred", label: "Came via a referral", points: 0, test: (r) => Boolean(r.came_from_code) },
 ];
