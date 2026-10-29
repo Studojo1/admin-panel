@@ -39,6 +39,8 @@ export interface SendOpts {
   to: string;
   subject: string;
   html: string;
+  /** Plain-text version, sent alongside the HTML when given. */
+  text?: string;
   replyTo?: string;
   /** Sender name in place of "Studojo Support"; the address stays the same. */
   fromName?: string;
@@ -57,6 +59,7 @@ export async function sendDirectGmail(opts: SendOpts): Promise<boolean> {
       to: opts.to,
       subject: opts.subject,
       html: opts.html,
+      text: opts.text,
       replyTo: opts.replyTo,
     });
     return true;

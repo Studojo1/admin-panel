@@ -555,6 +555,9 @@ export default function UgcApplicants() {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [moreFilters, setMoreFilters] = useState(false);
   const [scheduling, setScheduling] = useState<Set<number>>(new Set());
+  // The email pause (29 Oct 2026): while it's on, the meeting form says so
+  // instead of offering to email.
+  const [emailsPaused, setEmailsPaused] = useState(false);
   // The calendar tab shows once the creators admin is live at /fellowship/calendar.
   const [calendarLive, setCalendarLive] = useState(false);
   const [savingStatus, setSavingStatus] = useState<Set<number>>(new Set());
@@ -611,7 +614,12 @@ export default function UgcApplicants() {
       const data = await postAction({ intent: "create-from-application", applicationId: a.id }, "/api/ugc-creators");
       setFellowByApp((m) => ({
         ...m,
-        [a.id]: { id: data.creator.id, link: data.creator.link ?? null, intern_at: null, referred_at: null },
+        [a.id]: {
+          id: data.creator.id,
+          link: data.creator.link ?? null,
+          intern_at: data.creator.intern_at ?? null,
+          referred_at: data.creator.referred_at ?? null,
+        },
       }));
       setRows((rs) => rs.map((r) => (r.id === a.id ? { ...r, status: "selected" } : r)));
       moveCount(a.status, "selected");
@@ -660,6 +668,7 @@ export default function UgcApplicants() {
         setRows(data.applicants || []);
         setCounts(data.counts || null);
         setPipeline(data.pipeline || null);
+        setEmailsPaused(Boolean(data.emailsPaused));
         if (request === analyticsRequest.current) {
           setAnalytics(data.analytics ?? null);
           setAnalyticsError(data.analytics ? null : data.analytics_error || "unknown error");
@@ -897,9 +906,13 @@ export default function UgcApplicants() {
       setRows((rs) => rs.map((r) => (r.id === a.id ? { ...r, ...data.applicant } : r)));
       if (data.counts) setCounts(data.counts);
       if (data.pipeline) setPipeline(data.pipeline);
+      if (typeof data.emailsPaused === "boolean") setEmailsPaused(data.emailsPaused);
       const first = a.full_name.trim().split(/\s+/)[0];
-      if (data.emailed) toast.success(`Meeting set. ${first} has been emailed at ${a.email}.`);
-      else if (m.notify) toast.warning("Meeting saved, but the email didn't go. Send it on WhatsApp instead.");
+      const tell = whatsappHref(a.whatsapp) ? `send ${first} the time on WhatsApp` : `tell ${first} the time yourself`;
+      if (data.alreadyEmailed) toast.success(`Meeting saved. ${first} already has the email with this time.`);
+      else if (data.emailed) toast.success(`Meeting set. ${first} has been emailed at ${a.email}.`);
+      else if (data.emailsPaused) toast.success(`Meeting saved. Emails are paused, so ${tell}.`);
+      else if (m.notify) toast.warning(`Meeting saved, but the email didn't go, so ${tell}.`);
       else toast.success("Meeting saved. No email was sent.");
       return true;
     } catch (e: any) {
@@ -980,6 +993,7 @@ export default function UgcApplicants() {
         onOutcome={(o, on) => setOutcome(a, o, on)}
         scheduling={scheduling.has(a.id)}
         onScheduleMeeting={(m) => scheduleMeeting(a, m)}
+        emailsPaused={emailsPaused}
       />
     );
   };
@@ -2019,12 +2033,16 @@ function MeetingPanel({
   applicant: a,
   editing,
   onEditing,
+  canChange,
+  emailsPaused,
   busy,
   onSave,
 }: {
   applicant: Applicant;
   editing: boolean;
   onEditing: (v: boolean) => void;
+  canChange: boolean;
+  emailsPaused: boolean;
   busy: boolean;
   onSave: (m: { at: string; link: string; note: string; notify: boolean }) => Promise<boolean>;
 }) {
@@ -2054,7 +2072,7 @@ function MeetingPanel({
         <p className="mt-1 text-xs text-[#686377]">
           {a.meeting_emailed_at ? `Emailed to ${a.email} ${appliedAgo(a.meeting_emailed_at)}.` : "Not emailed."}
         </p>
-        {a.status !== "selected" && a.status !== "rejected" && (
+        {canChange && (
         <div className="mt-2 flex flex-wrap gap-2">
           <button type="button" onClick={() => onEditing(true)} className="rounded-lg border border-[#CDC8D9] bg-white px-3 py-1.5 text-sm font-semibold hover:border-[#6C3AE8]">
             Change
@@ -2081,7 +2099,7 @@ function MeetingPanel({
         const iso = new Date(`${form.date}T${form.time}:00+05:30`);
         if (Number.isNaN(iso.getTime())) return setError("That date or time doesn't look right.");
         setError(null);
-        const ok = await onSave({ at: iso.toISOString(), link: form.link.trim(), note: form.note.trim(), notify: form.notify });
+        const ok = await onSave({ at: iso.toISOString(), link: form.link.trim(), note: form.note.trim(), notify: form.notify && !emailsPaused });
         if (ok) onEditing(false);
       }}
     >
@@ -2098,18 +2116,24 @@ function MeetingPanel({
       </div>
       <label className="mt-2 block text-xs font-semibold text-[#4B4659]" htmlFor={`${id}-link`}>
         Meeting link (optional)
-        <input id={`${id}-link`} type="url" inputMode="url" placeholder="https://meet.google.com/..." value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#CDC8D9] bg-white px-2 py-1.5 text-sm font-normal" />
+        <input id={`${id}-link`} type="url" inputMode="url" maxLength={1000} placeholder="https://meet.google.com/..." value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#CDC8D9] bg-white px-2 py-1.5 text-sm font-normal" />
       </label>
       <label className="mt-2 block text-xs font-semibold text-[#4B4659]" htmlFor={`${id}-note`}>
         Note for them (optional)
         <textarea id={`${id}-note`} rows={2} maxLength={500} value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#CDC8D9] bg-white px-2 py-1.5 text-sm font-normal" />
       </label>
-      <label className="mt-2 flex items-start gap-2 text-sm">
-        <input type="checkbox" checked={form.notify} onChange={(e) => setForm((f) => ({ ...f, notify: e.target.checked }))} className="mt-0.5 h-4 w-4 accent-[#6C3AE8]" />
-        <span>
-          Email {first} the time at <span className="font-semibold [overflow-wrap:anywhere]">{a.email}</span>
-        </span>
-      </label>
+      {emailsPaused ? (
+        <p className="mt-2 rounded-lg bg-white px-3 py-2 text-sm text-[#4B4659]">
+          Emails are paused, so {first} won't be emailed. After saving, {whatsappHref(a.whatsapp) ? "send the time on WhatsApp" : "tell them the time yourself"}.
+        </p>
+      ) : (
+        <label className="mt-2 flex items-start gap-2 text-sm">
+          <input type="checkbox" checked={form.notify} onChange={(e) => setForm((f) => ({ ...f, notify: e.target.checked }))} className="mt-0.5 h-4 w-4 accent-[#6C3AE8]" />
+          <span>
+            Email {first} the time at <span className="font-semibold [overflow-wrap:anywhere]">{a.email}</span>
+          </span>
+        </label>
+      )}
       {error && (
         <p role="alert" className="mt-2 text-sm font-semibold text-[#AE2539]">
           {error}
@@ -2117,7 +2141,7 @@ function MeetingPanel({
       )}
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="submit" disabled={busy} className="rounded-lg bg-[#6C3AE8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#5428C8] disabled:opacity-60">
-          {busy ? "Saving..." : form.notify ? "Save and email" : "Save"}
+          {busy ? "Saving..." : form.notify && !emailsPaused ? "Save and email" : "Save"}
         </button>
         <button type="button" onClick={() => onEditing(false)} className="rounded-lg border border-[#CDC8D9] bg-white px-4 py-2 text-sm font-semibold">
           Cancel
@@ -2187,6 +2211,7 @@ function ApplicantProfile({
   onOutcome,
   scheduling,
   onScheduleMeeting,
+  emailsPaused,
 }: {
   applicant: Applicant;
   inSheet: boolean;
@@ -2210,6 +2235,7 @@ function ApplicantProfile({
   onOutcome: (outcome: Outcome, on: boolean) => void;
   scheduling: boolean;
   onScheduleMeeting: (m: { at: string; link: string; note: string; notify: boolean }) => Promise<boolean>;
+  emailsPaused: boolean;
 }) {
   const [editingMeeting, setEditingMeeting] = useState(false);
   const [confirmFellow, setConfirmFellow] = useState(false);
@@ -2219,6 +2245,9 @@ function ApplicantProfile({
     if (inSheet) backRef.current?.focus();
   }, [inSheet]);
   const first = a.full_name.trim().split(/\s+/)[0];
+  // The selection meeting is for people still in review: not a fellow, and not
+  // someone rejected (move them back first).
+  const canMeet = !fellow && a.status !== "selected" && a.status !== "rejected";
   const linkedin = httpsUrl(a.linkedin_url);
   const bestPost = httpsUrl(a.best_post_url);
   const whatsapp = whatsappHref(a.whatsapp);
@@ -2275,7 +2304,7 @@ function ApplicantProfile({
               key={st}
               type="button"
               aria-pressed={on}
-              disabled={savingStatus || (st === "meeting" && a.status === "selected")}
+              disabled={savingStatus || (st === "meeting" && !canMeet)}
               // "Meeting scheduled" means a meeting is set, so it opens the meeting form.
               onClick={() => (st === "meeting" ? !on && setEditingMeeting(true) : onStatus(st))}
               className={`rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors disabled:opacity-60 ${
@@ -2294,7 +2323,7 @@ function ApplicantProfile({
 
       <div className="flex flex-wrap gap-2 px-5 pb-4">
         {/* Once a meeting is set, its box below has the Change button. */}
-        {!editingMeeting && !a.meeting_at && a.status !== "selected" && a.status !== "rejected" && (
+        {!editingMeeting && !a.meeting_at && canMeet && (
           <button
             type="button"
             onClick={() => setEditingMeeting(true)}
@@ -2338,7 +2367,15 @@ function ApplicantProfile({
         </div>
       )}
 
-      <MeetingPanel applicant={a} editing={editingMeeting} onEditing={setEditingMeeting} busy={scheduling} onSave={onScheduleMeeting} />
+      <MeetingPanel
+        applicant={a}
+        editing={editingMeeting && canMeet}
+        onEditing={setEditingMeeting}
+        canChange={canMeet}
+        emailsPaused={emailsPaused}
+        busy={scheduling}
+        onSave={onScheduleMeeting}
+      />
 
       {fellow && (
         <section aria-label="Fellowship" className="mx-5 mb-4 rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3">

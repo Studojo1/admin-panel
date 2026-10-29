@@ -3,6 +3,7 @@ import { adminOnly } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql, type SQL } from "drizzle-orm";
 import { meetingEmail } from "~/lib/fellowship-meeting";
+import { emailsPaused } from "~/lib/email-pause.server";
 import { sendDirectGmail } from "~/lib/gmail-direct.server";
 import { ensureCreatorTables } from "~/lib/ugc-creators.server";
 
@@ -147,8 +148,8 @@ async function statusCounts() {
 
 // Applied to Fellow come from the applications, so each stage matches the
 // list it opens (Fellow is "selected", set by Make fellow). Growth intern and
-// Referred are what fellows went on to, marked on their profile and kept in
-// ugc_creators.
+// Referred are what those fellows went on to, marked on their profile and kept
+// in ugc_creators. Like Fellow, they still count if the fellow later leaves.
 async function pipelineCounts(counts: Awaited<ReturnType<typeof statusCounts>>) {
   const fellow = counts.by_status.selected ?? 0;
   let growthIntern = 0;
@@ -158,7 +159,7 @@ async function pipelineCounts(counts: Awaited<ReturnType<typeof statusCounts>>) 
     const row = (await db.execute(sql`
       SELECT COUNT(*) FILTER (WHERE intern_at IS NOT NULL)::int AS intern,
              COUNT(*) FILTER (WHERE referred_at IS NOT NULL)::int AS referred
-      FROM ugc_creators WHERE status <> 'removed'
+      FROM ugc_creators WHERE application_id IS NOT NULL
     `)).rows[0] as { intern: number; referred: number } | undefined;
     growthIntern = row?.intern ?? 0;
     referred = row?.referred ?? 0;
@@ -175,8 +176,13 @@ async function pipelineCounts(counts: Awaited<ReturnType<typeof statusCounts>>) 
   };
 }
 
-const MEETING_LINK_MAX = 300;
+// Teams links run to a few hundred characters.
+const MEETING_LINK_MAX = 1000;
 const MEETING_NOTE_MAX = 500;
+// Control characters other than new lines and tabs, and direction overrides:
+// Postgres refuses NUL, and the rest can hide or reorder text in the email.
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u202A-\u202E\u2066-\u2069]/g;
+const SAFE_LINK = /^https:\/\/[^\s<>"\u0000-\u001F\u007F\u202A-\u202E\u2066-\u2069]+$/i;
 const DAY_MS = 86400000;
 
 // The driver returns timestamptz as Postgres text ("2026-10-26 13:48:53.62+00").
@@ -580,8 +586,10 @@ export async function action({ request }: Route.ActionArgs) {
 
   // POST { intent: "schedule-meeting", id, at, link?, note?, notify? }: set the
   // selection meeting, move them to "Meeting scheduled", and (unless notify is
-  // false) email them the time. The status is saved even if the email fails;
-  // the reply says whether it went.
+  // false, or emails are paused) email them the time. The meeting is saved even
+  // if the email fails; the reply says whether it went. Each meeting is emailed
+  // at most once: saving the same time, link and note again (a retry, say)
+  // doesn't send it again, and changing any of them clears "emailed".
   if (body.intent === "schedule-meeting") {
     const id = parseId(body.id);
     if (!id) return Response.json({ error: "id is required" }, { status: 400 });
@@ -591,29 +599,78 @@ export async function action({ request }: Route.ActionArgs) {
     if (at.getTime() < now - 5 * 60000) return Response.json({ error: "That time has already passed." }, { status: 400 });
     if (at.getTime() > now + 60 * DAY_MS) return Response.json({ error: "Pick a time in the next 60 days." }, { status: 400 });
     const link = typeof body.link === "string" ? body.link.trim() : "";
-    if (link && (link.length > MEETING_LINK_MAX || !/^https:\/\/[^\s<>"]+$/i.test(link))) {
-      return Response.json({ error: "The meeting link must start with https://" }, { status: 400 });
-    }
-    const note = typeof body.note === "string" ? body.note.replace(/\r\n?/g, "\n").trim() : "";
+    if (link.length > MEETING_LINK_MAX) return Response.json({ error: "Keep the meeting link under 1,000 characters." }, { status: 400 });
+    if (link && !SAFE_LINK.test(link)) return Response.json({ error: "The meeting link must start with https://" }, { status: 400 });
+    const note = typeof body.note === "string" ? body.note.replace(/\r\n?/g, "\n").replace(CONTROL_CHARS, "").trim() : "";
     if (note.length > MEETING_NOTE_MAX) return Response.json({ error: "Keep the note under 500 characters." }, { status: 400 });
 
-    // Only someone still in review moves to "Meeting scheduled": a fellow or a
-    // rejected applicant keeps their status.
+    // The selection meeting is for people still in review. A fellow has been
+    // through it, and a rejected applicant must be moved back first, so that
+    // nobody gets "We'd like to meet you" by mistake.
+    await ensureCreatorTables();
+    const current = (await db.execute(sql`
+      SELECT a.status,
+             EXISTS (SELECT 1 FROM ugc_creators c WHERE c.application_id = a.id AND c.status <> 'removed') AS fellow
+      FROM ugc_applications a WHERE a.id = ${id}
+    `)).rows[0] as { status: string; fellow: boolean } | undefined;
+    if (!current) return Response.json({ error: "Applicant not found" }, { status: 404 });
+    if (current.status === "selected" || current.fellow) {
+      return Response.json({ error: "They're already a fellow, so there's no selection meeting to set." }, { status: 409 });
+    }
+    if (current.status === "rejected") {
+      return Response.json({ error: "They're rejected. Move them back to New or Shortlisted first." }, { status: 409 });
+    }
+
+    const atIso = at.toISOString();
+    const linkValue = link || null;
+    const noteValue = note || null;
     const updated = await db.execute(sql`
       UPDATE ugc_applications
-      SET status = CASE WHEN status IN ('new', 'shortlisted', 'meeting') THEN 'meeting' ELSE status END,
-          meeting_at = ${at.toISOString()}, meeting_link = ${link || null}, meeting_note = ${note || null}
-      WHERE id = ${id}
-      RETURNING id, full_name, email
+      SET status = 'meeting',
+          meeting_emailed_at = CASE
+            WHEN meeting_at IS NOT DISTINCT FROM ${atIso}::timestamptz
+             AND meeting_link IS NOT DISTINCT FROM ${linkValue}::text
+             AND meeting_note IS NOT DISTINCT FROM ${noteValue}::text
+            THEN meeting_emailed_at
+          END,
+          meeting_at = ${atIso}::timestamptz, meeting_link = ${linkValue}, meeting_note = ${noteValue}
+      WHERE id = ${id} AND status IN ('new', 'shortlisted', 'meeting')
+      RETURNING id, full_name, email, meeting_emailed_at
     `);
-    const row = updated.rows[0] as { id: number; full_name: string; email: string } | undefined;
-    if (!row) return Response.json({ error: "Applicant not found" }, { status: 404 });
+    const row = updated.rows[0] as { id: number; full_name: string; email: string | null; meeting_emailed_at: unknown } | undefined;
+    if (!row) return Response.json({ error: "Their status just changed. Reload the page and try again." }, { status: 409 });
 
-    let emailed = false;
-    if (body.notify !== false && row.email) {
-      const message = meetingEmail({ fullName: row.full_name, at, link: link || null, note: note || null });
-      emailed = await sendDirectGmail({ to: row.email, subject: message.subject, html: message.html, fromName: "Studojo Growth Fellowship" });
-      if (emailed) await db.execute(sql`UPDATE ugc_applications SET meeting_emailed_at = NOW() WHERE id = ${id}`);
+    const paused = emailsPaused();
+    // They already have the email for exactly this meeting.
+    const alreadyEmailed = row.meeting_emailed_at != null;
+    let emailed = alreadyEmailed;
+    if (body.notify !== false && !paused && !alreadyEmailed && row.email) {
+      // Mark it sent before sending, so a retry that arrives while this one is
+      // still sending finds it marked and doesn't send a second copy.
+      const claim = (await db.execute(sql`
+        UPDATE ugc_applications SET meeting_emailed_at = NOW()
+        WHERE id = ${id} AND meeting_emailed_at IS NULL
+          AND meeting_at = ${atIso}::timestamptz
+          AND meeting_link IS NOT DISTINCT FROM ${linkValue}::text
+          AND meeting_note IS NOT DISTINCT FROM ${noteValue}::text
+        RETURNING meeting_emailed_at::text AS claimed
+      `)).rows[0] as { claimed: string } | undefined;
+      if (claim) {
+        const message = meetingEmail({ fullName: row.full_name, at, link: linkValue, note: noteValue });
+        emailed = await sendDirectGmail({
+          to: row.email,
+          subject: message.subject,
+          html: message.html,
+          text: message.text,
+          fromName: "Studojo Growth Fellowship",
+        });
+        if (!emailed) {
+          await db.execute(sql`
+            UPDATE ugc_applications SET meeting_emailed_at = NULL
+            WHERE id = ${id} AND meeting_emailed_at = ${claim.claimed}::timestamptz
+          `);
+        }
+      }
     }
     const fresh = (await db.execute(sql`
       SELECT id, status, meeting_at, meeting_link, meeting_note, meeting_emailed_at FROM ugc_applications WHERE id = ${id}
@@ -622,6 +679,8 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({
       ok: true,
       emailed,
+      alreadyEmailed,
+      emailsPaused: paused,
       applicant: { ...fresh, meeting_at: isoTime(fresh.meeting_at), meeting_emailed_at: isoTime(fresh.meeting_emailed_at) },
       counts,
       pipeline: await pipelineCounts(counts),
@@ -711,5 +770,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     share: shareStats ? (shareStats.get(row.id as number) ?? NO_SHARES) : null,
   }));
 
-  return Response.json({ applicants, counts, pipeline: await pipelineCounts(counts), ...analytics });
+  return Response.json({
+    applicants,
+    counts,
+    pipeline: await pipelineCounts(counts),
+    // While the email pause is on, the meeting form says so instead of offering to email.
+    emailsPaused: emailsPaused(),
+    ...analytics,
+  });
 }

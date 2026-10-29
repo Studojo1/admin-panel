@@ -97,15 +97,20 @@ export async function action({ request }: Route.ActionArgs) {
       INSERT INTO ugc_creators (application_id, token, slug, full_name, email, whatsapp, linkedin_url, college, field, created_by)
       VALUES (${applicationId}, ${newCreatorToken()}, ${newCreatorSlug(String(app.full_name ?? ""))}, ${app.full_name}, ${app.email}, ${app.whatsapp}, ${app.linkedin_url}, ${app.college}, ${app.field}, ${admin.email})
       ON CONFLICT (application_id) DO UPDATE SET status = 'active' WHERE ugc_creators.status = 'removed'
-      RETURNING id, token, slug
+      RETURNING id, token, slug, intern_at, referred_at
     `);
     const row = (inserted.rows[0] ??
-      (await db.execute(sql`SELECT id, token, slug FROM ugc_creators WHERE application_id = ${applicationId}`)).rows[0]) as
-      | { id: number; token: string; slug: string | null }
+      (await db.execute(sql`SELECT id, token, slug, intern_at, referred_at FROM ugc_creators WHERE application_id = ${applicationId}`)).rows[0]) as
+      | { id: number; token: string; slug: string | null; intern_at: string | null; referred_at: string | null }
       | undefined;
     if (!row) return Response.json({ error: "Could not create the creator" }, { status: 500 });
     await db.execute(sql`UPDATE ugc_applications SET status = 'selected' WHERE id = ${applicationId} AND status <> 'selected'`);
-    return Response.json({ ok: true, created: inserted.rows.length > 0, creator: { id: row.id, slug: row.slug, link: studentLink(row.slug) } });
+    return Response.json({
+      ok: true,
+      created: inserted.rows.length > 0,
+      // A fellow brought back keeps what they went on to.
+      creator: { id: row.id, slug: row.slug, link: studentLink(row.slug), intern_at: row.intern_at, referred_at: row.referred_at },
+    });
   }
 
   // Add someone who didn't come through the form.
@@ -127,8 +132,14 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (body.intent === "set-status") {
     if (!(STATUSES as readonly string[]).includes(body.status)) return Response.json({ error: "Invalid status" }, { status: 400 });
-    const r = await db.execute(sql`UPDATE ugc_creators SET status = ${body.status} WHERE id = ${id} RETURNING id`);
+    const r = await db.execute(sql`UPDATE ugc_creators SET status = ${body.status} WHERE id = ${id} RETURNING id, application_id`);
     if (!r.rows.length) return Response.json({ error: "Creator not found" }, { status: 404 });
+    // An active or paused fellow who applied is a Fellow on the applicants page
+    // too, so bringing one back puts their application in step.
+    const applicationId = (r.rows[0] as { application_id: number | null }).application_id;
+    if (body.status !== "removed" && applicationId) {
+      await db.execute(sql`UPDATE ugc_applications SET status = 'selected' WHERE id = ${applicationId} AND status <> 'selected'`);
+    }
     return Response.json({ ok: true });
   }
 
