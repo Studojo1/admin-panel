@@ -109,6 +109,25 @@ export async function ensureCreatorTables() {
                || '-' || substr(md5(random()::text || id::text || clock_timestamp()::text), 1, 8)
     WHERE slug IS NULL
   `);
+  // The team's call notes on each fellow ("About them"), which Claude reads
+  // before writing, and when the team last nudged them. Admin only: the
+  // fellows' own pages must never select these.
+  await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS team_notes TEXT`);
+  await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS nudged_at TIMESTAMPTZ`);
+  // Posts a fellow wrote before the fellowship, so Claude never repeats them.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS ugc_creator_earlier_posts (
+      id SERIAL PRIMARY KEY,
+      creator_id INTEGER NOT NULL REFERENCES ugc_creators(id) ON DELETE CASCADE,
+      title TEXT,
+      body TEXT NOT NULL,
+      posted_on DATE,
+      url TEXT,
+      impressions INTEGER,
+      added_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ugc_creator_earlier_posts_creator ON ugc_creator_earlier_posts (creator_id)`);
   // Lessons for every fellow, no names (one row).
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_playbook (
@@ -258,12 +277,17 @@ export interface CreatorStats {
   milestonesReached: string[];
 }
 
+// db.execute (drizzle) hands DATE and TIMESTAMPTZ back as text, but plain pg
+// hands back Date objects; accept both so the numbers never depend on the driver.
+const dayOf = (v: unknown): string => (v instanceof Date ? istDate(v) : String(v).slice(0, 10));
+const msOf = (v: unknown): number => (v instanceof Date ? v.getTime() : v ? new Date(String(v)).getTime() : NaN);
+
 export function creatorStats(posts: PostRow[], now: Date = new Date()): CreatorStats {
   const today = istDate(now);
   const thisWeek = weekOf(today);
   const byWeek = new Map<string, PostRow[]>();
   for (const p of posts) {
-    const w = weekOf(String(p.due_date).slice(0, 10));
+    const w = weekOf(dayOf(p.due_date));
     if (!byWeek.has(w)) byWeek.set(w, []);
     byWeek.get(w)!.push(p);
   }
@@ -283,8 +307,9 @@ export function creatorStats(posts: PostRow[], now: Date = new Date()): CreatorS
   const sevenDaysAgo = now.getTime() - 7 * DAY;
   const activity = posts
     .flatMap((p) => [p.copied_at, p.posted_at, p.metrics_at])
-    .filter((t): t is string => Boolean(t))
-    .sort();
+    .map(msOf)
+    .filter((t) => Number.isFinite(t))
+    .sort((a, b) => a - b);
 
   const next = MILESTONES.find((m) => completedWeeks < m.weeks) ?? null;
   return {
@@ -293,7 +318,7 @@ export function creatorStats(posts: PostRow[], now: Date = new Date()): CreatorS
     run,
     postsPublished: posted.length,
     impressions: posted.reduce((s, p) => s + (p.impressions ?? 0), 0),
-    awaitingNumbers: posted.filter((p) => p.impressions === null && p.posted_at && Date.parse(p.posted_at) < sevenDaysAgo).length,
+    awaitingNumbers: posted.filter((p) => p.impressions === null && p.posted_at && msOf(p.posted_at) < sevenDaysAgo).length,
     atRisk: due.length > 0 && postedThisWeek === 0 && weekday >= 2,
     // Postgres text timestamps ("2026-10-19 13:49:55+05:30") don't parse in
     // every browser; hand the page an ISO string.
