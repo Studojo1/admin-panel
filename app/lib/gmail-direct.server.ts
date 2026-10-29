@@ -8,6 +8,7 @@
 //
 // The transport is created lazily and cached for the lifetime of the process.
 import nodemailer, { type Transporter } from "nodemailer";
+import { emailsPaused } from "./email-pause.server";
 
 let cached: { transporter: Transporter; from: string } | null = null;
 
@@ -42,6 +43,10 @@ export interface SendOpts {
 }
 
 export async function sendDirectGmail(opts: SendOpts): Promise<boolean> {
+  if (emailsPaused()) {
+    console.info("[email-pause] held: ticket reply email (gmail-direct)");
+    return false;
+  }
   const t = getTransporter();
   if (!t) return false;
   try {
