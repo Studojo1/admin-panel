@@ -514,6 +514,47 @@ export default function UgcApplicants() {
   const analyticsRequest = useRef(0);
   // An applicant opened from elsewhere on the page, scrolled to once shown.
   const [scrollTo, setScrollTo] = useState<number | null>(null);
+  // Applicants already taken on as fellows: application id to their page link.
+  const [fellowByApp, setFellowByApp] = useState<Record<number, { id: number; link: string | null }>>({});
+  const [makingFellow, setMakingFellow] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (isPending || !isAuthorized) return;
+    getJson("/api/ugc-creators")
+      .then((d) => {
+        const map: Record<number, { id: number; link: string | null }> = {};
+        for (const c of (d.creators || []) as { id: number; application_id: number | null; link: string | null }[]) {
+          if (c.application_id) map[c.application_id] = { id: c.id, link: c.link };
+        }
+        setFellowByApp(map);
+      })
+      .catch(() => {
+        // Without it, rows just offer "Make fellow", which is safe to press twice.
+      });
+  }, [isPending, isAuthorized]);
+
+  async function makeFellow(a: Applicant) {
+    setMakingFellow((s) => withId(s, a.id, true));
+    try {
+      const token = await getToken();
+      if (!token) throw new Error("Please sign in again.");
+      const res = await fetch("/api/ugc-creators", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ intent: "create-from-application", applicationId: a.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      setFellowByApp((m) => ({ ...m, [a.id]: { id: data.creator.id, link: data.creator.link ?? null } }));
+      setRows((rs) => rs.map((r) => (r.id === a.id ? { ...r, status: "selected" } : r)));
+      toast.success(`${a.full_name} is now a fellow.`);
+    } catch (e: any) {
+      toast.error(e.message || "Could not make them a fellow");
+    } finally {
+      setMakingFellow((s) => withId(s, a.id, false));
+    }
+  }
   // Stand-out quick filters (all must match) and the sort order.
   const [quick, setQuick] = useState<Set<HighlightKey>>(new Set());
   const [sortBy, setSortBy] = useState<"newest" | "standout">("newest");
@@ -1055,6 +1096,9 @@ export default function UgcApplicants() {
                                 savingNotes={savingNotes.has(r.id)}
                                 onNotesChange={(value) => setNoteDrafts((d) => ({ ...d, [r.id]: value }))}
                                 onNotesSave={() => saveNotes(r)}
+                                fellow={fellowByApp[r.id] ?? null}
+                                makingFellow={makingFellow.has(r.id)}
+                                onMakeFellow={() => makeFellow(r)}
                               />
                             </div>
                           </td>
@@ -1643,6 +1687,9 @@ function ApplicantDetail({
   savingNotes,
   onNotesChange,
   onNotesSave,
+  fellow,
+  makingFellow,
+  onMakeFellow,
 }: {
   applicant: Applicant;
   via: CameVia | null;
@@ -1654,6 +1701,9 @@ function ApplicantDetail({
   savingNotes: boolean;
   onNotesChange: (value: string) => void;
   onNotesSave: () => void;
+  fellow: { id: number; link: string | null } | null;
+  makingFellow: boolean;
+  onMakeFellow: () => void;
 }) {
   const linkedin = httpsUrl(a.linkedin_url);
   const bestPost = httpsUrl(a.best_post_url);
@@ -1811,6 +1861,46 @@ function ApplicantDetail({
           </dl>
         </Panel>
       </div>
+
+      <Panel title="Fellowship">
+        {fellow ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-gray-700 [overflow-wrap:anywhere]">
+              {a.full_name} is a fellow. Their page:{" "}
+              <span className="font-mono text-xs text-gray-900">{fellow.link ?? "being set up"}</span>
+              <span className="block text-xs text-gray-500">Send it once the fellows' pages are live on studojo.com.</span>
+            </p>
+            {fellow.link && (
+              <button
+                type="button"
+                onClick={() =>
+                  navigator.clipboard
+                    .writeText(fellow.link!)
+                    .then(() => toast.success("Link copied"))
+                    .catch(() => toast.error("Could not copy. Select the link instead."))
+                }
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:border-violet-400"
+              >
+                Copy link
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-gray-600">
+              Taking them on gives them their own page and marks them selected. Their posts are then written and approved in the fellowship admin.
+            </p>
+            <button
+              type="button"
+              onClick={onMakeFellow}
+              disabled={makingFellow}
+              className="rounded-lg border-2 border-neutral-900 bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
+            >
+              {makingFellow ? "Setting up..." : "Make fellow"}
+            </button>
+          </div>
+        )}
+      </Panel>
 
       <Panel title="Team notes">
         <label htmlFor={`ugc-notes-${a.id}`} className="sr-only">
