@@ -13,7 +13,7 @@ import {
 
 // Creators in the LinkedIn UGC programme (/ugc-creators). GET lists them with
 // this week's progress; POST takes an applicant on as a creator, adds one by
-// hand, or changes a creator's status or cohort.
+// hand, or changes a creator's status, cohort or what they went on to.
 
 const STATUSES = ["active", "paused", "removed"] as const;
 
@@ -35,6 +35,8 @@ interface CreatorRow {
   status: string;
   connections_at_join: number | null;
   joined_at: string;
+  intern_at: string | null;
+  referred_at: string | null;
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -43,7 +45,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const creators = (await db.execute(sql`
     SELECT id, application_id, token, slug, full_name, email, whatsapp, linkedin_url, college, field, cohort,
-           status, connections_at_join, joined_at
+           status, connections_at_join, joined_at, intern_at, referred_at
     FROM ugc_creators
     ORDER BY (status = 'removed'), joined_at DESC
   `)).rows as unknown as CreatorRow[];
@@ -80,6 +82,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (!body || typeof body !== "object") return Response.json({ error: "Invalid JSON" }, { status: 400 });
 
   // Take an applicant on: copy their details across and mark them selected.
+  // Pressing it twice is safe, and it brings back a fellow who was removed.
   if (body.intent === "create-from-application") {
     const applicationId = Number(body.applicationId);
     if (!Number.isInteger(applicationId) || applicationId <= 0 || applicationId > 2147483647) {
@@ -93,7 +96,7 @@ export async function action({ request }: Route.ActionArgs) {
     const inserted = await db.execute(sql`
       INSERT INTO ugc_creators (application_id, token, slug, full_name, email, whatsapp, linkedin_url, college, field, created_by)
       VALUES (${applicationId}, ${newCreatorToken()}, ${newCreatorSlug(String(app.full_name ?? ""))}, ${app.full_name}, ${app.email}, ${app.whatsapp}, ${app.linkedin_url}, ${app.college}, ${app.field}, ${admin.email})
-      ON CONFLICT (application_id) DO NOTHING
+      ON CONFLICT (application_id) DO UPDATE SET status = 'active' WHERE ugc_creators.status = 'removed'
       RETURNING id, token, slug
     `);
     const row = (inserted.rows[0] ??
@@ -127,6 +130,27 @@ export async function action({ request }: Route.ActionArgs) {
     const r = await db.execute(sql`UPDATE ugc_creators SET status = ${body.status} WHERE id = ${id} RETURNING id`);
     if (!r.rows.length) return Response.json({ error: "Creator not found" }, { status: 404 });
     return Response.json({ ok: true });
+  }
+
+  // What they went on to: { outcome: "intern" | "referred", on }. Turning one on
+  // keeps the first date it was set.
+  if (body.intent === "set-outcome") {
+    if (body.outcome !== "intern" && body.outcome !== "referred") {
+      return Response.json({ error: "Invalid outcome" }, { status: 400 });
+    }
+    if (typeof body.on !== "boolean") return Response.json({ error: "on must be true or false" }, { status: 400 });
+    const r =
+      body.outcome === "intern"
+        ? await db.execute(sql`
+            UPDATE ugc_creators SET intern_at = CASE WHEN ${body.on}::boolean THEN COALESCE(intern_at, NOW()) END
+            WHERE id = ${id} AND status <> 'removed' RETURNING intern_at, referred_at
+          `)
+        : await db.execute(sql`
+            UPDATE ugc_creators SET referred_at = CASE WHEN ${body.on}::boolean THEN COALESCE(referred_at, NOW()) END
+            WHERE id = ${id} AND status <> 'removed' RETURNING intern_at, referred_at
+          `);
+    if (!r.rows.length) return Response.json({ error: "Fellow not found" }, { status: 404 });
+    return Response.json({ ok: true, creator: r.rows[0] });
   }
 
   if (body.intent === "set-cohort") {

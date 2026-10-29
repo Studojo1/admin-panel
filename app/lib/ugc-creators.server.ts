@@ -125,6 +125,11 @@ async function createTables() {
   // fellows' own pages must never select these.
   await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS team_notes TEXT`);
   await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS nudged_at TIMESTAMPTZ`);
+  // What a fellow went on to, marked by the team on their applicant profile:
+  // the growth internship at Studojo, or a referral to someone hiring in our
+  // network. These fill the last two stages of the applicants' pipeline.
+  await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS intern_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS referred_at TIMESTAMPTZ`);
   // Posts a fellow wrote before the fellowship, so Claude never repeats them.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_creator_earlier_posts (

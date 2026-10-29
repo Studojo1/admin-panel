@@ -153,8 +153,12 @@ interface Analytics {
 // 'selected' is a fellow: only Make fellow sets it, since that also creates
 // their page.
 const STATUSES = ["new", "shortlisted", "meeting", "selected", "rejected"] as const;
-// The ones the team sets by hand.
-const SETTABLE = ["new", "shortlisted", "meeting", "rejected"] as const;
+// The ones the team sets by hand. "Meeting scheduled" comes from Schedule
+// meeting (which saves the time and emails them) and Fellow from Make fellow.
+const SETTABLE = ["new", "shortlisted", "rejected"] as const;
+// The profile's status row, in pipeline order.
+const STATUS_BUTTONS = ["new", "shortlisted", "meeting", "rejected"] as const;
+const WIDE = "(min-width: 1024px)";
 
 const STATUS_LABELS: Record<string, string> = {
   new: "New",
@@ -492,10 +496,10 @@ async function getJson(url: string) {
   return res.json();
 }
 
-async function postAction(body: Record<string, unknown>) {
+async function postAction(body: Record<string, unknown>, url = "/api/ugc-applicants") {
   const token = await getToken();
   if (!token) throw new Error("Please sign in again.");
-  const res = await fetch("/api/ugc-applicants", {
+  const res = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     credentials: "include",
@@ -514,6 +518,21 @@ async function copyText(text: string) {
     toast.error("Could not copy. Select the link and copy it instead.");
   }
 }
+
+// A fellow's record, for an applicant taken on.
+interface Fellow {
+  id: number;
+  link: string | null;
+  intern_at: string | null;
+  referred_at: string | null;
+}
+
+// What a fellow went on to; these fill the pipeline's last two stages.
+const OUTCOMES = [
+  { key: "intern", field: "intern_at", label: "Growth intern" },
+  { key: "referred", field: "referred_at", label: "Referred to someone hiring" },
+] as const;
+type Outcome = (typeof OUTCOMES)[number]["key"];
 
 function withId(set: Set<number>, id: number, present: boolean): Set<number> {
   const next = new Set(set);
@@ -552,17 +571,20 @@ export default function UgcApplicants() {
   const analyticsRequest = useRef(0);
   // An applicant opened from elsewhere on the page, scrolled to once shown.
   const [scrollTo, setScrollTo] = useState<number | null>(null);
-  // Applicants already taken on as fellows: application id to their page link.
-  const [fellowByApp, setFellowByApp] = useState<Record<number, { id: number; link: string | null }>>({});
+  // Applicants already taken on as fellows: application id to their record.
+  const [fellowByApp, setFellowByApp] = useState<Record<number, Fellow>>({});
   const [makingFellow, setMakingFellow] = useState<Set<number>>(new Set());
+  const [savingOutcome, setSavingOutcome] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     if (isPending || !isAuthorized) return;
     getJson("/api/ugc-creators")
       .then((d) => {
-        const map: Record<number, { id: number; link: string | null }> = {};
-        for (const c of (d.creators || []) as { id: number; application_id: number | null; link: string | null }[]) {
-          if (c.application_id) map[c.application_id] = { id: c.id, link: c.link };
+        const map: Record<number, Fellow> = {};
+        for (const c of (d.creators || []) as (Fellow & { application_id: number | null; status: string })[]) {
+          if (c.application_id && c.status !== "removed") {
+            map[c.application_id] = { id: c.id, link: c.link, intern_at: c.intern_at ?? null, referred_at: c.referred_at ?? null };
+          }
         }
         setFellowByApp(map);
       })
@@ -571,28 +593,53 @@ export default function UgcApplicants() {
       });
   }, [isPending, isAuthorized]);
 
+  // Fresh counts and pipeline after a change made through the fellows' API.
+  function refreshCounts() {
+    getJson("/api/ugc-applicants?only=counts")
+      .then((d) => {
+        if (d.counts) setCounts(d.counts);
+        if (d.pipeline) setPipeline(d.pipeline);
+      })
+      .catch(() => {
+        // The counts catch up on the next load.
+      });
+  }
+
   async function makeFellow(a: Applicant) {
     setMakingFellow((s) => withId(s, a.id, true));
     try {
-      const token = await getToken();
-      if (!token) throw new Error("Please sign in again.");
-      const res = await fetch("/api/ugc-creators", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ intent: "create-from-application", applicationId: a.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-      setFellowByApp((m) => ({ ...m, [a.id]: { id: data.creator.id, link: data.creator.link ?? null } }));
+      const data = await postAction({ intent: "create-from-application", applicationId: a.id }, "/api/ugc-creators");
+      setFellowByApp((m) => ({
+        ...m,
+        [a.id]: { id: data.creator.id, link: data.creator.link ?? null, intern_at: null, referred_at: null },
+      }));
       setRows((rs) => rs.map((r) => (r.id === a.id ? { ...r, status: "selected" } : r)));
       moveCount(a.status, "selected");
-      if (data.created) setPipeline((p) => (p ? { ...p, fellow: p.fellow + 1 } : p));
       toast.success(`${a.full_name} is now a fellow.`);
+      refreshCounts();
     } catch (e: any) {
       toast.error(e.message || "Could not make them a fellow");
     } finally {
       setMakingFellow((s) => withId(s, a.id, false));
+    }
+  }
+
+  // Marks (or unmarks) what a fellow went on to.
+  async function setOutcome(a: Applicant, outcome: Outcome, on: boolean) {
+    const fellow = fellowByApp[a.id];
+    if (!fellow) return;
+    setSavingOutcome((s) => withId(s, a.id, true));
+    try {
+      const data = await postAction({ intent: "set-outcome", id: fellow.id, outcome, on }, "/api/ugc-creators");
+      setFellowByApp((m) => ({
+        ...m,
+        [a.id]: { ...m[a.id], intern_at: data.creator.intern_at ?? null, referred_at: data.creator.referred_at ?? null },
+      }));
+      refreshCounts();
+    } catch (e: any) {
+      toast.error(`Could not update ${a.full_name}: ${e.message || "unknown error"}`);
+    } finally {
+      setSavingOutcome((s) => withId(s, a.id, false));
     }
   }
   // Stand-out quick filters (all must match) and the sort order.
@@ -677,8 +724,57 @@ export default function UgcApplicants() {
   // On a wide screen the profile column is never empty: show the first applicant.
   useEffect(() => {
     if (selectedId !== null || filtered.length === 0) return;
-    if (window.matchMedia("(min-width: 1024px)").matches) setSelectedId(filtered[0].id);
+    if (window.matchMedia(WIDE).matches) setSelectedId(filtered[0].id);
   }, [filtered, selectedId]);
+
+  // The phone sheet has its own history entry, so the phone's Back closes it
+  // instead of leaving the page (and any unsaved notes).
+  const sheetInHistory = useRef(false);
+  function openSheet() {
+    setSheetOpen(true);
+    if (!sheetInHistory.current) {
+      window.history.pushState({ ...(window.history.state ?? {}), ugcSheet: true }, "");
+      sheetInHistory.current = true;
+    }
+  }
+  function closeSheet() {
+    if (sheetInHistory.current) {
+      sheetInHistory.current = false;
+      window.history.back(); // popstate closes it
+    } else {
+      setSheetOpen(false);
+    }
+  }
+  useEffect(() => {
+    const onPop = () => {
+      sheetInHistory.current = false;
+      setSheetOpen(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  // A sheet left open when the screen widens (a tablet turned) closes.
+  useEffect(() => {
+    const mq = window.matchMedia(WIDE);
+    const onChange = () => mq.matches && closeSheet();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Focus returns to the row when the sheet closes.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !sheetOpen && selectedId !== null) {
+      document.querySelector<HTMLButtonElement>(`#ugc-applicant-${selectedId} button[data-open]`)?.focus({ preventScroll: true });
+    }
+    wasOpen.current = sheetOpen;
+  }, [sheetOpen, selectedId]);
+  // A keyboard user opening an applicant on a wide screen lands on their profile.
+  const [focusProfile, setFocusProfile] = useState(false);
+  useEffect(() => {
+    if (!focusProfile) return;
+    document.getElementById("ugc-profile-title")?.focus();
+    setFocusProfile(false);
+  }, [focusProfile, selectedId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -693,7 +789,7 @@ export default function UgcApplicants() {
   // The phone sheet locks the page behind it and closes with Escape.
   useEffect(() => {
     if (!sheetOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSheetOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeSheet();
     document.addEventListener("keydown", onKey);
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -721,7 +817,7 @@ export default function UgcApplicants() {
   // Shows an applicant's profile: beside the list on a wide screen, as a sheet on a phone.
   function select(id: number) {
     setSelectedId(id);
-    if (!window.matchMedia("(min-width: 1024px)").matches) setSheetOpen(true);
+    if (!window.matchMedia(WIDE).matches) openSheet();
   }
 
   // Opens an applicant named elsewhere on the page (a sharer, or someone who
@@ -730,7 +826,7 @@ export default function UgcApplicants() {
     if (!rows.some((r) => r.id === id)) return;
     if (!filtered.some((r) => r.id === id)) clearFilters();
     select(id);
-    setScrollTo(id);
+    if (!sheetOpen) setScrollTo(id);
   }
 
   // Keeps the status counts right after a change made here.
@@ -861,17 +957,15 @@ export default function UgcApplicants() {
     const savedNotes = a.team_notes ?? "";
     return (
       <ApplicantProfile
+        key={a.id}
         applicant={a}
         inSheet={inSheet}
-        onClose={() => setSheetOpen(false)}
+        onClose={closeSheet}
         via={links.cameVia(a)}
         broughtIn={links.broughtIn(a)}
         links={links}
         score={so.score}
-        onOpenApplicant={(id) => {
-          setSheetOpen(false);
-          openApplicant(id);
-        }}
+        onOpenApplicant={openApplicant}
         savingStatus={savingStatus.has(a.id)}
         onStatus={(st) => changeStatus(a, st)}
         notes={draft ?? savedNotes}
@@ -882,6 +976,8 @@ export default function UgcApplicants() {
         fellow={fellowByApp[a.id] ?? null}
         makingFellow={makingFellow.has(a.id)}
         onMakeFellow={() => makeFellow(a)}
+        savingOutcome={savingOutcome.has(a.id)}
+        onOutcome={(o, on) => setOutcome(a, o, on)}
         scheduling={scheduling.has(a.id)}
         onScheduleMeeting={(m) => scheduleMeeting(a, m)}
       />
@@ -890,6 +986,7 @@ export default function UgcApplicants() {
 
   return (
     <div className="min-h-screen bg-[#F2F1F6] text-[#1A1625]">
+      <div inert={sheetOpen || undefined}>
       <AdminHeader />
 
       {/* The fellowship's own two tabs, as in the design. */}
@@ -931,7 +1028,7 @@ export default function UgcApplicants() {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {counts && <span className="text-sm text-[#686377]">{counts.last_24_hours} in the past 24 hours</span>}
             <a href="#funnel-and-sharing" className="text-sm font-semibold text-[#5428C8] underline underline-offset-2 hover:text-[#1A1625]">
-              Funnel and sharing
+              Sharing and sources
             </a>
             <button
               type="button"
@@ -962,25 +1059,17 @@ export default function UgcApplicants() {
         {loading ? (
           <div className="py-16 text-center text-sm text-[#686377]">Loading...</div>
         ) : loadError ? null : rows.length === 0 ? (
-          <div className="mt-5 rounded-xl border border-[#E5E2EC] bg-white p-12 text-center">
-            <p className="text-sm font-medium">No applications yet.</p>
-            <p className="mt-1 text-sm text-[#686377]">Applications from studojo.com/fellowship-growth will show up here as they come in.</p>
+          <div className="mt-5 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_290px]">
+            <div className="rounded-xl border border-[#E5E2EC] bg-white p-12 text-center">
+              <p className="text-sm font-medium">No applications yet.</p>
+              <p className="mt-1 text-sm text-[#686377]">Applications from studojo.com/fellowship-growth will show up here as they come in.</p>
+            </div>
+            <FunnelSide analytics={analytics} error={analyticsError} loading={analyticsLoading} range={range} onRangeChange={changeRange} />
           </div>
         ) : (
           <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[290px_minmax(0,1fr)_420px]">
-            {/* Left: the application funnel (below the list until the screen is wide). */}
-            <div className="order-3 lg:col-span-2 xl:order-none xl:col-span-1">
-              <FunnelSide
-                analytics={analytics}
-                error={analyticsError}
-                loading={analyticsLoading}
-                range={range}
-                onRangeChange={changeRange}
-              />
-            </div>
-
             {/* Middle: the list. */}
-            <section aria-labelledby="ugc-list-title" className="order-1 min-w-0 rounded-xl border border-[#E5E2EC] bg-white xl:order-none">
+            <section aria-labelledby="ugc-list-title" className="min-w-0 rounded-xl border border-[#E5E2EC] bg-white">
               <div className="px-4 pt-5 sm:px-5">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h2 id="ugc-list-title" className="text-xl font-semibold" style={{ fontFamily: SERIF }}>
@@ -999,15 +1088,14 @@ export default function UgcApplicants() {
                   </label>
                 </div>
 
-                <div role="tablist" aria-label="Status" className="-mx-1 mt-3 flex gap-1 overflow-x-auto border-b border-[#E5E2EC]">
+                <div role="group" aria-label="Status filter" className="mt-3 flex flex-wrap gap-x-1 border-b border-[#E5E2EC]">
                   {statusTabs.map((t) => {
                     const on = (filters.status || "") === t.key;
                     return (
                       <button
                         key={t.key || "all"}
                         type="button"
-                        role="tab"
-                        aria-selected={on}
+                        aria-pressed={on}
                         onClick={() => setFilters((f) => ({ ...f, status: t.key }))}
                         className={`-mb-px whitespace-nowrap border-b-2 px-2 pb-2 pt-1 text-sm font-semibold ${
                           on ? "border-[#6C3AE8] text-[#1A1625]" : "border-transparent text-[#686377] hover:text-[#1A1625]"
@@ -1050,7 +1138,9 @@ export default function UgcApplicants() {
                           }`}
                         >
                           {h.label}
+                          <span className="sr-only">, </span>
                           <span className={`ml-1.5 tabular-nums ${on ? "text-violet-100" : "text-[#686377]"}`}>{n}</span>
+                          <span className="sr-only"> applicants</span>
                         </button>
                       );
                     })}
@@ -1063,6 +1153,21 @@ export default function UgcApplicants() {
                       {moreFilters ? "Fewer filters" : "More filters"}
                     </button>
                   </div>
+                  {!moreFilters && FILTERS.some((f) => f.key !== "status" && filters[f.key]) && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {FILTERS.filter((f) => f.key !== "status" && filters[f.key]).map((f) => (
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => setFilters((prev) => ({ ...prev, [f.key]: "" }))}
+                          aria-label={`Remove filter ${f.label}: ${f.optionLabel ? f.optionLabel(filters[f.key]) : filters[f.key]}`}
+                          className="rounded-full border border-[#6C3AE8] bg-[#F2EDFF] px-3 py-1 text-[13px] font-medium text-[#5428C8]"
+                        >
+                          {f.label}: {f.optionLabel ? f.optionLabel(filters[f.key]) : filters[f.key]} <span aria-hidden="true">×</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {moreFilters && (
                     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {FILTERS.filter((f) => f.key !== "status").map((f) => (
@@ -1130,7 +1235,10 @@ export default function UgcApplicants() {
                             <button
                               type="button"
                               data-open
-                              onClick={() => select(r.id)}
+                              onClick={(e) => {
+                                select(r.id);
+                                if (e.detail === 0 && window.matchMedia(WIDE).matches) setFocusProfile(true);
+                              }}
                               aria-label={`Open ${r.full_name}'s answers`}
                               aria-current={isSel ? "true" : undefined}
                               className="text-left text-[15px] font-semibold hover:underline"
@@ -1170,16 +1278,21 @@ export default function UgcApplicants() {
                             <select
                               aria-label={`Status for ${r.full_name}`}
                               value={r.status}
-                              disabled={savingStatus.has(r.id)}
+                              // A fellow stays one: their page is live.
+                              disabled={savingStatus.has(r.id) || Boolean(fellowByApp[r.id])}
                               onChange={(e) => changeStatus(r, e.target.value)}
                               className={`mt-0 rounded-lg border px-2 py-1.5 text-[13px] font-semibold sm:mt-2 sm:w-full ${STATUS_STYLES[r.status] ?? STATUS_STYLES.new}`}
                             >
-                              {(r.status === "selected" ? STATUSES : SETTABLE).map((st) => (
-                                <option key={st} value={st} disabled={st === "selected"}>
+                              {!(SETTABLE as readonly string[]).includes(r.status) && (
+                                <option value={r.status} disabled={r.status === "selected"}>
+                                  {STATUS_LABELS[r.status] ?? r.status}
+                                </option>
+                              )}
+                              {SETTABLE.map((st) => (
+                                <option key={st} value={st}>
                                   {STATUS_LABELS[st]}
                                 </option>
                               ))}
-                              {!(STATUSES as readonly string[]).includes(r.status) && <option value={r.status}>{r.status}</option>}
                             </select>
                           </div>
                         </div>
@@ -1190,8 +1303,8 @@ export default function UgcApplicants() {
               )}
             </section>
 
-            {/* Right: the selected applicant (a sheet on phones). */}
-            <aside aria-label="Applicant" className="order-2 hidden min-w-0 lg:block xl:order-none">
+            {/* Right: the selected applicant (a sheet on phones). It stays in view while the list scrolls. */}
+            <aside aria-label="Applicant" className="hidden min-w-0 lg:sticky lg:top-[96px] lg:block lg:self-start">
               {selected ? (
                 profileFor(selected, false)
               ) : (
@@ -1200,6 +1313,17 @@ export default function UgcApplicants() {
                 </div>
               )}
             </aside>
+
+            {/* The application funnel: under the list, or on the left of a wide screen. */}
+            <div className="lg:col-span-2 xl:order-first xl:col-span-1">
+              <FunnelSide
+                analytics={analytics}
+                error={analyticsError}
+                loading={analyticsLoading}
+                range={range}
+                onRangeChange={changeRange}
+              />
+            </div>
           </div>
         )}
 
@@ -1214,9 +1338,16 @@ export default function UgcApplicants() {
           />
         )}
       </main>
+      </div>
 
       {sheetOpen && selected && (
-        <div role="dialog" aria-modal="true" aria-label={selected.full_name} className="fixed inset-0 z-[60] overflow-y-auto bg-[#F2F1F6] lg:hidden">
+        <div
+          key={selected.id}
+          role="dialog"
+          aria-modal="true"
+          aria-label={selected.full_name}
+          className="fixed left-0 top-0 z-[60] h-dvh w-screen overflow-y-auto bg-[#F2F1F6] lg:hidden"
+        >
           {profileFor(selected, true)}
         </div>
       )}
@@ -1294,7 +1425,7 @@ function PipelineCard({ pipeline, active, onPick }: { pipeline: Pipeline; active
           return (
             <li key={st.label} className="relative">
               {st.status === null ? (
-                <div className="rounded-lg px-3 py-2" title="Set on the fellow, once they get there">
+                <div className="rounded-lg px-3 py-2">
                   {body}
                 </div>
               ) : (
@@ -1316,6 +1447,7 @@ function PipelineCard({ pipeline, active, onPick }: { pipeline: Pipeline; active
           );
         })}
       </ol>
+      <p className="mt-2 px-3 text-xs text-[#686377]">Mark Growth intern and Referred on a fellow's profile, under What they went on to.</p>
     </section>
   );
 }
@@ -1362,7 +1494,7 @@ function FunnelSide({
       const before = funnel[FUNNEL_STAGES[i - 1].key];
       if (st.key === "applications" || before <= 0) continue;
       const lost = 1 - funnel[st.key] / before;
-      if (!drop || lost > drop.lost) drop = { from: FUNNEL_STAGES[i - 1].label, to: st.label, lost };
+      if (lost > 0 && (!drop || lost > drop.lost)) drop = { from: FUNNEL_STAGES[i - 1].label, to: st.label, lost };
     }
   }
   const max = funnel ? Math.max(0, ...FUNNEL_STAGES.map((st) => funnel[st.key])) : 0;
@@ -1376,21 +1508,25 @@ function FunnelSide({
       </div>
       {!funnel ? (
         <p className="mt-3 text-sm text-red-700" role="alert">
-          Could not load the funnel: {error || "unknown error"}.{" "}
+          Could not load the funnel: {error || "unknown error"}{" "}
           <button type="button" onClick={() => onRangeChange(range)} className="font-semibold underline">
             {loading ? "Trying again..." : "Try again"}
           </button>
         </p>
       ) : (
         <div aria-busy={loading} className={`transition-opacity ${loading ? "opacity-50" : ""}`}>
-          <p className="mt-3 flex items-baseline gap-2">
-            <span className="text-[34px] font-semibold leading-none" style={{ fontFamily: SERIF }}>
-              {funnel.view > 0 ? pct(funnel.applications, funnel.view) : "0%"}
-            </span>
-            <span className="text-sm text-[#4B4659]">
-              of visitors applied ({fmt(funnel.applications)} of {fmt(funnel.view)})
-            </span>
-          </p>
+          {funnel.view > 0 ? (
+            <p className="mt-3 flex items-baseline gap-2">
+              <span className="text-[34px] font-semibold leading-none" style={{ fontFamily: SERIF }}>
+                {pct(funnel.applications, funnel.view)}
+              </span>
+              <span className="text-sm text-[#4B4659]">
+                of visitors applied ({fmt(funnel.applications)} of {fmt(funnel.view)})
+              </span>
+            </p>
+          ) : (
+            <p className="mt-3 text-sm text-[#4B4659]">Nobody has opened the page in this range yet.</p>
+          )}
           <ol className="mt-4 space-y-3">
             {FUNNEL_STAGES.map((st, i) => {
               const value = funnel[st.key];
@@ -1918,6 +2054,7 @@ function MeetingPanel({
         <p className="mt-1 text-xs text-[#686377]">
           {a.meeting_emailed_at ? `Emailed to ${a.email} ${appliedAgo(a.meeting_emailed_at)}.` : "Not emailed."}
         </p>
+        {a.status !== "selected" && a.status !== "rejected" && (
         <div className="mt-2 flex flex-wrap gap-2">
           <button type="button" onClick={() => onEditing(true)} className="rounded-lg border border-[#CDC8D9] bg-white px-3 py-1.5 text-sm font-semibold hover:border-[#6C3AE8]">
             Change
@@ -1928,6 +2065,7 @@ function MeetingPanel({
             </a>
           )}
         </div>
+        )}
       </section>
     );
   }
@@ -2045,6 +2183,8 @@ function ApplicantProfile({
   fellow,
   makingFellow,
   onMakeFellow,
+  savingOutcome,
+  onOutcome,
   scheduling,
   onScheduleMeeting,
 }: {
@@ -2063,14 +2203,22 @@ function ApplicantProfile({
   savingNotes: boolean;
   onNotesChange: (value: string) => void;
   onNotesSave: () => void;
-  fellow: { id: number; link: string | null } | null;
+  fellow: Fellow | null;
   makingFellow: boolean;
   onMakeFellow: () => void;
+  savingOutcome: boolean;
+  onOutcome: (outcome: Outcome, on: boolean) => void;
   scheduling: boolean;
   onScheduleMeeting: (m: { at: string; link: string; note: string; notify: boolean }) => Promise<boolean>;
 }) {
   const [editingMeeting, setEditingMeeting] = useState(false);
-  useEffect(() => setEditingMeeting(false), [a.id]);
+  const [confirmFellow, setConfirmFellow] = useState(false);
+  const backRef = useRef<HTMLButtonElement>(null);
+  // The sheet takes focus when it opens.
+  useEffect(() => {
+    if (inSheet) backRef.current?.focus();
+  }, [inSheet]);
+  const first = a.full_name.trim().split(/\s+/)[0];
   const linkedin = httpsUrl(a.linkedin_url);
   const bestPost = httpsUrl(a.best_post_url);
   const whatsapp = whatsappHref(a.whatsapp);
@@ -2084,12 +2232,12 @@ function ApplicantProfile({
       className={
         inSheet
           ? "min-h-full bg-white pb-10"
-          : "sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-[#E5E2EC] bg-white"
+          : "max-h-[calc(100vh-112px)] overflow-y-auto rounded-xl border border-[#E5E2EC] bg-white"
       }
     >
       {inSheet && (
         <div className="sticky top-0 z-10 flex items-center border-b border-[#E5E2EC] bg-white px-4 py-2">
-          <button type="button" onClick={onClose} className="min-h-11 rounded-lg px-2 text-sm font-semibold text-[#5428C8]">
+          <button ref={backRef} type="button" onClick={onClose} className="min-h-11 rounded-lg px-2 text-sm font-semibold text-[#5428C8]">
             Back to the list
           </button>
         </div>
@@ -2098,7 +2246,7 @@ function ApplicantProfile({
       <header className="flex gap-4 px-5 pb-4 pt-5">
         <Avatar name={a.full_name} size="lg" />
         <div className="min-w-0">
-          <h2 className="text-[26px] font-semibold leading-tight [overflow-wrap:anywhere]" style={{ fontFamily: SERIF }}>
+          <h2 id="ugc-profile-title" tabIndex={-1} className="text-[26px] font-semibold leading-tight outline-none [overflow-wrap:anywhere]" style={{ fontFamily: SERIF }}>
             {a.full_name}
           </h2>
           <p className="text-sm text-[#4B4659]">
@@ -2114,16 +2262,22 @@ function ApplicantProfile({
         </div>
       </header>
 
+      {fellow ? (
+        <p className="px-5 pb-3">
+          <span className="inline-block rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[13px] font-semibold text-emerald-800">Fellow</span>
+        </p>
+      ) : (
       <div role="group" aria-label="Status" className="flex flex-wrap gap-2 px-5 pb-3">
-        {SETTABLE.map((st) => {
+        {STATUS_BUTTONS.map((st) => {
           const on = a.status === st;
           return (
             <button
               key={st}
               type="button"
               aria-pressed={on}
-              disabled={savingStatus}
-              onClick={() => onStatus(st)}
+              disabled={savingStatus || (st === "meeting" && a.status === "selected")}
+              // "Meeting scheduled" means a meeting is set, so it opens the meeting form.
+              onClick={() => (st === "meeting" ? !on && setEditingMeeting(true) : onStatus(st))}
               className={`rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors disabled:opacity-60 ${
                 on ? "border-[#1A1625] bg-[#1A1625] text-white" : "border-[#CDC8D9] bg-white hover:border-[#6C3AE8]"
               }`}
@@ -2136,10 +2290,11 @@ function ApplicantProfile({
           <span className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[13px] font-semibold text-emerald-800">Fellow</span>
         )}
       </div>
+      )}
 
       <div className="flex flex-wrap gap-2 px-5 pb-4">
         {/* Once a meeting is set, its box below has the Change button. */}
-        {!editingMeeting && !a.meeting_at && a.status !== "selected" && (
+        {!editingMeeting && !a.meeting_at && a.status !== "selected" && a.status !== "rejected" && (
           <button
             type="button"
             onClick={() => setEditingMeeting(true)}
@@ -2148,10 +2303,10 @@ function ApplicantProfile({
             Schedule meeting
           </button>
         )}
-        {!fellow && (
+        {!fellow && !confirmFellow && (
           <button
             type="button"
-            onClick={onMakeFellow}
+            onClick={() => setConfirmFellow(true)}
             disabled={makingFellow}
             className="rounded-lg border border-[#1A1625] bg-white px-4 py-2 text-sm font-semibold hover:bg-[#F2F1F6] disabled:opacity-60"
           >
@@ -2159,6 +2314,29 @@ function ApplicantProfile({
           </button>
         )}
       </div>
+
+      {!fellow && confirmFellow && (
+        <div role="alertdialog" aria-label={`Make ${first} a fellow?`} className="mx-5 mb-4 rounded-lg border border-[#1A1625] bg-white px-4 py-3">
+          <p className="text-sm font-semibold">Make {first} a fellow?</p>
+          <p className="mt-0.5 text-sm text-[#4B4659]">This creates their page and marks them as a fellow.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={makingFellow}
+              onClick={() => {
+                setConfirmFellow(false);
+                onMakeFellow();
+              }}
+              className="rounded-lg bg-[#1A1625] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              Yes, make fellow
+            </button>
+            <button type="button" onClick={() => setConfirmFellow(false)} className="rounded-lg border border-[#CDC8D9] bg-white px-4 py-2 text-sm font-semibold">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <MeetingPanel applicant={a} editing={editingMeeting} onEditing={setEditingMeeting} busy={scheduling} onSave={onScheduleMeeting} />
 
@@ -2183,6 +2361,28 @@ function ApplicantProfile({
               Copy link
             </button>
           )}
+          <h3 className="mt-3 text-sm font-semibold">What they went on to</h3>
+          <div role="group" aria-label="What they went on to" className="mt-1.5 flex flex-wrap gap-2">
+            {OUTCOMES.map((o) => {
+              const on = Boolean(fellow[o.field]);
+              return (
+                <button
+                  key={o.key}
+                  type="button"
+                  aria-pressed={on}
+                  disabled={savingOutcome}
+                  onClick={() => onOutcome(o.key, !on)}
+                  className={`rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors disabled:opacity-60 ${
+                    on ? "border-emerald-700 bg-emerald-700 text-white" : "border-[#CDC8D9] bg-white hover:border-emerald-700"
+                  }`}
+                >
+                  {on && <span aria-hidden="true">✓ </span>}
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-xs text-[#686377]">These count in the pipeline's Growth intern and Referred.</p>
         </section>
       )}
 

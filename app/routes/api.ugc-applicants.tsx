@@ -4,6 +4,7 @@ import db from "~/lib/db.server";
 import { sql, type SQL } from "drizzle-orm";
 import { meetingEmail } from "~/lib/fellowship-meeting";
 import { sendDirectGmail } from "~/lib/gmail-direct.server";
+import { ensureCreatorTables } from "~/lib/ugc-creators.server";
 
 // Applications to the Growth Fellowship. The public form on
 // studojo.com/fellowship-growth (also /creators and /ugc) writes the rows;
@@ -144,24 +145,25 @@ async function statusCounts() {
   };
 }
 
-// Applied, shortlisted and meeting come from the applications; fellows (and
-// those who became growth interns or were referred) from ugc_creators, which
-// also counts fellows added by hand. Before that table exists, fellows are
-// the applications marked selected.
+// Applied to Fellow come from the applications, so each stage matches the
+// list it opens (Fellow is "selected", set by Make fellow). Growth intern and
+// Referred are what fellows went on to, marked on their profile and kept in
+// ugc_creators.
 async function pipelineCounts(counts: Awaited<ReturnType<typeof statusCounts>>) {
-  let fellow = counts.by_status.selected ?? 0;
+  const fellow = counts.by_status.selected ?? 0;
   let growthIntern = 0;
   let referred = 0;
   try {
-    const rows = (await db.execute(sql`SELECT status, COUNT(*)::int AS n FROM ugc_creators GROUP BY status`)).rows as {
-      status: string;
-      n: number;
-    }[];
-    fellow = rows.filter((r) => r.status !== "removed").reduce((sum, r) => sum + r.n, 0);
-    growthIntern = rows.find((r) => r.status === "intern")?.n ?? 0;
-    referred = rows.find((r) => r.status === "referred")?.n ?? 0;
-  } catch {
-    // No fellows table yet.
+    await ensureCreatorTables();
+    const row = (await db.execute(sql`
+      SELECT COUNT(*) FILTER (WHERE intern_at IS NOT NULL)::int AS intern,
+             COUNT(*) FILTER (WHERE referred_at IS NOT NULL)::int AS referred
+      FROM ugc_creators WHERE status <> 'removed'
+    `)).rows[0] as { intern: number; referred: number } | undefined;
+    growthIntern = row?.intern ?? 0;
+    referred = row?.referred ?? 0;
+  } catch (e) {
+    console.error("[ugc-applicants] fellows' outcomes failed:", e instanceof Error ? e.message : e);
   }
   return {
     applied: counts.total,
@@ -550,6 +552,19 @@ export async function action({ request }: Route.ActionArgs) {
     if (!isStatus(status)) {
       return Response.json({ error: "Invalid status" }, { status: 400 });
     }
+    // Fellow comes only from Make fellow, which also creates their page, and a
+    // fellow stays one here: their page is live, so moving them back would
+    // leave the two out of step.
+    if (status === "selected") {
+      return Response.json({ error: "Use Make fellow to make them a fellow." }, { status: 400 });
+    }
+    const isFellow = await db
+      .execute(sql`SELECT 1 FROM ugc_creators WHERE application_id = ${id} AND status <> 'removed'`)
+      .then((r) => r.rows.length > 0)
+      .catch(() => false); // no fellows table yet
+    if (isFellow) {
+      return Response.json({ error: "They're a fellow now, so their status stays Fellow." }, { status: 409 });
+    }
     const result = await db.execute(sql`
       UPDATE ugc_applications SET status = ${status}
       WHERE id = ${id}
@@ -582,9 +597,12 @@ export async function action({ request }: Route.ActionArgs) {
     const note = typeof body.note === "string" ? body.note.replace(/\r\n?/g, "\n").trim() : "";
     if (note.length > MEETING_NOTE_MAX) return Response.json({ error: "Keep the note under 500 characters." }, { status: 400 });
 
+    // Only someone still in review moves to "Meeting scheduled": a fellow or a
+    // rejected applicant keeps their status.
     const updated = await db.execute(sql`
       UPDATE ugc_applications
-      SET status = 'meeting', meeting_at = ${at.toISOString()}, meeting_link = ${link || null}, meeting_note = ${note || null}
+      SET status = CASE WHEN status IN ('new', 'shortlisted', 'meeting') THEN 'meeting' ELSE status END,
+          meeting_at = ${at.toISOString()}, meeting_link = ${link || null}, meeting_note = ${note || null}
       WHERE id = ${id}
       RETURNING id, full_name, email
     `);
@@ -654,6 +672,11 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   if (params.get("only") === "analytics") {
     return Response.json(await analyticsOrError(range));
+  }
+  // GET ?only=counts: the status counts and pipeline, after a change elsewhere (Make fellow).
+  if (params.get("only") === "counts") {
+    const counts = await statusCounts();
+    return Response.json({ counts, pipeline: await pipelineCounts(counts) });
   }
 
   const [result, counts, analytics, shareStats] = await Promise.all([
