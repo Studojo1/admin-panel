@@ -2,6 +2,8 @@ import type { Route } from "./+types/api.ugc-applicants";
 import { adminOnly } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql, type SQL } from "drizzle-orm";
+import { meetingEmail } from "~/lib/fellowship-meeting";
+import { sendDirectGmail } from "~/lib/gmail-direct.server";
 
 // Applications to the Growth Fellowship. The public form on
 // studojo.com/fellowship-growth (also /creators and /ugc) writes the rows;
@@ -10,8 +12,9 @@ import { sql, type SQL } from "drizzle-orm";
 // the public page records.
 
 // The review states. 'new' is the default assigned on insert by the public
-// form; the rest are set from this panel.
-const STATUSES = ["new", "shortlisted", "selected", "rejected"] as const;
+// form; the rest are set from this panel. 'meeting' is "Meeting scheduled";
+// 'selected' is a fellow (Make fellow sets it).
+const STATUSES = ["new", "shortlisted", "meeting", "selected", "rejected"] as const;
 type Status = (typeof STATUSES)[number];
 
 const isStatus = (value: string): value is Status =>
@@ -104,6 +107,11 @@ async function ensureTable() {
   await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS fellowship_goals JSONB`);
   await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS intern_interest TEXT`);
   await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS network_share TEXT`);
+  // The selection meeting, set from this panel (admin only; the form never writes these).
+  await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS meeting_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS meeting_link TEXT`);
+  await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS meeting_note TEXT`);
+  await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS meeting_emailed_at TIMESTAMPTZ`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_ugc_applications_share_code
     ON ugc_applications (share_code) WHERE share_code IS NOT NULL
@@ -135,6 +143,39 @@ async function statusCounts() {
     ]),
   };
 }
+
+// Applied, shortlisted and meeting come from the applications; fellows (and
+// those who became growth interns or were referred) from ugc_creators, which
+// also counts fellows added by hand. Before that table exists, fellows are
+// the applications marked selected.
+async function pipelineCounts(counts: Awaited<ReturnType<typeof statusCounts>>) {
+  let fellow = counts.by_status.selected ?? 0;
+  let growthIntern = 0;
+  let referred = 0;
+  try {
+    const rows = (await db.execute(sql`SELECT status, COUNT(*)::int AS n FROM ugc_creators GROUP BY status`)).rows as {
+      status: string;
+      n: number;
+    }[];
+    fellow = rows.filter((r) => r.status !== "removed").reduce((sum, r) => sum + r.n, 0);
+    growthIntern = rows.find((r) => r.status === "intern")?.n ?? 0;
+    referred = rows.find((r) => r.status === "referred")?.n ?? 0;
+  } catch {
+    // No fellows table yet.
+  }
+  return {
+    applied: counts.total,
+    shortlisted: counts.by_status.shortlisted ?? 0,
+    meeting: counts.by_status.meeting ?? 0,
+    fellow,
+    growthIntern,
+    referred,
+  };
+}
+
+const MEETING_LINK_MAX = 300;
+const MEETING_NOTE_MAX = 500;
+const DAY_MS = 86400000;
 
 // The driver returns timestamptz as Postgres text ("2026-10-26 13:48:53.62+00").
 // Send ISO 8601 instead, so every browser and spreadsheet reads it the same way.
@@ -518,7 +559,55 @@ export async function action({ request }: Route.ActionArgs) {
       return Response.json({ error: "Applicant not found" }, { status: 404 });
     }
     // Fresh counts, so the header stays right without reloading every row.
-    return Response.json({ ok: true, applicant: result.rows[0], counts: await statusCounts() });
+    const counts = await statusCounts();
+    return Response.json({ ok: true, applicant: result.rows[0], counts, pipeline: await pipelineCounts(counts) });
+  }
+
+  // POST { intent: "schedule-meeting", id, at, link?, note?, notify? }: set the
+  // selection meeting, move them to "Meeting scheduled", and (unless notify is
+  // false) email them the time. The status is saved even if the email fails;
+  // the reply says whether it went.
+  if (body.intent === "schedule-meeting") {
+    const id = parseId(body.id);
+    if (!id) return Response.json({ error: "id is required" }, { status: 400 });
+    const at = new Date(typeof body.at === "string" ? body.at : NaN);
+    const now = Date.now();
+    if (Number.isNaN(at.getTime())) return Response.json({ error: "Pick a date and time for the meeting." }, { status: 400 });
+    if (at.getTime() < now - 5 * 60000) return Response.json({ error: "That time has already passed." }, { status: 400 });
+    if (at.getTime() > now + 60 * DAY_MS) return Response.json({ error: "Pick a time in the next 60 days." }, { status: 400 });
+    const link = typeof body.link === "string" ? body.link.trim() : "";
+    if (link && (link.length > MEETING_LINK_MAX || !/^https:\/\/[^\s<>"]+$/i.test(link))) {
+      return Response.json({ error: "The meeting link must start with https://" }, { status: 400 });
+    }
+    const note = typeof body.note === "string" ? body.note.replace(/\r\n?/g, "\n").trim() : "";
+    if (note.length > MEETING_NOTE_MAX) return Response.json({ error: "Keep the note under 500 characters." }, { status: 400 });
+
+    const updated = await db.execute(sql`
+      UPDATE ugc_applications
+      SET status = 'meeting', meeting_at = ${at.toISOString()}, meeting_link = ${link || null}, meeting_note = ${note || null}
+      WHERE id = ${id}
+      RETURNING id, full_name, email
+    `);
+    const row = updated.rows[0] as { id: number; full_name: string; email: string } | undefined;
+    if (!row) return Response.json({ error: "Applicant not found" }, { status: 404 });
+
+    let emailed = false;
+    if (body.notify !== false && row.email) {
+      const message = meetingEmail({ fullName: row.full_name, at, link: link || null, note: note || null });
+      emailed = await sendDirectGmail({ to: row.email, subject: message.subject, html: message.html, fromName: "Studojo Growth Fellowship" });
+      if (emailed) await db.execute(sql`UPDATE ugc_applications SET meeting_emailed_at = NOW() WHERE id = ${id}`);
+    }
+    const fresh = (await db.execute(sql`
+      SELECT id, status, meeting_at, meeting_link, meeting_note, meeting_emailed_at FROM ugc_applications WHERE id = ${id}
+    `)).rows[0] as Record<string, unknown>;
+    const counts = await statusCounts();
+    return Response.json({
+      ok: true,
+      emailed,
+      applicant: { ...fresh, meeting_at: isoTime(fresh.meeting_at), meeting_emailed_at: isoTime(fresh.meeting_emailed_at) },
+      counts,
+      pipeline: await pipelineCounts(counts),
+    });
   }
 
   if (body.intent === "set-notes") {
@@ -577,6 +666,7 @@ export async function loader({ request }: Route.LoaderArgs) {
              story_work, story_setback, story_lesson, tone,
              can_commit, studojo_ok, why_join, referral_source, referred_by,
              consent_at, status, team_notes, share_code, came_from_code,
+             meeting_at, meeting_link, meeting_note, meeting_emailed_at,
              source_path, utm_source, utm_medium, utm_campaign, referrer,
              created_at
       FROM ugc_applications
@@ -593,8 +683,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     fellowship_goals: topicList(row.fellowship_goals),
     consent_at: isoTime(row.consent_at),
     created_at: isoTime(row.created_at),
+    meeting_at: isoTime(row.meeting_at),
+    meeting_emailed_at: isoTime(row.meeting_emailed_at),
     share: shareStats ? (shareStats.get(row.id as number) ?? NO_SHARES) : null,
   }));
 
-  return Response.json({ applicants, counts, ...analytics });
+  return Response.json({ applicants, counts, pipeline: await pipelineCounts(counts), ...analytics });
 }

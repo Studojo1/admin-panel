@@ -9,10 +9,21 @@ import { sql } from "drizzle-orm";
 // rows. This is the one place that creates or alters these tables (studojo.com
 // runs no DDL). Every statement is idempotent and never drops or renames anything.
 
-let tablesReady = false;
+// One run at a time per process: the start-up call and the first requests
+// share it, so their CREATE statements never race each other.
+let ready: Promise<void> | null = null;
 
-export async function ensureCreatorTables() {
-  if (tablesReady) return;
+export function ensureCreatorTables(): Promise<void> {
+  if (!ready) {
+    ready = createTables().catch((e) => {
+      ready = null; // try again on the next call
+      throw e;
+    });
+  }
+  return ready;
+}
+
+async function createTables() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_creators (
       id SERIAL PRIMARY KEY,
@@ -148,7 +159,6 @@ export async function ensureCreatorTables() {
     )
   `);
   await db.execute(sql`INSERT INTO ugc_programme (id, rules) VALUES (1, ${JSON.stringify(PROGRAMME_RULES)}::jsonb) ON CONFLICT (id) DO NOTHING`);
-  tablesReady = true;
 }
 
 /** 32 url-safe characters, kept for API use. */
@@ -331,7 +341,7 @@ export function creatorStats(posts: PostRow[], now: Date = new Date()): CreatorS
 // Create the tables as soon as the server loads this module (at start-up in
 // production): the fellows' pages on studojo.com only read and write rows, so
 // they can't wait for an admin to visit first. A failure here is retried on
-// first use, since tablesReady stays false.
+// the next call.
 ensureCreatorTables().catch((e) => {
   const err = e as { code?: string; name?: string };
   console.error("[ugc-creators] table setup at start failed; it retries on first use", err?.code ?? err?.name ?? "unknown");
