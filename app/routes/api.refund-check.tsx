@@ -1,74 +1,55 @@
 /**
- * Server-side proxy for the campaign refund check (Refund Policy v3.0 §3.3).
+ * Campaign refund check (Refund Policy v3.0 section 3.3) for the /old archive.
  *
- * GET  /api/refund-check?campaign_id=&reported_on=YYYY-MM-DD
- * POST /api/refund-check  { op: "restart", campaign_id }
- * POST /api/refund-check  { op: "refund", campaign_id, reported_on, reason }
+ * GET /old/api/refund-check?campaign_id=&reported_on=YYYY-MM-DD
  *
- * job-outreach-svc checks the admin JWT on every call and recomputes §3.3
- * before refunding, so nothing here decides eligibility.
+ * job-outreach-svc computed this until the old product was retired
+ * (2 Nov 2026); it is now read from its tables directly, read only, with the
+ * same rules (~/lib/outreach-archive/refund-check.server.ts). Restarting a
+ * campaign or refunding is not possible from the read-only archive.
  */
 import type { Route } from "./+types/api.refund-check";
 import { requireAdmin } from "~/lib/auth-helper.server";
-import { fetchRetiring } from "~/lib/retired-service.server";
+import { archiveReadOnly } from "~/lib/archive.server";
+import { readFailed, readOnly } from "~/lib/outreach-archive/db.server";
+import { campaignRefundCheck } from "~/lib/outreach-archive/refund-check.server";
 
-// Retired with the old product: once it stops, every call here answers 503
-// { retired: true } and the page shows "Service retired" (retired-service.server.ts).
-const JOB_OUTREACH = "job-outreach-svc";
-const JOB_OUTREACH_URL =
-  process.env.JOB_OUTREACH_URL ??
-  (process.env.JOB_OUTREACH_SVC_SERVICE_HOST
-    ? `http://${process.env.JOB_OUTREACH_SVC_SERVICE_HOST}:${process.env.JOB_OUTREACH_SVC_SERVICE_PORT ?? 8000}`
-    : "http://job-outreach-svc:8000");
-
-const BASE = `${JOB_OUTREACH_URL}/api/v1/admin/outreach/campaign`;
 const noCache = { "Cache-Control": "no-store" };
 
-async function forward(res: Response) {
-  const body = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
-  return Response.json(body, { status: res.status, headers: noCache });
+/** strptime("%Y-%m-%d") then isoformat(): a real date, zero padded, or null. */
+function parseDay(value: string): string | null {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(value);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return null;
+  return t.toISOString().slice(0, 10);
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
   if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const auth = request.headers.get("Authorization");
-  if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const url = new URL(request.url);
   const id = url.searchParams.get("campaign_id");
-  if (!id || !/^\d+$/.test(id)) return Response.json({ detail: "campaign_id must be a number" }, { status: 400 });
+  if (!id || !/^\d+$/.test(id) || Number(id) > 2147483647) {
+    return Response.json({ detail: "campaign_id must be a number" }, { status: 400 });
+  }
   const reported = url.searchParams.get("reported_on");
-  const qs = reported ? `?reported_on=${encodeURIComponent(reported)}` : "";
+  let reportedOn: string | null = null;
+  if (reported) {
+    reportedOn = parseDay(reported);
+    if (!reportedOn) return Response.json({ detail: "reported_on must be YYYY-MM-DD" }, { status: 400 });
+  }
   try {
-    return forward(await fetchRetiring(JOB_OUTREACH, `${BASE}/${id}/refund-check${qs}`, { headers: { Authorization: auth } }));
+    const check = await readOnly((q) => campaignRefundCheck(q, Number(id), reportedOn));
+    if (!check) return Response.json({ detail: "Campaign not found." }, { status: 404, headers: noCache });
+    return Response.json(check, { headers: noCache });
   } catch (e) {
-    return Response.json({ detail: `Outreach service unreachable: ${(e as Error).message}` }, { status: 502 });
+    return readFailed("refund-check", e);
   }
 }
 
+// The archive is read only: no restart, no refund.
 export async function action({ request }: Route.ActionArgs) {
   if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const auth = request.headers.get("Authorization");
-  if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const body = (await request.json().catch(() => ({}))) as {
-    op?: string; campaign_id?: number; reported_on?: string; reason?: string;
-  };
-  if (!body.campaign_id || !Number.isInteger(body.campaign_id)) {
-    return Response.json({ detail: "campaign_id must be a number" }, { status: 400 });
-  }
-  const headers = { Authorization: auth, "Content-Type": "application/json" };
-  try {
-    if (body.op === "restart") {
-      return forward(await fetchRetiring(JOB_OUTREACH, `${BASE}/${body.campaign_id}/restart`, { method: "POST", headers }));
-    }
-    if (body.op === "refund") {
-      return forward(await fetchRetiring(JOB_OUTREACH, `${BASE}/${body.campaign_id}/refund-unsent`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ reported_on: body.reported_on, reason: body.reason ?? "", confirm: true }),
-      }));
-    }
-    return Response.json({ detail: "op must be restart or refund" }, { status: 400 });
-  } catch (e) {
-    return Response.json({ detail: `Outreach service unreachable: ${(e as Error).message}` }, { status: 502 });
-  }
+  return archiveReadOnly();
 }
