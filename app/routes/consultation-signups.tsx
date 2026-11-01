@@ -39,7 +39,7 @@ export default function ConsultationSignups() {
       try {
         const token = await getToken();
         if (!token) throw new Error("Not authenticated");
-        const res = await fetch("/old/api/consultation-signups", {
+        const res = await fetch("/api/consultation-signups", {
           headers: { Authorization: `Bearer ${token}` },
           credentials: "include",
         });

@@ -131,7 +131,7 @@ function ChatModal({ chatId, onClose }: { chatId: number; onClose: () => void })
     (async () => {
       try {
         const token = await getToken();
-        const r = await fetch(`/old/api/sensei/chat/${chatId}`, {
+        const r = await fetch(`/api/sensei/chat/${chatId}`, {
           credentials: "include",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
@@ -154,7 +154,7 @@ function ChatModal({ chatId, onClose }: { chatId: number; onClose: () => void })
     const tabRef = window.open("", "_blank");
     try {
       const token = await getToken();
-      const r = await fetch(`/old/api/sensei/chat/${chatId}`, {
+      const r = await fetch(`/api/sensei/chat/${chatId}`, {
         method: "POST",
         credentials: "include",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -289,7 +289,7 @@ export default function Sensei() {
       // Admin API routes authorize by Bearer token (the cookie/share-token path
       // is not reliable in prod), same as every other admin page here.
       const token = await getToken();
-      const r = await fetch("/old/api/sensei", {
+      const r = await fetch("/api/sensei", {
         credentials: "include",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -312,7 +312,7 @@ export default function Sensei() {
     setBusy(true); setMsg("");
     try {
       const token = await getToken();
-      const r = await fetch("/old/api/sensei", {
+      const r = await fetch("/api/sensei", {
         method: "POST", credentials: "include",
         headers: {
           "Content-Type": "application/json",
@@ -536,7 +536,7 @@ export default function Sensei() {
         {/* Support tickets */}
         <h2 className="font-['Clash_Display'] text-xl font-bold mb-3">
           Support tickets
-          <a href="/old/tickets" className="ml-3 text-sm font-medium text-violet-600 hover:underline">Open full ticket view →</a>
+          <a href="/tickets" className="ml-3 text-sm font-medium text-violet-600 hover:underline">Open full ticket view →</a>
         </h2>
         <div className={`${card} overflow-hidden`}>
           {tickets.map((t) => (

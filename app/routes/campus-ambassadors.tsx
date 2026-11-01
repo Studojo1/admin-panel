@@ -79,7 +79,7 @@ export default function CampusAmbassadors() {
         const token = await getToken();
         if (!token) throw new Error("Not authenticated");
         const res = await fetch(
-          `/old/api/campus-ambassadors${showArchive ? "?archive=1" : ""}`,
+          `/api/campus-ambassadors${showArchive ? "?archive=1" : ""}`,
           {
             headers: { Authorization: `Bearer ${token}` },
             credentials: "include",
@@ -131,7 +131,7 @@ export default function CampusAmbassadors() {
     try {
       const token = await getToken();
       if (!token) throw new Error("Not authenticated");
-      const res = await fetch("/old/api/campus-ambassadors", {
+      const res = await fetch("/api/campus-ambassadors", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         credentials: "include",

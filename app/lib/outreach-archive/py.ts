@@ -49,6 +49,8 @@ export function pyOr<T, U>(a: T, b: U): T | U {
 export function pyRound(x: number, n = 0): number {
   if (!Number.isFinite(x)) return x;
   const neg = x < 0;
+  // toFixed takes up to 100 digits since ES2018; all of them are needed here.
+  // oxlint-disable-next-line number-arg-out-of-range
   const s = Math.abs(x).toFixed(100);
   const [ip, fp] = s.split(".");
   const keep = fp.slice(0, n);
@@ -146,6 +148,8 @@ export function diffDays(a: string, b: string): number {
 
 /** Python str.splitlines()[0] (or "" when there is no line). */
 export function firstLine(s: string): string {
+  // Python's str.splitlines() line breaks include these control characters.
+  // oxlint-disable-next-line no-control-regex
   return s.split(/\r\n|[\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]/)[0] ?? "";
 }
 

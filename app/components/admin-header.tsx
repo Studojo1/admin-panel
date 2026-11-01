@@ -1,35 +1,37 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useLocation, useNavigate } from "react-router";
 import { authClient } from "~/lib/auth-client";
 
-const NAV_LINKS = [
-  { to: "/old", label: "Dashboard" },
-  { to: "/old/users", label: "Users" },
-  { to: "/old/daily", label: "Daily Dashboard" },
-  { to: "/old/funnel", label: "Funnel" },
-  { to: "/old/journeys", label: "User Journeys" },
-  { to: "/old/outreach-orders", label: "Outreach Orders" },
-  { to: "/old/campaign-health", label: "Campaign Health" },
-  { to: "/old/campaign-refund-check", label: "Refund Check" },
-  { to: "/old/suppression", label: "Opt-outs" },
-  { to: "/old/paid-users", label: "Paid Users" },
-  { to: "/old/outreach", label: "Outreach Stats" },
-  { to: "/old/chat-logs", label: "Chat Logs" },
-  { to: "/old/ops-alerts", label: "Ops Alerts" },
-  { to: "/old/tickets", label: "Tickets" },
-  { to: "/old/webinar-registrations", label: "Webinar Signups" },
-  { to: "/old/campus-ambassadors", label: "Studojo Insiders" },
-  { to: "/old/email-sequences", label: "Emails" },
-  { to: "/old/sensei", label: "Sensei" },
-  { to: "/old/analytics", label: "Analytics" },
-  { to: "/old/utm-builder", label: "UTM Links" },
-  { to: "/old/coupons", label: "Coupons" },
-  { to: "/old/b2b-gtm", label: "B2B GTM" },
-  { to: "/old/gtm", label: "GTM Dashboards" },
-  { to: "/old/career-coach", label: "Career Coach" },
-  { to: "/old/settings", label: "Settings" },
-] as const;
+// Live tools first, at their original paths. The retired student product's
+// dashboards follow under /old (read-only archive, relaunch 2 Nov 2026).
+const NAV_LINKS: readonly { to: string; label: string; archive?: true }[] = [
+  { to: "/users", label: "Users" },
+  { to: "/chat-logs", label: "Chat Logs" },
+  { to: "/ops-alerts", label: "Ops Alerts" },
+  { to: "/tickets", label: "Tickets" },
+  { to: "/webinar-registrations", label: "Webinar Signups" },
+  { to: "/campus-ambassadors", label: "Studojo Insiders" },
+  { to: "/sensei", label: "Sensei" },
+  { to: "/utm-builder", label: "UTM Links" },
+  { to: "/b2b-gtm", label: "B2B GTM" },
+  { to: "/gtm", label: "GTM Dashboards" },
+  { to: "/settings", label: "Settings" },
+  { to: "/old", label: "Dashboard", archive: true },
+  { to: "/old/daily", label: "Daily Dashboard", archive: true },
+  { to: "/old/funnel", label: "Funnel", archive: true },
+  { to: "/old/journeys", label: "User Journeys", archive: true },
+  { to: "/old/outreach-orders", label: "Outreach Orders", archive: true },
+  { to: "/old/campaign-health", label: "Campaign Health", archive: true },
+  { to: "/old/campaign-refund-check", label: "Refund Check", archive: true },
+  { to: "/old/suppression", label: "Opt-outs", archive: true },
+  { to: "/old/paid-users", label: "Paid Users", archive: true },
+  { to: "/old/outreach", label: "Outreach Stats", archive: true },
+  { to: "/old/email-sequences", label: "Emails", archive: true },
+  { to: "/old/analytics", label: "Analytics", archive: true },
+  { to: "/old/coupons", label: "Coupons", archive: true },
+  { to: "/old/career-coach", label: "Career Coach", archive: true },
+];
 
 export function AdminHeader() {
   const location = useLocation();
@@ -116,9 +118,16 @@ export function AdminHeader() {
                   transition={{ duration: 0.15 }}
                   className="absolute right-0 top-full mt-2 w-52 overflow-y-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] max-h-[calc(100vh-6rem)]"
                 >
-                  {NAV_LINKS.map((link) => {
+                  {NAV_LINKS.map((link, i) => {
                     const isActive = location.pathname === link.to;
+                    const archiveStart = link.archive && !NAV_LINKS[i - 1]?.archive;
                     return (
+                      <Fragment key={link.to}>
+                      {archiveStart && (
+                        <div className="border-t-2 border-neutral-900 bg-amber-50 px-4 py-2 font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-500">
+                          Old product (archive)
+                        </div>
+                      )}
                       <Link
                         key={link.to}
                         to={link.to}
@@ -130,6 +139,7 @@ export function AdminHeader() {
                       >
                         {link.label}
                       </Link>
+                      </Fragment>
                     );
                   })}
                 </motion.div>
@@ -146,7 +156,7 @@ export function AdminHeader() {
             whileTap={{ scale: 0.95 }}
           >
             <Link
-              to="/old/sensei"
+              to="/sensei"
               className="rounded-lg border-2 border-neutral-900 bg-neutral-900 px-4 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
             >
               ◈ Sensei

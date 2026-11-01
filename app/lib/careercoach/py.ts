@@ -18,6 +18,8 @@ export function or<T, U>(a: T, b: U): T | U {
 function decimalString(x: number | string): string {
   if (typeof x === "string") return x.trim();
   if (Number.isInteger(x)) return String(x);
+  // toFixed takes up to 100 digits since ES2018; all of them are needed here.
+  // oxlint-disable-next-line number-arg-out-of-range
   return x.toFixed(100);
 }
 
@@ -117,6 +119,8 @@ export function pySlice(s: string, n: number): string {
 
 /** Python str.strip() for the whitespace that occurs in chat text. */
 export function pyStrip(s: string): string {
+  // Python's str.strip() whitespace includes these control characters.
+  // oxlint-disable-next-line no-control-regex
   return s.replace(/^[\s\x1c-\x1f\x85]+|[\s\x1c-\x1f\x85]+$/g, "");
 }
 

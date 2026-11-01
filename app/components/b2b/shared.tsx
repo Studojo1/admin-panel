@@ -340,7 +340,7 @@ export function ExitModal({
   const save = async () => {
     setSaving(true);
     try {
-      await authedFetch("/old/api/b2b-gtm?action=exit", {
+      await authedFetch("/api/b2b-gtm?action=exit", {
         method: "POST",
         body: JSON.stringify({
           company_id: company.id,
@@ -421,7 +421,7 @@ export function ReactivateModal({
   const save = async () => {
     setSaving(true);
     try {
-      await authedFetch("/old/api/b2b-gtm?action=reactivate", {
+      await authedFetch("/api/b2b-gtm?action=reactivate", {
         method: "POST",
         body: JSON.stringify({
           company_id: company.id,

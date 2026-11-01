@@ -6,7 +6,7 @@ import { posthogFetch } from "~/lib/posthog-client";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 async function phQuery(query: string) {
-  const res = await posthogFetch("/old/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",

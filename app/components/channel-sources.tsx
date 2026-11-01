@@ -66,7 +66,7 @@ async function loadSources(start: string, end: string): Promise<SourcesData> {
 }
 
 async function loadVisitors(start: string, end: string): Promise<Partial<Record<ChannelKey, number>>> {
-  const res = await posthogFetch("/old/api/posthog?type=query", {
+  const res = await posthogFetch("/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query: { kind: "HogQLQuery", query: visitorsHogql(start, end) } }),
