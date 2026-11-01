@@ -9,10 +9,21 @@ import { sql } from "drizzle-orm";
 // rows. This is the one place that creates or alters these tables (studojo.com
 // runs no DDL). Every statement is idempotent and never drops or renames anything.
 
-let tablesReady = false;
+// One run at a time per process: the start-up call and the first requests
+// share it, so their CREATE statements never race each other.
+let ready: Promise<void> | null = null;
 
-export async function ensureCreatorTables() {
-  if (tablesReady) return;
+export function ensureCreatorTables(): Promise<void> {
+  if (!ready) {
+    ready = createTables().catch((e) => {
+      ready = null; // try again on the next call
+      throw e;
+    });
+  }
+  return ready;
+}
+
+async function createTables() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_creators (
       id SERIAL PRIMARY KEY,
@@ -105,7 +116,7 @@ export async function ensureCreatorTables() {
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_ugc_creators_slug ON ugc_creators (slug) WHERE slug IS NOT NULL`);
   await db.execute(sql`
     UPDATE ugc_creators
-    SET slug = COALESCE(NULLIF(lower(regexp_replace(split_part(full_name, ' ', 1), '[^a-zA-Z]', '', 'g')), ''), 'fellow')
+    SET slug = COALESCE(NULLIF(left(lower(regexp_replace(split_part(btrim(full_name), ' ', 1), '[^a-zA-Z]', '', 'g')), 20), ''), 'fellow')
                || '-' || substr(md5(random()::text || id::text || clock_timestamp()::text), 1, 8)
     WHERE slug IS NULL
   `);
@@ -114,6 +125,11 @@ export async function ensureCreatorTables() {
   // fellows' own pages must never select these.
   await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS team_notes TEXT`);
   await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS nudged_at TIMESTAMPTZ`);
+  // What a fellow went on to, marked by the team on their applicant profile:
+  // the growth internship at Studojo, or a referral to someone hiring in our
+  // network. These fill the last two stages of the applicants' pipeline.
+  await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS intern_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS referred_at TIMESTAMPTZ`);
   // Posts a fellow wrote before the fellowship, so Claude never repeats them.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_creator_earlier_posts (
@@ -148,7 +164,6 @@ export async function ensureCreatorTables() {
     )
   `);
   await db.execute(sql`INSERT INTO ugc_programme (id, rules) VALUES (1, ${JSON.stringify(PROGRAMME_RULES)}::jsonb) ON CONFLICT (id) DO NOTHING`);
-  tablesReady = true;
 }
 
 /** 32 url-safe characters, kept for API use. */
@@ -331,7 +346,7 @@ export function creatorStats(posts: PostRow[], now: Date = new Date()): CreatorS
 // Create the tables as soon as the server loads this module (at start-up in
 // production): the fellows' pages on studojo.com only read and write rows, so
 // they can't wait for an admin to visit first. A failure here is retried on
-// first use, since tablesReady stays false.
+// the next call.
 ensureCreatorTables().catch((e) => {
   const err = e as { code?: string; name?: string };
   console.error("[ugc-creators] table setup at start failed; it retries on first use", err?.code ?? err?.name ?? "unknown");

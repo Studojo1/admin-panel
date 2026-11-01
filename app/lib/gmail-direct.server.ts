@@ -10,9 +10,9 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { emailsPaused } from "./email-pause.server";
 
-let cached: { transporter: Transporter; from: string } | null = null;
+let cached: { transporter: Transporter; from: string; user: string } | null = null;
 
-function getTransporter(): { transporter: Transporter; from: string } | null {
+function getTransporter(): { transporter: Transporter; from: string; user: string } | null {
   if (cached) return cached;
   const user = (process.env.STUDOJO_GMAIL_USER || "studojo@gmail.com").trim();
   const password = (process.env.STUDOJO_GMAIL_APP_PASSWORD || "")
@@ -30,8 +30,13 @@ function getTransporter(): { transporter: Transporter; from: string } | null {
     secure: false,
     requireTLS: true,
     auth: { user, pass: password },
+    // Fail in seconds rather than minutes, so the person waiting on a send
+    // hears whether it went before their request times out.
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
   });
-  cached = { transporter, from: `Studojo Support <${user}>` };
+  cached = { transporter, from: `Studojo Support <${user}>`, user };
   return cached;
 }
 
@@ -39,7 +44,11 @@ export interface SendOpts {
   to: string;
   subject: string;
   html: string;
+  /** Plain-text version, sent alongside the HTML when given. */
+  text?: string;
   replyTo?: string;
+  /** Sender name in place of "Studojo Support"; the address stays the same. */
+  fromName?: string;
 }
 
 export async function sendDirectGmail(opts: SendOpts): Promise<boolean> {
@@ -51,10 +60,11 @@ export async function sendDirectGmail(opts: SendOpts): Promise<boolean> {
   if (!t) return false;
   try {
     await t.transporter.sendMail({
-      from: t.from,
+      from: opts.fromName ? `${opts.fromName.replace(/[<>"\r\n]/g, "")} <${t.user}>` : t.from,
       to: opts.to,
       subject: opts.subject,
       html: opts.html,
+      text: opts.text,
       replyTo: opts.replyTo,
     });
     return true;

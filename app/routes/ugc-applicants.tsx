@@ -1,9 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
+import { meetingWhatsapp, meetingWhen } from "~/lib/fellowship-meeting";
 import type { Route } from "./+types/ugc-applicants";
 
 export function meta({}: Route.MetaArgs) {
@@ -11,10 +13,16 @@ export function meta({}: Route.MetaArgs) {
 }
 
 // Applications to the Growth Fellowship from studojo.com/fellowship-growth
-// (also served at /creators and /ugc).
-// The team follows the page's funnel and the applicants' share links, filters
-// the applicants, reads every answer, sets a status, keeps notes and exports
-// from here. Reads and saves go through /api/ugc-applicants.
+// (also served at /creators and /ugc), in the founder's chosen "Editorial
+// calendar" design: the pipeline, then the funnel, the list and the selected
+// applicant's profile side by side. The team filters and sorts applicants,
+// reads every answer, sets a status, schedules the selection meeting (which
+// emails the applicant), makes them a fellow, keeps notes and exports from
+// here, and follows the page's sharing numbers below. Reads and saves go
+// through /api/ugc-applicants (and /api/ugc-creators for Make fellow).
+
+// Headings use a book serif, as in the design.
+const SERIF = '"Iowan Old Style", Charter, "Bitstream Charter", Georgia, serif';
 
 // The share buttons on the form's success screen.
 const CHANNELS = ["linkedin", "whatsapp", "copy"] as const;
@@ -87,8 +95,27 @@ interface Applicant {
   utm_campaign: string | null;
   referrer: string | null;
   created_at: string;
+  // The selection meeting, set from this page.
+  meeting_at: string | null;
+  meeting_link: string | null;
+  meeting_note: string | null;
+  meeting_emailed_at: string | null;
+  // The meeting time they were last actually emailed (kept when it changes).
+  meeting_emailed_for?: string | null;
+  // Another save is sending the meeting email right now.
+  meeting_sending?: boolean;
   // Null when the numbers could not be counted.
   share: ShareStats | null;
+}
+
+// Applied to Referred, as api.ugc-applicants.tsx counts them.
+interface Pipeline {
+  applied: number;
+  shortlisted: number;
+  meeting: number;
+  fellow: number;
+  growthIntern: number;
+  referred: number;
 }
 
 interface Counts {
@@ -127,21 +154,36 @@ interface Analytics {
 }
 
 // The review states and the notes limit, as enforced by api.ugc-applicants.tsx.
-const STATUSES = ["new", "shortlisted", "selected", "rejected"] as const;
+// 'selected' is a fellow: only Make fellow sets it, since that also creates
+// their page.
+const STATUSES = ["new", "shortlisted", "meeting", "selected", "rejected"] as const;
+// The ones the team sets by hand. "Meeting scheduled" comes from Schedule
+// meeting (which saves the time and emails them) and Fellow from Make fellow.
+const SETTABLE = ["new", "shortlisted", "rejected"] as const;
+// The profile's status row, in pipeline order.
+const STATUS_BUTTONS = ["new", "shortlisted", "meeting", "rejected"] as const;
+// Tailwind's lg breakpoint, in the same unit, so this agrees with lg:block and
+// lg:hidden at any browser font size.
+const WIDE = "(min-width: 64rem)";
 
 const STATUS_LABELS: Record<string, string> = {
   new: "New",
   shortlisted: "Shortlisted",
-  selected: "Selected",
+  meeting: "Meeting scheduled",
+  selected: "Fellow",
   rejected: "Rejected",
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  new: "bg-blue-100 text-blue-700 border-blue-200",
-  shortlisted: "bg-amber-100 text-amber-700 border-amber-200",
-  selected: "bg-green-100 text-green-700 border-green-200",
-  rejected: "bg-gray-200 text-gray-600 border-gray-300",
+  new: "bg-blue-50 text-blue-700 border-blue-200",
+  shortlisted: "bg-amber-50 text-amber-800 border-amber-200",
+  meeting: "bg-violet-50 text-violet-700 border-violet-200",
+  selected: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  rejected: "bg-gray-100 text-gray-600 border-gray-300",
 };
+
+// The five signals shown as quick filters before "More filters".
+const PRIMARY_HIGHLIGHTS = ["conn500", "crossed1k", "weekly", "commit", "intern"] as const;
 
 const NOTES_MAX = 2000;
 
@@ -460,10 +502,10 @@ async function getJson(url: string) {
   return res.json();
 }
 
-async function postAction(body: Record<string, unknown>) {
+async function postAction(body: Record<string, unknown>, url = "/api/ugc-applicants") {
   const token = await getToken();
   if (!token) throw new Error("Please sign in again.");
-  const res = await fetch("/api/ugc-applicants", {
+  const res = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     credentials: "include",
@@ -483,6 +525,21 @@ async function copyText(text: string) {
   }
 }
 
+// A fellow's record, for an applicant taken on.
+interface Fellow {
+  id: number;
+  link: string | null;
+  intern_at: string | null;
+  referred_at: string | null;
+}
+
+// What a fellow went on to; these fill the pipeline's last two stages.
+const OUTCOMES = [
+  { key: "intern", field: "intern_at", label: "Growth intern" },
+  { key: "referred", field: "referred_at", label: "Referred to someone hiring" },
+] as const;
+type Outcome = (typeof OUTCOMES)[number]["key"];
+
 function withId(set: Set<number>, id: number, present: boolean): Set<number> {
   const next = new Set(set);
   if (present) next.add(id);
@@ -498,8 +555,17 @@ export default function UgcApplicants() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filters, setFilters] = useState<Record<FilterKey, string>>(NO_FILTERS);
   const [search, setSearch] = useState("");
-  // Rows opened to show every answer.
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // The applicant whose profile is open (on phones, as a full-screen sheet).
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [pipeline, setPipeline] = useState<Pipeline | null>(null);
+  const [moreFilters, setMoreFilters] = useState(false);
+  const [scheduling, setScheduling] = useState<Set<number>>(new Set());
+  // The email pause (29 Oct 2026): while it's on, the meeting form says so
+  // instead of offering to email.
+  const [emailsPaused, setEmailsPaused] = useState(false);
+  // The calendar tab shows once the creators admin is live at /fellowship/calendar.
+  const [calendarLive, setCalendarLive] = useState(false);
   const [savingStatus, setSavingStatus] = useState<Set<number>>(new Set());
   // Notes being edited, by applicant id. Kept while a row is closed, so
   // nothing typed is lost by collapsing it.
@@ -514,45 +580,81 @@ export default function UgcApplicants() {
   const analyticsRequest = useRef(0);
   // An applicant opened from elsewhere on the page, scrolled to once shown.
   const [scrollTo, setScrollTo] = useState<number | null>(null);
-  // Applicants already taken on as fellows: application id to their page link.
-  const [fellowByApp, setFellowByApp] = useState<Record<number, { id: number; link: string | null }>>({});
+  // Applicants already taken on as fellows: application id to their record.
+  const [fellowByApp, setFellowByApp] = useState<Record<number, Fellow>>({});
   const [makingFellow, setMakingFellow] = useState<Set<number>>(new Set());
+  const [savingOutcome, setSavingOutcome] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     if (isPending || !isAuthorized) return;
     getJson("/api/ugc-creators")
       .then((d) => {
-        const map: Record<number, { id: number; link: string | null }> = {};
-        for (const c of (d.creators || []) as { id: number; application_id: number | null; link: string | null }[]) {
-          if (c.application_id) map[c.application_id] = { id: c.id, link: c.link };
+        const map: Record<number, Fellow> = {};
+        for (const c of (d.creators || []) as (Fellow & { application_id: number | null; status: string })[]) {
+          if (c.application_id && c.status !== "removed") {
+            map[c.application_id] = { id: c.id, link: c.link, intern_at: c.intern_at ?? null, referred_at: c.referred_at ?? null };
+          }
         }
         setFellowByApp(map);
       })
       .catch(() => {
-        // Without it, rows just offer "Make fellow", which is safe to press twice.
+        // Rows still offer "Make fellow", which is safe to press twice.
+        toast.error("Could not load the fellows' pages. Reload to see them.");
       });
   }, [isPending, isAuthorized]);
+
+  // Fresh counts and pipeline after a change made through the fellows' API.
+  function refreshCounts() {
+    getJson("/api/ugc-applicants?only=counts")
+      .then((d) => {
+        if (d.counts) setCounts(d.counts);
+        if (d.pipeline) setPipeline(d.pipeline);
+      })
+      .catch(() => {
+        // The counts catch up on the next load.
+      });
+  }
 
   async function makeFellow(a: Applicant) {
     setMakingFellow((s) => withId(s, a.id, true));
     try {
-      const token = await getToken();
-      if (!token) throw new Error("Please sign in again.");
-      const res = await fetch("/api/ugc-creators", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ intent: "create-from-application", applicationId: a.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-      setFellowByApp((m) => ({ ...m, [a.id]: { id: data.creator.id, link: data.creator.link ?? null } }));
+      const data = await postAction({ intent: "create-from-application", applicationId: a.id }, "/api/ugc-creators");
+      setFellowByApp((m) => ({
+        ...m,
+        [a.id]: {
+          id: data.creator.id,
+          link: data.creator.link ?? null,
+          intern_at: data.creator.intern_at ?? null,
+          referred_at: data.creator.referred_at ?? null,
+        },
+      }));
       setRows((rs) => rs.map((r) => (r.id === a.id ? { ...r, status: "selected" } : r)));
+      moveCount(a.status, "selected");
       toast.success(`${a.full_name} is now a fellow.`);
+      refreshCounts();
     } catch (e: any) {
       toast.error(e.message || "Could not make them a fellow");
     } finally {
       setMakingFellow((s) => withId(s, a.id, false));
+    }
+  }
+
+  // Marks (or unmarks) what a fellow went on to.
+  async function setOutcome(a: Applicant, outcome: Outcome, on: boolean) {
+    const fellow = fellowByApp[a.id];
+    if (!fellow) return;
+    setSavingOutcome((s) => withId(s, a.id, true));
+    try {
+      const data = await postAction({ intent: "set-outcome", id: fellow.id, outcome, on }, "/api/ugc-creators");
+      setFellowByApp((m) => ({
+        ...m,
+        [a.id]: { ...m[a.id], intern_at: data.creator.intern_at ?? null, referred_at: data.creator.referred_at ?? null },
+      }));
+      refreshCounts();
+    } catch (e: any) {
+      toast.error(`Could not update ${a.full_name}: ${e.message || "unknown error"}`);
+    } finally {
+      setSavingOutcome((s) => withId(s, a.id, false));
     }
   }
   // Stand-out quick filters (all must match) and the sort order.
@@ -572,6 +674,8 @@ export default function UgcApplicants() {
         if (cancelled) return;
         setRows(data.applicants || []);
         setCounts(data.counts || null);
+        setPipeline(data.pipeline || null);
+        setEmailsPaused(Boolean(data.emailsPaused));
         if (request === analyticsRequest.current) {
           setAnalytics(data.analytics ?? null);
           setAnalyticsError(data.analytics ? null : data.analytics_error || "unknown error");
@@ -628,10 +732,93 @@ export default function UgcApplicants() {
     if (scrollTo === null) return;
     const row = document.getElementById(`ugc-applicant-${scrollTo}`);
     if (!row) return;
-    row.scrollIntoView({ behavior: "smooth", block: "start" });
-    row.querySelector<HTMLButtonElement>("button[aria-expanded]")?.focus({ preventScroll: true });
+    row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    row.querySelector<HTMLButtonElement>("button[data-open]")?.focus({ preventScroll: true });
     setScrollTo(null);
   }, [scrollTo, filtered]);
+
+  // On a wide screen the profile column is never empty: show the first applicant.
+  useEffect(() => {
+    if (selectedId !== null || filtered.length === 0) return;
+    if (window.matchMedia(WIDE).matches) setSelectedId(filtered[0].id);
+  }, [filtered, selectedId]);
+
+  // The phone sheet has its own history entry, so the phone's Back closes it
+  // instead of leaving the page (and any unsaved notes).
+  const sheetInHistory = useRef(false);
+  function openSheet() {
+    setSheetOpen(true);
+    if (!sheetInHistory.current) {
+      window.history.pushState({ ...(window.history.state ?? {}), ugcSheet: true }, "");
+      sheetInHistory.current = true;
+    }
+  }
+  function closeSheet() {
+    if (sheetInHistory.current) {
+      sheetInHistory.current = false;
+      window.history.back(); // popstate closes it
+    } else {
+      setSheetOpen(false);
+    }
+  }
+  useEffect(() => {
+    const onPop = () => {
+      sheetInHistory.current = false;
+      setSheetOpen(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  // A sheet left open when the screen widens (a tablet turned) closes.
+  useEffect(() => {
+    const mq = window.matchMedia(WIDE);
+    const onChange = () => mq.matches && closeSheet();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Focus returns to the row when the sheet closes.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !sheetOpen && selectedId !== null) {
+      document.querySelector<HTMLButtonElement>(`#ugc-applicant-${selectedId} button[data-open]`)?.focus({ preventScroll: true });
+    }
+    wasOpen.current = sheetOpen;
+  }, [sheetOpen, selectedId]);
+  // A keyboard user opening an applicant on a wide screen lands on their profile.
+  const [focusProfile, setFocusProfile] = useState(false);
+  useEffect(() => {
+    if (!focusProfile) return;
+    document.getElementById("ugc-profile-title")?.focus();
+    setFocusProfile(false);
+  }, [focusProfile, selectedId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/fellowship/calendar", { method: "GET", credentials: "include" })
+      .then((res) => !cancelled && setCalendarLive(res.ok))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The phone sheet locks the page behind it and closes with Escape.
+  useEffect(() => {
+    if (!sheetOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      // The meeting form and the Make fellow confirm close themselves first.
+      if ((e.target as Element | null)?.closest?.('form, [role="alertdialog"]')) return;
+      closeSheet();
+    };
+    document.addEventListener("keydown", onKey);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+    };
+  }, [sheetOpen]);
 
   function clearFilters() {
     setFilters(NO_FILTERS);
@@ -648,8 +835,10 @@ export default function UgcApplicants() {
     });
   }
 
-  function toggle(id: number) {
-    setExpanded((prev) => withId(prev, id, !prev.has(id)));
+  // Shows an applicant's profile: beside the list on a wide screen, as a sheet on a phone.
+  function select(id: number) {
+    setSelectedId(id);
+    if (!window.matchMedia(WIDE).matches) openSheet();
   }
 
   // Opens an applicant named elsewhere on the page (a sharer, or someone who
@@ -657,8 +846,16 @@ export default function UgcApplicants() {
   function openApplicant(id: number) {
     if (!rows.some((r) => r.id === id)) return;
     if (!filtered.some((r) => r.id === id)) clearFilters();
-    setExpanded((prev) => withId(prev, id, true));
-    setScrollTo(id);
+    select(id);
+    if (!sheetOpen) setScrollTo(id);
+  }
+
+  // Keeps the status counts right after a change made here.
+  function moveCount(from: string, to: string) {
+    if (from === to) return;
+    setCounts((c) =>
+      c ? { ...c, by_status: { ...c.by_status, [from]: Math.max(0, (c.by_status[from] ?? 0) - 1), [to]: (c.by_status[to] ?? 0) + 1 } } : c
+    );
   }
 
   async function changeRange(next: RangeKey) {
@@ -689,10 +886,10 @@ export default function UgcApplicants() {
 
   // A click anywhere on a row opens it, except on its links and controls, or
   // when the click ends a text selection (copying an email, say).
-  function onRowClick(e: MouseEvent<HTMLTableRowElement>, id: number) {
+  function onRowClick(e: MouseEvent<HTMLLIElement>, id: number) {
     if ((e.target as HTMLElement).closest("a, button, select, input, textarea, label")) return;
     if (window.getSelection()?.toString()) return;
-    toggle(id);
+    select(id);
   }
 
   async function changeStatus(applicant: Applicant, status: string) {
@@ -704,11 +901,38 @@ export default function UgcApplicants() {
     try {
       const data = await postAction({ intent: "set-status", id: applicant.id, status });
       if (data.counts) setCounts(data.counts);
+      if (data.pipeline) setPipeline(data.pipeline);
     } catch (e: any) {
       setRows((rs) => rs.map((r) => (r.id === applicant.id ? { ...r, status: previous } : r)));
       toast.error(`Could not update ${applicant.full_name}: ${e.message || "unknown error"}`);
     } finally {
       setSavingStatus((s) => withId(s, applicant.id, false));
+    }
+  }
+
+  // Sets the selection meeting and (unless told not to) emails them the time.
+  async function scheduleMeeting(a: Applicant, m: { at: string; link: string; note: string; notify: boolean }) {
+    setScheduling((s) => withId(s, a.id, true));
+    try {
+      const data = await postAction({ intent: "schedule-meeting", id: a.id, ...m });
+      setRows((rs) => rs.map((r) => (r.id === a.id ? { ...r, ...data.applicant } : r)));
+      if (data.counts) setCounts(data.counts);
+      if (data.pipeline) setPipeline(data.pipeline);
+      if (typeof data.emailsPaused === "boolean") setEmailsPaused(data.emailsPaused);
+      const first = a.full_name.trim().split(/\s+/)[0];
+      const tell = whatsappHref(a.whatsapp) ? `send ${first} the time on WhatsApp` : `tell ${first} the time yourself`;
+      if (data.alreadyEmailed) toast.success(`Meeting saved. ${first} already has the email with this time.`);
+      else if (data.emailed) toast.success(`Meeting set. ${first} has been emailed at ${a.email}.`);
+      else if (data.sending) toast.info(`Meeting saved. The email to ${first} is still being sent. Reload in a minute to check it went.`);
+      else if (data.emailsPaused) toast.success(`Meeting saved. Emails are paused, so ${tell}.`);
+      else if (m.notify) toast.warning(`Meeting saved, but the email didn't go, so ${tell}.`);
+      else toast.success("Meeting saved. No email was sent.");
+      return true;
+    } catch (e: any) {
+      toast.error(e.message || "Could not set the meeting");
+      return false;
+    } finally {
+      setScheduling((s) => withId(s, a.id, false));
     }
   }
 
@@ -737,69 +961,113 @@ export default function UgcApplicants() {
 
   if (isPending || isAuthorized === null) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F0]">
+      <div className="flex min-h-screen items-center justify-center bg-[#F2F1F6]">
         <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-violet-500 border-r-transparent" />
       </div>
     );
   }
   if (!isAuthorized) return null;
 
-  const columns: { label: string; title?: string }[] = [
-    { label: "" },
-    { label: "Applied" },
-    { label: "Applicant" },
-    { label: "Score", title: `Stand-out score out of ${MAX_SCORE}, from the reach and commitment signals they show (the tags under their name)` },
-    { label: "Field" },
-    { label: "LinkedIn" },
-    { label: "Connections" },
-    { label: "Posting" },
-    { label: "Post over 1k", title: "Has any of their posts crossed 1,000 impressions?" },
-    { label: "Can commit" },
-    { label: "Studojo posts" },
-    { label: "Status" },
+  const selected = rows.find((r) => r.id === selectedId) ?? null;
+  const newCount = counts?.by_status.new ?? 0;
+  const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
+  const stageFilter = filters.status;
+  const statusTabs: { key: string; label: string; n: number }[] = [
+    { key: "", label: "All", n: rows.length },
+    ...STATUSES.map((st) => ({ key: st, label: STATUS_LABELS[st], n: counts?.by_status[st] ?? 0 })),
   ];
 
+  const profileFor = (a: Applicant, inSheet: boolean) => {
+    const so = standOut(a, links);
+    const draft = noteDrafts[a.id];
+    const savedNotes = a.team_notes ?? "";
+    return (
+      <ApplicantProfile
+        key={a.id}
+        applicant={a}
+        inSheet={inSheet}
+        onClose={closeSheet}
+        via={links.cameVia(a)}
+        broughtIn={links.broughtIn(a)}
+        links={links}
+        score={so.score}
+        onOpenApplicant={openApplicant}
+        savingStatus={savingStatus.has(a.id)}
+        onStatus={(st) => changeStatus(a, st)}
+        notes={draft ?? savedNotes}
+        notesDirty={draft !== undefined && cleanNotes(draft) !== savedNotes}
+        savingNotes={savingNotes.has(a.id)}
+        onNotesChange={(value) => setNoteDrafts((d) => ({ ...d, [a.id]: value }))}
+        onNotesSave={() => saveNotes(a)}
+        fellow={fellowByApp[a.id] ?? null}
+        makingFellow={makingFellow.has(a.id)}
+        onMakeFellow={() => makeFellow(a)}
+        savingOutcome={savingOutcome.has(a.id)}
+        onOutcome={(o, on) => setOutcome(a, o, on)}
+        scheduling={scheduling.has(a.id)}
+        onScheduleMeeting={(m) => scheduleMeeting(a, m)}
+        emailsPaused={emailsPaused}
+      />
+    );
+  };
+
   return (
-    <div className="min-h-screen bg-[#F5F5F0]">
+    <div className="min-h-screen bg-[#F2F1F6] text-[#1A1625]">
+      <div inert={sheetOpen || undefined}>
       <AdminHeader />
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+
+      {/* The fellowship's own two tabs, as in the design. */}
+      <nav aria-label="Growth Fellowship" className="border-b border-[#E5E2EC] bg-white">
+        <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-x-6 gap-y-1 px-4 sm:px-6">
+          <div className="flex items-center gap-1">
+            <span className="mr-3 py-3 text-sm font-semibold text-[#686377]">Growth Fellowship</span>
+            {calendarLive && (
+              <Link
+                to="/fellowship/calendar"
+                className="border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-[#4B4659] hover:text-[#1A1625]"
+              >
+                Calendar
+              </Link>
+            )}
+            <span aria-current="page" className="inline-flex items-center gap-2 border-b-2 border-[#6C3AE8] px-3 py-3 text-sm font-semibold text-[#1A1625]">
+              Applicants
+              {newCount > 0 && (
+                <span className="rounded-full bg-[#AE2539] px-1.5 text-[11px] font-bold leading-[18px] text-white" title={`${newCount} new`}>
+                  {newCount}
+                </span>
+              )}
+            </span>
+          </div>
+          <p className="py-2 text-sm font-semibold text-[#4B4659]">{today}</p>
+        </div>
+      </nav>
+
+      <main className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
-              Growth Fellowship applicants
+            <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.01em]" style={{ fontFamily: SERIF }}>
+              Applicants
             </h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Applications to the Studojo Growth Fellowship from studojo.com/fellowship-growth. Click a row to read every answer.
+            <p className="mt-1 text-sm text-[#686377]">
+              Growth Fellowship applications from studojo.com/fellowship-growth. Scores are out of {MAX_SCORE}.
             </p>
           </div>
-          <div className="flex items-center gap-4">
-            <a href="#funnel-and-sharing" className="text-sm font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900">
-              Funnel and sharing
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {counts && <span className="text-sm text-[#686377]">{counts.last_24_hours} in the past 24 hours</span>}
+            <a href="#funnel-and-sharing" className="text-sm font-semibold text-[#5428C8] underline underline-offset-2 hover:text-[#1A1625]">
+              Sharing and sources
             </a>
             <button
               type="button"
               onClick={() => downloadCsv(filtered, links)}
               disabled={filtered.length === 0}
-              title="Downloads the applicants shown below, with every answer and their share link numbers"
-              className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-1.5 text-sm font-semibold text-gray-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
+              title="Downloads the applicants shown, with every answer and their share link numbers"
+              className="rounded-lg border border-[#CDC8D9] bg-white px-4 py-2 text-sm font-semibold hover:border-[#6C3AE8] disabled:opacity-50"
             >
               Download CSV
             </button>
           </div>
         </div>
-
-        {counts && (
-          <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-5">
-            <CountTile
-              label="Total applicants"
-              value={counts.total}
-              note={`${counts.last_24_hours} in the past 24 hours`}
-            />
-            {STATUSES.map((s) => (
-              <CountTile key={s} label={STATUS_LABELS[s]} value={counts.by_status[s] ?? 0} />
-            ))}
-          </div>
-        )}
 
         {loadError && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
@@ -807,313 +1075,287 @@ export default function UgcApplicants() {
           </div>
         )}
 
-        {!loading && rows.length > 0 && (
-          <section className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" aria-label="Who stands out">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-900">Who stands out</h2>
-                <p className="text-xs text-gray-500">Click to filter. Pick several to see people who match all of them.</p>
-              </div>
-              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Sort
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as "newest" | "standout")}
-                  className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-gray-900"
-                >
-                  <option value="newest">Newest first</option>
-                  <option value="standout">Stand-out score</option>
-                </select>
-              </label>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {HIGHLIGHTS.map((h) => {
-                const on = quick.has(h.key);
-                const n = rows.filter((r) => h.test(r, links)).length;
-                return (
-                  <button
-                    key={h.key}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => toggleQuick(h.key)}
-                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                      on ? "border-violet-600 bg-violet-600 text-white" : "border-gray-300 bg-white text-gray-800 hover:border-violet-400"
-                    }`}
-                  >
-                    {h.label}
-                    <span className={`ml-2 tabular-nums ${on ? "text-violet-100" : "text-gray-400"}`}>{n}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {!loading && rows.length > 0 && (
-          <div className="mb-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
-              <div>
-                <label htmlFor="ugc-search" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Search
-                </label>
-                <input
-                  id="ugc-search"
-                  type="search"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Name, email or college"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
-                />
-              </div>
-              {FILTERS.map((f) => (
-                <div key={f.key}>
-                  <label
-                    htmlFor={`ugc-filter-${f.key}`}
-                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500"
-                  >
-                    {f.label}
-                  </label>
-                  <select
-                    id={`ugc-filter-${f.key}`}
-                    value={filters[f.key]}
-                    onChange={(e) => setFilters((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
-                  >
-                    <option value="">{f.all}</option>
-                    {filterOptions[f.key].map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {f.optionLabel ? f.optionLabel(o.value) : o.value} ({o.count})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-            <div className="mt-2 flex items-center gap-3 text-sm">
-              <span className="text-gray-400">
-                {filtered.length} of {rows.length} shown
-              </span>
-              {filtersActive && (
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                  className="text-xs font-medium text-violet-700 underline underline-offset-2"
-                >
-                  Clear filters
-                </button>
-              )}
-            </div>
-          </div>
+        {pipeline && (
+          <PipelineCard
+            pipeline={pipeline}
+            active={stageFilter}
+            onPick={(st) => setFilters((f) => ({ ...f, status: f.status === st ? "" : st }))}
+          />
         )}
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Loading...</div>
+          <div className="py-16 text-center text-sm text-[#686377]">Loading...</div>
         ) : loadError ? null : rows.length === 0 ? (
-          <div className="rounded-2xl border border-gray-200 bg-white p-12 text-center shadow-sm">
-            <p className="text-sm font-medium text-gray-700">No applications yet.</p>
-            <p className="mt-1 text-sm text-gray-400">
-              Applications from studojo.com/fellowship-growth will show up here as they come in.
-            </p>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-2xl border border-gray-200 bg-white p-12 text-center shadow-sm">
-            <p className="text-sm text-gray-500">No applications match these filters.</p>
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="mt-3 text-sm font-medium text-violet-700 underline underline-offset-2"
-            >
-              Clear filters
-            </button>
+          <div className="mt-5 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_290px]">
+            <div className="rounded-xl border border-[#E5E2EC] bg-white p-12 text-center">
+              <p className="text-sm font-medium">No applications yet.</p>
+              <p className="mt-1 text-sm text-[#686377]">Applications from studojo.com/fellowship-growth will show up here as they come in.</p>
+            </div>
+            <FunnelSide analytics={analytics} error={analyticsError} loading={analyticsLoading} range={range} onRangeChange={changeRange} />
           </div>
         ) : (
-          // @container lets an open row's answers size to the visible width
-          // (100cqw) when the table is wider than the screen and scrolls.
-          <div className="@container overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50">
-                <tr>
-                  {columns.map((c, i) => (
-                    <th
-                      key={c.label || i}
-                      title={c.title}
-                      className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+          <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[290px_minmax(0,1fr)_420px]">
+            {/* Middle: the list. */}
+            <section aria-labelledby="ugc-list-title" className="min-w-0 rounded-xl border border-[#E5E2EC] bg-white">
+              <div className="px-4 pt-5 sm:px-5">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 id="ugc-list-title" className="text-xl font-semibold" style={{ fontFamily: SERIF }}>
+                    {rows.length} applications
+                  </h2>
+                  <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#686377]">
+                    Sort
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as "newest" | "standout")}
+                      className="rounded-lg border border-[#CDC8D9] bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-[#1A1625]"
                     >
-                      {c.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filtered.map((r) => {
-                  const open = expanded.has(r.id);
-                  const linkedin = httpsUrl(r.linkedin_url);
-                  const savedNotes = r.team_notes ?? "";
-                  const draft = noteDrafts[r.id];
-                  const via = links.cameVia(r);
-                  const so = standOut(r, links);
-                  return (
-                    <Fragment key={r.id}>
-                      <tr
-                        id={`ugc-applicant-${r.id}`}
-                        onClick={(e) => onRowClick(e, r.id)}
-                        className={`scroll-mt-8 cursor-pointer align-top ${open ? "bg-violet-50/60" : "hover:bg-gray-50"}`}
+                      <option value="newest">Newest first</option>
+                      <option value="standout">Stand-out score</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div role="group" aria-label="Status filter" className="mt-3 flex flex-wrap gap-x-1 border-b border-[#E5E2EC]">
+                  {statusTabs.map((t) => {
+                    const on = (filters.status || "") === t.key;
+                    return (
+                      <button
+                        key={t.key || "all"}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setFilters((f) => ({ ...f, status: t.key }))}
+                        className={`-mb-px whitespace-nowrap border-b-2 px-2 pb-2 pt-1 text-sm font-semibold ${
+                          on ? "border-[#6C3AE8] text-[#1A1625]" : "border-transparent text-[#686377] hover:text-[#1A1625]"
+                        }`}
                       >
-                        <td className="py-3 pl-3 pr-0">
-                          <button
-                            type="button"
-                            onClick={() => toggle(r.id)}
-                            aria-expanded={open}
-                            aria-label={`${open ? "Hide" : "Show"} every answer from ${r.full_name}`}
-                            className="flex h-6 w-6 items-center justify-center rounded text-gray-500 hover:bg-gray-200 hover:text-gray-900"
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                              className={`transition-transform ${open ? "rotate-90" : ""}`}
-                            >
-                              <polyline points="9 6 15 12 9 18" />
-                            </svg>
-                          </button>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-xs text-gray-500">
-                          <div>{formatDay(r.created_at)}</div>
-                          <div className="text-gray-400">{formatClock(r.created_at)}</div>
-                        </td>
-                        <td className="min-w-[200px] px-3 py-3">
-                          <div className="font-medium text-gray-900">{r.full_name}</div>
-                          <div className="text-xs text-gray-600">{r.college}</div>
-                          <div className="text-xs text-gray-400">
-                            {r.course}, {r.year_of_study}
-                          </div>
-                          {via && (
-                            <div className="mt-1 text-xs text-gray-500">
-                              Came via <CameViaName via={via} onOpen={openApplicant} />
-                            </div>
-                          )}
-                          {so.reasons.length > 0 && (
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                              {so.reasons.slice(0, 3).map((reason) => (
-                                <span key={reason} className="whitespace-nowrap rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800">
-                                  {reason}
-                                </span>
-                              ))}
-                              {so.reasons.length > 3 && <span className="text-[11px] text-gray-400">+{so.reasons.length - 3} more</span>}
-                            </div>
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3">
-                          <span className="text-sm font-bold tabular-nums text-gray-900">{so.score}</span>
-                          <span className="text-xs text-gray-400"> / {MAX_SCORE}</span>
-                        </td>
-                        <td className="px-3 py-3 text-gray-800">{r.field}</td>
-                        {r.has_linkedin ? (
-                          <>
-                            <td className="whitespace-nowrap px-3 py-3">
-                              {linkedin ? (
-                                <a
-                                  href={linkedin}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900"
-                                >
-                                  Profile
-                                </a>
-                              ) : (
-                                <span className="text-xs text-gray-400" title={r.linkedin_url ?? undefined}>
-                                  {r.linkedin_url ? "Not a link" : "Not answered"}
-                                </span>
-                              )}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-3 text-gray-800">
-                              {r.connections ? (
-                                r.connections
-                              ) : r.followers ? (
-                                <>
-                                  <div>{r.followers}</div>
-                                  <div className="text-xs text-gray-400">followers, old form</div>
-                                </>
-                              ) : (
-                                <span className="text-xs text-gray-400">Not answered</span>
-                              )}
-                            </td>
-                            <td className="px-3 py-3 text-gray-800">
-                              <div>{orBlank(r.post_frequency)}</div>
-                              <div className="text-xs text-gray-500">Last posted: {r.last_posted ?? "not answered"}</div>
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-3 text-gray-800">{orBlank(r.crossed_1k)}</td>
-                          </>
-                        ) : (
-                          <td colSpan={4} className="px-3 py-3">
-                            <NoLinkedinPill />
-                            <span className="ml-2 text-xs text-gray-400">LinkedIn questions skipped</span>
-                          </td>
-                        )}
-                        <td className="px-3 py-3 text-gray-800">{r.can_commit}</td>
-                        <td className="px-3 py-3 text-gray-800">{r.studojo_ok}</td>
-                        <td className="px-3 py-3">
+                        {t.label} <span className="font-normal text-[#686377]">{t.n}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <label htmlFor="ugc-search" className="sr-only">
+                    Search
+                  </label>
+                  <input
+                    id="ugc-search"
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search name, email or college"
+                    className="min-w-0 flex-1 rounded-lg border border-[#CDC8D9] bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                  />
+                </div>
+
+                <section aria-label="Who stands out" className="mt-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold text-[#686377]">Quick filters</span>
+                    {HIGHLIGHTS.filter((h) => moreFilters || (PRIMARY_HIGHLIGHTS as readonly string[]).includes(h.key) || quick.has(h.key)).map((h) => {
+                      const on = quick.has(h.key);
+                      const n = rows.filter((r) => h.test(r, links)).length;
+                      return (
+                        <button
+                          key={h.key}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => toggleQuick(h.key)}
+                          className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
+                            on ? "border-[#6C3AE8] bg-[#6C3AE8] text-white" : "border-[#CDC8D9] bg-white text-[#1A1625] hover:border-[#6C3AE8]"
+                          }`}
+                        >
+                          {h.label}
+                          <span className="sr-only">, </span>
+                          <span className={`ml-1.5 tabular-nums ${on ? "text-violet-100" : "text-[#686377]"}`}>{n}</span>
+                          <span className="sr-only"> applicants</span>
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      aria-expanded={moreFilters}
+                      onClick={() => setMoreFilters((v) => !v)}
+                      className="text-[13px] font-semibold text-[#5428C8] underline underline-offset-2"
+                    >
+                      {moreFilters ? "Fewer filters" : "More filters"}
+                    </button>
+                  </div>
+                  {!moreFilters && FILTERS.some((f) => f.key !== "status" && filters[f.key]) && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {FILTERS.filter((f) => f.key !== "status" && filters[f.key]).map((f) => (
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => setFilters((prev) => ({ ...prev, [f.key]: "" }))}
+                          aria-label={`Remove filter ${f.label}: ${f.optionLabel ? f.optionLabel(filters[f.key]) : filters[f.key]}`}
+                          className="rounded-full border border-[#6C3AE8] bg-[#F2EDFF] px-3 py-1 text-[13px] font-medium text-[#5428C8]"
+                        >
+                          {f.label}: {f.optionLabel ? f.optionLabel(filters[f.key]) : filters[f.key]} <span aria-hidden="true">×</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {moreFilters && (
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {FILTERS.filter((f) => f.key !== "status").map((f) => (
+                        <div key={f.key}>
+                          <label htmlFor={`ugc-filter-${f.key}`} className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#686377]">
+                            {f.label}
+                          </label>
                           <select
-                            aria-label={`Status for ${r.full_name}`}
-                            value={r.status}
-                            disabled={savingStatus.has(r.id)}
-                            onChange={(e) => changeStatus(r, e.target.value)}
-                            className={`rounded-full border px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-50 ${
-                              STATUS_STYLES[r.status] ?? STATUS_STYLES.new
-                            }`}
+                            id={`ugc-filter-${f.key}`}
+                            value={filters[f.key]}
+                            onChange={(e) => setFilters((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                            className="w-full rounded-lg border border-[#CDC8D9] bg-white px-3 py-2 text-sm"
                           >
-                            {/* A status set outside this panel still shows. */}
-                            {!(STATUSES as readonly string[]).includes(r.status) && (
-                              <option value={r.status}>{r.status}</option>
-                            )}
-                            {STATUSES.map((s) => (
-                              <option key={s} value={s}>
-                                {STATUS_LABELS[s]}
+                            <option value="">{f.all}</option>
+                            {filterOptions[f.key].map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {f.optionLabel ? f.optionLabel(o.value) : o.value} ({o.count})
                               </option>
                             ))}
                           </select>
-                        </td>
-                      </tr>
-                      {open && (
-                        <tr className="bg-gray-50">
-                          <td colSpan={columns.length} className="p-0">
-                            {/* Pinned to the visible width, so the answers stay readable without scrolling sideways. */}
-                            <div className="sticky left-0 w-[100cqw] px-4 py-5">
-                              <ApplicantDetail
-                                applicant={r}
-                                via={via}
-                                broughtIn={links.broughtIn(r)}
-                                standOutReasons={so.reasons}
-                                onOpenApplicant={openApplicant}
-                                notes={draft ?? savedNotes}
-                                notesDirty={draft !== undefined && cleanNotes(draft) !== savedNotes}
-                                savingNotes={savingNotes.has(r.id)}
-                                onNotesChange={(value) => setNoteDrafts((d) => ({ ...d, [r.id]: value }))}
-                                onNotesSave={() => saveNotes(r)}
-                                fellow={fellowByApp[r.id] ?? null}
-                                makingFellow={makingFellow.has(r.id)}
-                                onMakeFellow={() => makeFellow(r)}
-                              />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <div className="mt-3 flex items-center gap-3 pb-3 text-sm">
+                  <span className="text-[#686377]">
+                    {filtered.length} of {rows.length} shown
+                  </span>
+                  {filtersActive && (
+                    <button type="button" onClick={clearFilters} className="text-xs font-semibold text-[#5428C8] underline underline-offset-2">
+                      Clear filters
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {filtered.length === 0 ? (
+                <div className="border-t border-[#E5E2EC] p-10 text-center">
+                  <p className="text-sm text-[#686377]">No applications match these filters.</p>
+                  <button type="button" onClick={clearFilters} className="mt-3 text-sm font-semibold text-[#5428C8] underline underline-offset-2">
+                    Clear filters
+                  </button>
+                </div>
+              ) : (
+                <ol aria-label="Applicants">
+                  {filtered.map((r, i) => {
+                    const so = standOut(r, links);
+                    const via = links.cameVia(r);
+                    const isSel = r.id === selectedId;
+                    return (
+                      <li
+                        key={r.id}
+                        id={`ugc-applicant-${r.id}`}
+                        onClick={(e) => onRowClick(e, r.id)}
+                        className={`scroll-mt-4 cursor-pointer border-t border-[#E5E2EC] px-4 py-4 sm:px-5 ${
+                          isSel ? "bg-[#F2EDFF] shadow-[inset_3px_0_0_#6C3AE8]" : "hover:bg-[#F8F7FB]"
+                        }`}
+                      >
+                        <div className="grid grid-cols-[22px_40px_minmax(0,1fr)] gap-x-3 sm:grid-cols-[22px_40px_minmax(0,1fr)_176px]">
+                          <span className="pt-2.5 text-right text-xs tabular-nums text-[#686377]">{i + 1}</span>
+                          <Avatar name={r.full_name} />
+                          <div className="min-w-0">
+                            <button
+                              type="button"
+                              data-open
+                              onClick={(e) => {
+                                select(r.id);
+                                if (e.detail === 0 && window.matchMedia(WIDE).matches) setFocusProfile(true);
+                              }}
+                              aria-label={`Open ${r.full_name}'s answers`}
+                              aria-current={isSel ? "true" : undefined}
+                              className="text-left text-[15px] font-semibold hover:underline"
+                            >
+                              {r.full_name}
+                            </button>
+                            <p className="text-[13px] text-[#686377]">
+                              {r.year_of_study} · {r.college}
+                              {r.city ? ` · ${r.city}` : ""} · applied {appliedAgo(r.created_at)}
+                            </p>
+                            {via && (
+                              <p className="mt-0.5 text-xs text-[#686377]">
+                                Came via <CameViaName via={via} onOpen={openApplicant} />
+                              </p>
+                            )}
+                            {r.status === "meeting" && r.meeting_at && (
+                              <p className="mt-1 text-xs font-medium text-violet-700">Meeting: {meetingWhen(new Date(r.meeting_at))}</p>
+                            )}
+                            <div className="mt-2 flex flex-wrap items-center gap-1">
+                              {!r.has_linkedin && <NoLinkedinPill />}
+                              {so.reasons.slice(0, 3).map((reason) => (
+                                <span key={reason} className="whitespace-nowrap rounded-md border border-[#E5E2EC] bg-[#F8F7FB] px-2 py-0.5 text-[11.5px] font-medium text-[#4B4659]">
+                                  {reason}
+                                </span>
+                              ))}
+                              {so.reasons.length > 3 && <span className="text-[11.5px] text-[#686377]">+{so.reasons.length - 3} more</span>}
                             </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+                          </div>
+                          <div className="col-span-3 mt-3 flex items-center justify-between gap-3 sm:col-span-1 sm:mt-0 sm:block sm:text-right">
+                            <div>
+                              <p className="text-lg font-semibold tabular-nums" style={{ fontFamily: SERIF }}>
+                                {so.score}
+                                <span className="text-xs font-normal text-[#686377]"> / {MAX_SCORE}</span>
+                              </p>
+                              <ScoreBlocks score={so.score} />
+                            </div>
+                            <select
+                              aria-label={`Status for ${r.full_name}`}
+                              value={r.status}
+                              // A fellow stays one: their page is live.
+                              disabled={savingStatus.has(r.id) || Boolean(fellowByApp[r.id]) || r.status === "selected"}
+                              onChange={(e) => changeStatus(r, e.target.value)}
+                              className={`mt-0 rounded-lg border px-2 py-1.5 text-[13px] font-semibold sm:mt-2 sm:w-full ${STATUS_STYLES[r.status] ?? STATUS_STYLES.new}`}
+                            >
+                              {!(SETTABLE as readonly string[]).includes(r.status) && (
+                                <option value={r.status} disabled={r.status === "selected"}>
+                                  {STATUS_LABELS[r.status] ?? r.status}
+                                </option>
+                              )}
+                              {SETTABLE.map((st) => (
+                                <option key={st} value={st}>
+                                  {STATUS_LABELS[st]}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </section>
+
+            {/* Right: the selected applicant (a sheet on phones). It stays in view while the list scrolls. */}
+            <aside aria-label="Applicant" className="hidden min-w-0 lg:sticky lg:top-[96px] lg:block lg:self-start">
+              {selected && !sheetOpen ? (
+                profileFor(selected, false)
+              ) : (
+                <div className="rounded-xl border border-dashed border-[#CDC8D9] bg-white p-10 text-center text-sm text-[#686377]">
+                  Pick an applicant to read their answers.
+                </div>
+              )}
+            </aside>
+
+            {/* The application funnel: under the list, or on the left of a wide screen. */}
+            <div className="lg:col-span-2 xl:order-first xl:col-span-1">
+              <FunnelSide
+                analytics={analytics}
+                error={analyticsError}
+                loading={analyticsLoading}
+                range={range}
+                onRangeChange={changeRange}
+              />
+            </div>
           </div>
         )}
 
         {!loading && !loadError && (
-          <FunnelAndSharing
+          <SharingSection
             analytics={analytics}
             error={analyticsError}
             loading={analyticsLoading}
@@ -1123,25 +1365,234 @@ export default function UgcApplicants() {
           />
         )}
       </main>
+      </div>
+
+      {sheetOpen && selected && (
+        <div
+          key={selected.id}
+          role="dialog"
+          aria-modal="true"
+          aria-label={selected.full_name}
+          className="fixed left-0 top-0 z-[60] h-dvh w-screen overflow-y-auto bg-[#F2F1F6] lg:hidden"
+        >
+          {profileFor(selected, true)}
+        </div>
+      )}
     </div>
   );
 }
 
-function CountTile({ label, value, note }: { label: string; value: number; note?: string }) {
+// "10 min ago", "3 hr ago", "yesterday", "2 days ago", then the date.
+function appliedAgo(iso: string | null): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return "";
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (mins < 60) return `${Math.max(1, mins)} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  const days = Math.round(hrs / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return `on ${formatDay(iso)}`;
+}
+
+const AVATAR_TINTS = ["bg-[#E8E3FB] text-[#4B2BB8]", "bg-[#FCE8EB] text-[#AE2539]", "bg-[#E2F3E9] text-[#11724A]", "bg-[#FFF2D9] text-[#8A5300]", "bg-[#E3EEFB] text-[#1D4F91]"];
+
+function Avatar({ name, size = "md" }: { name: string; size?: "md" | "lg" }) {
+  const parts = name.trim().split(/\s+/);
+  const initials = ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+  const tint = AVATAR_TINTS[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % AVATAR_TINTS.length];
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
-      <p className="mt-1 text-3xl font-bold text-gray-900">{value}</p>
-      {note && <p className="mt-1 text-xs text-gray-400">{note}</p>}
+    <span
+      aria-hidden="true"
+      className={`grid shrink-0 place-items-center rounded-full font-semibold ${tint} ${size === "lg" ? "h-16 w-16 text-xl" : "h-10 w-10 text-sm"}`}
+    >
+      {initials}
+    </span>
+  );
+}
+
+// The score as 13 small blocks, filled up to it.
+function ScoreBlocks({ score, large = false }: { score: number; large?: boolean }) {
+  return (
+    <span className={`mt-1 inline-flex ${large ? "gap-1" : "gap-[2px]"}`} aria-hidden="true">
+      {Array.from({ length: MAX_SCORE }, (_, i) => (
+        <i key={i} className={`${large ? "h-3.5 w-4 rounded-[3px]" : "h-2 w-[7px] rounded-[2px]"} ${i < score ? "bg-[#6C3AE8]" : "bg-[#E3DEF0]"}`} />
+      ))}
+    </span>
+  );
+}
+
+// Applied to Referred. Clicking a stage shows those applicants.
+function PipelineCard({ pipeline, active, onPick }: { pipeline: Pipeline; active: string; onPick: (status: string) => void }) {
+  const stages: { label: string; n: number; status: string | null; note?: string }[] = [
+    { label: "Applied", n: pipeline.applied, status: "" },
+    { label: "Shortlisted", n: pipeline.shortlisted, status: "shortlisted" },
+    { label: "Meeting scheduled", n: pipeline.meeting, status: "meeting" },
+    { label: "Fellow", n: pipeline.fellow, status: "selected" },
+    { label: "Growth intern", n: pipeline.growthIntern, status: null },
+    { label: "Referred", n: pipeline.referred, status: null },
+  ];
+  return (
+    <section aria-labelledby="ugc-pipeline-title" className="rounded-xl border border-[#E5E2EC] bg-white px-5 pb-4 pt-4">
+      <h2 id="ugc-pipeline-title" className="text-xl font-semibold" style={{ fontFamily: SERIF }}>
+        Pipeline
+      </h2>
+      <ol className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+        {stages.map((st, i) => {
+          const on = st.status !== null && active === st.status;
+          const body = (
+            <>
+              <span className="block text-[28px] font-semibold leading-none tabular-nums" style={{ fontFamily: SERIF }}>
+                {fmt(st.n)}
+              </span>
+              <span className="mt-1 block text-sm font-medium text-[#4B4659]">{st.label}</span>
+            </>
+          );
+          return (
+            <li key={st.label} className="relative">
+              {st.status === null ? (
+                <div className="rounded-lg px-3 py-2">
+                  {body}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => onPick(st.status as string)}
+                  className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${on ? "bg-[#F2EDFF] ring-1 ring-[#D9CCFF]" : "hover:bg-[#F8F7FB]"}`}
+                >
+                  {body}
+                </button>
+              )}
+              {i < stages.length - 1 && (
+                <span aria-hidden="true" className="absolute right-[-6px] top-1/2 hidden -translate-y-1/2 text-[#CDC8D9] xl:block">
+                  ›
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="mt-2 px-3 text-xs text-[#686377]">Mark Growth intern and Referred on a fellow's profile, under What they went on to.</p>
+    </section>
+  );
+}
+
+function RangePicker({ range, onRangeChange, label }: { range: RangeKey; onRangeChange: (r: RangeKey) => void; label: string }) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex rounded-lg border border-[#CDC8D9] bg-white p-0.5">
+      {RANGES.map((r) => (
+        <button
+          key={r.key}
+          type="button"
+          aria-pressed={range === r.key}
+          onClick={() => onRangeChange(r.key)}
+          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+            range === r.key ? "bg-[#6C3AE8] text-white" : "text-[#4B4659] hover:bg-[#F2F1F6]"
+          }`}
+        >
+          {r.label}
+        </button>
+      ))}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Funnel and sharing
-// ---------------------------------------------------------------------------
+// The application funnel, narrow, beside the list.
+function FunnelSide({
+  analytics,
+  error,
+  loading,
+  range,
+  onRangeChange,
+}: {
+  analytics: Analytics | null;
+  error: string | null;
+  loading: boolean;
+  range: RangeKey;
+  onRangeChange: (range: RangeKey) => void;
+}) {
+  const funnel = analytics?.funnel;
+  let drop: { from: string; to: string; lost: number } | null = null;
+  if (funnel) {
+    for (let i = 1; i < FUNNEL_STAGES.length; i++) {
+      const st = FUNNEL_STAGES[i];
+      const before = funnel[FUNNEL_STAGES[i - 1].key];
+      if (st.key === "applications" || before <= 0) continue;
+      const lost = 1 - funnel[st.key] / before;
+      if (lost > 0 && (!drop || lost > drop.lost)) drop = { from: FUNNEL_STAGES[i - 1].label, to: st.label, lost };
+    }
+  }
+  const max = funnel ? Math.max(0, ...FUNNEL_STAGES.map((st) => funnel[st.key])) : 0;
+  return (
+    <section aria-labelledby="ugc-funnel-title" className="rounded-xl border border-[#E5E2EC] bg-white p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h2 id="ugc-funnel-title" className="text-xl font-semibold" style={{ fontFamily: SERIF }}>
+          Application funnel
+        </h2>
+        <RangePicker range={range} onRangeChange={onRangeChange} label="Range for the funnel" />
+      </div>
+      {!funnel ? (
+        <p className="mt-3 text-sm text-red-700" role="alert">
+          Could not load the funnel: {error || "unknown error"}{" "}
+          <button type="button" onClick={() => onRangeChange(range)} className="font-semibold underline">
+            {loading ? "Trying again..." : "Try again"}
+          </button>
+        </p>
+      ) : (
+        <div aria-busy={loading} className={`transition-opacity ${loading ? "opacity-50" : ""}`}>
+          {funnel.view > 0 ? (
+            <p className="mt-3 flex items-baseline gap-2">
+              <span className="text-[34px] font-semibold leading-none" style={{ fontFamily: SERIF }}>
+                {pct(funnel.applications, funnel.view)}
+              </span>
+              <span className="text-sm text-[#4B4659]">
+                of visitors applied ({fmt(funnel.applications)} of {fmt(funnel.view)})
+              </span>
+            </p>
+          ) : (
+            <p className="mt-3 text-sm text-[#4B4659]">Nobody has opened the page in this range yet.</p>
+          )}
+          <ol className="mt-4 space-y-3">
+            {FUNNEL_STAGES.map((st, i) => {
+              const value = funnel[st.key];
+              const before = i > 0 ? funnel[FUNNEL_STAGES[i - 1].key] : null;
+              return (
+                <li key={st.key}>
+                  <div className="flex items-baseline justify-between gap-2 text-[13px]">
+                    <span className="font-semibold">
+                      {st.label}
+                      {st.note && <span className="block text-[11px] font-normal text-[#686377]">{st.note}</span>}
+                    </span>
+                    <span className="whitespace-nowrap text-[12px] text-[#686377]">
+                      {before === null ? "All visitors" : st.key === "applications" ? "All in this range" : before > 0 ? `${pct(value, before)} carried on` : ""}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="h-2.5 flex-1 rounded-sm bg-[#F2F1F6]" aria-hidden="true">
+                      <div className="h-full rounded-r-[3px] bg-[#6C3AE8]" style={{ width: value > 0 && max > 0 ? `max(${(value / max) * 100}%, 3px)` : 0 }} />
+                    </div>
+                    <span className="w-12 text-right text-sm font-semibold tabular-nums">{fmt(value)}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+          {drop && (
+            <p className="mt-4 border-t border-[#E5E2EC] pt-3 text-[13px] text-[#4B4659]">
+              The biggest drop is from <b>{drop.from.toLowerCase()}</b> to <b>{drop.to.toLowerCase()}</b>:{" "}
+              {Math.round(drop.lost * 100)}% leave there.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
 
-function FunnelAndSharing({
+// Share links, the no-LinkedIn warning, sources and top sharers, full width under the desk.
+function SharingSection({
   analytics,
   error,
   loading,
@@ -1157,48 +1608,25 @@ function FunnelAndSharing({
   onOpenApplicant: (id: number) => void;
 }) {
   return (
-    <section id="funnel-and-sharing" aria-labelledby="ugc-funnel-title" className="mt-8 scroll-mt-28">
+    <section id="funnel-and-sharing" aria-labelledby="ugc-sharing-title" className="mt-8 scroll-mt-28">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id="ugc-funnel-title" className="text-lg font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>
-            Funnel and sharing
+          <h2 id="ugc-sharing-title" className="text-xl font-semibold" style={{ fontFamily: SERIF }}>
+            Sharing and sources
           </h2>
-          <p className="mt-0.5 text-sm text-gray-500">
-            From the public page. People are counted once per browser.
-          </p>
+          <p className="mt-0.5 text-sm text-[#686377]">From the public page. People are counted once per browser.</p>
         </div>
-        <div role="group" aria-label="Range for the funnel and sharing numbers" className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5 shadow-sm">
-          {RANGES.map((r) => (
-            <button
-              key={r.key}
-              type="button"
-              aria-pressed={range === r.key}
-              onClick={() => onRangeChange(r.key)}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-                range === r.key ? "bg-violet-600 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
+        <RangePicker range={range} onRangeChange={onRangeChange} label="Range for the funnel and sharing numbers" />
       </div>
-
       {!analytics ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
-          Could not load the funnel and sharing numbers: {error || "unknown error"}{" "}
-          <button
-            type="button"
-            onClick={() => onRangeChange(range)}
-            className="font-medium underline underline-offset-2"
-          >
+          Could not load the sharing numbers: {error || "unknown error"}{" "}
+          <button type="button" onClick={() => onRangeChange(range)} className="font-medium underline underline-offset-2">
             {loading ? "Trying again..." : "Try again"}
           </button>
         </div>
       ) : (
-        // While another range loads, the current numbers stay, dimmed.
         <div aria-busy={loading} className={`space-y-4 transition-opacity ${loading ? "opacity-50" : ""}`}>
-          <FunnelCard funnel={analytics.funnel} />
           <div className="grid gap-4 lg:grid-cols-3">
             <SharingCard sharing={analytics.sharing} className="lg:col-span-2" />
             <NoLinkedinCard data={analytics.no_linkedin} />
@@ -1215,8 +1643,8 @@ function FunnelAndSharing({
 
 function Card({ title, note, className = "", children }: { title: string; note?: ReactNode; className?: string; children: ReactNode }) {
   return (
-    <section className={`min-w-0 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm ${className}`}>
-      <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+    <section className={`min-w-0 rounded-xl border border-[#E5E2EC] bg-white p-5 ${className}`}>
+      <h3 className="text-base font-semibold" style={{ fontFamily: SERIF }}>{title}</h3>
       {note && <p className="mt-0.5 text-xs text-gray-500">{note}</p>}
       <div className="mt-4">{children}</div>
     </section>
@@ -1233,81 +1661,6 @@ function Bar({ value, max, thin = false }: { value: number; max: number; thin?: 
         style={{ width: value > 0 ? `max(${width}%, 3px)` : 0 }}
       />
     </div>
-  );
-}
-
-function FunnelCard({ funnel }: { funnel: Analytics["funnel"] }) {
-  const max = Math.max(0, ...FUNNEL_STAGES.map((s) => funnel[s.key]));
-  // The step of the form that loses the biggest share of the people who
-  // reached the one before it.
-  let biggestDrop = -1;
-  let lowestKept = 1;
-  FUNNEL_STAGES.forEach((s, i) => {
-    if (i === 0 || s.key === "applications") return;
-    const before = funnel[FUNNEL_STAGES[i - 1].key];
-    if (before > 0 && funnel[s.key] / before < lowestKept) {
-      lowestKept = funnel[s.key] / before;
-      biggestDrop = i;
-    }
-  });
-
-  return (
-    <Card
-      title="Funnel"
-      note={
-        funnel.view > 0
-          ? `${pct(funnel.applications, funnel.view)} of the people who opened the page applied.`
-          : "Nobody has opened the page in this range yet."
-      }
-    >
-      <ol className="space-y-3">
-        {FUNNEL_STAGES.map((s, i) => {
-          const value = funnel[s.key];
-          const before = i > 0 ? funnel[FUNNEL_STAGES[i - 1].key] : null;
-          return (
-            <li
-              key={s.key}
-              title={
-                before === null
-                  ? `${fmt(value)} ${value === 1 ? "person" : "people"}`
-                  : s.key === "applications"
-                    ? `${fmt(value)} ${value === 1 ? "application" : "applications"} saved in this range`
-                    : `${fmt(value)} of ${fmt(before)} (${pct(value, before)}) went on from "${FUNNEL_STAGES[i - 1].label}"`
-              }
-              className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-4 gap-y-1.5 sm:grid-cols-[13rem_minmax(0,1fr)_4rem_8.5rem]"
-            >
-              <div className="min-w-0 text-sm font-medium text-gray-800">
-                {s.label}
-                {i === biggestDrop && (
-                  <span className="ml-2 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-semibold text-amber-800">
-                    Biggest drop
-                  </span>
-                )}
-                {s.note && <span className="block text-xs font-normal text-gray-400">{s.note}</span>}
-              </div>
-              <div className="order-last col-span-3 sm:order-none sm:col-span-1">
-                <Bar value={value} max={max} />
-              </div>
-              <div className="text-right text-sm font-semibold tabular-nums text-gray-900">{fmt(value)}</div>
-              <div className="text-right text-xs tabular-nums text-gray-500">
-                {before === null ? (
-                  "Starting point"
-                ) : s.key === "applications" ? (
-                  // Saved applications are counted from the table, not from page
-                  // events, so they can outnumber tracked submits (blocked storage,
-                  // older applications). A percentage of the step before would mislead.
-                  "All in this range"
-                ) : (
-                  <>
-                    <span className="font-semibold text-gray-800">{pct(value, before)}</span> of the step before
-                  </>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-    </Card>
   );
 }
 
@@ -1554,8 +1907,8 @@ function CameViaName({ via, onOpen }: { via: CameVia; onOpen: (id: number) => vo
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4">
-      <h3 className="mb-3 text-sm font-semibold text-gray-900">{title}</h3>
+    <section className="border-t border-[#E5E2EC] px-5 py-4">
+      <h3 className="mb-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[#686377]">{title}</h3>
       {children}
     </section>
   );
@@ -1564,8 +1917,8 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
 function Answer({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</dt>
-      <dd className="mt-0.5 text-sm text-gray-800 [overflow-wrap:anywhere]">{children}</dd>
+      <dt className="text-[12px] font-semibold text-[#686377]">{label}</dt>
+      <dd className="mt-0.5 text-sm text-[#1A1625] [overflow-wrap:anywhere]">{children}</dd>
     </div>
   );
 }
@@ -1611,7 +1964,7 @@ function SharePanel({
 
   return (
     <Panel title="Their share link">
-      <div className="grid gap-5 md:grid-cols-3">
+      <div className="grid gap-4">
         <dl className="space-y-3">
           <Answer label="Share code">
             <span className="font-mono">{a.share_code}</span>
@@ -1676,12 +2029,255 @@ function SharePanel({
   );
 }
 
-function ApplicantDetail({
+// Dates and times typed into the meeting form are India time.
+const IST_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
+const IST_TIME = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false });
+
+// A meeting is current only while they're at "Meeting scheduled". Moving them
+// to another status calls it off, and the box then says so.
+const isCurrentMeeting = (a: Applicant) => a.status === "meeting" && Boolean(a.meeting_at);
+
+function meetingDefaults(a: Applicant) {
+  const at = isCurrentMeeting(a) ? new Date(a.meeting_at!) : (() => {
+    // Tomorrow, 11 am India time.
+    const d = new Date(Date.now() + 86400000);
+    return new Date(`${IST_DAY.format(d)}T11:00:00+05:30`);
+  })();
+  return { date: IST_DAY.format(at), time: IST_TIME.format(at), link: a.meeting_link ?? "", note: a.meeting_note ?? "", notify: true };
+}
+
+// What the applicant has been told about the current meeting.
+function emailedLine(a: Applicant, first: string): string {
+  if (a.meeting_emailed_at) return `Emailed to ${a.email} ${appliedAgo(a.meeting_emailed_at)}.`;
+  if (a.meeting_sending) return `The email to ${a.email} is being sent.`;
+  if (a.meeting_emailed_for && a.meeting_at) {
+    const told = new Date(a.meeting_emailed_for);
+    if (told.getTime() !== new Date(a.meeting_at).getTime()) {
+      return `Not emailed. ${first} was emailed an earlier time, ${meetingWhen(told)}, so tell them this one.`;
+    }
+    return `Not emailed. ${first} has the email for this time, but not the latest link or note.`;
+  }
+  return "Not emailed.";
+}
+
+function MeetingPanel({
   applicant: a,
+  editing,
+  onEditing,
+  canChange,
+  emailsPaused,
+  busy,
+  onSave,
+}: {
+  applicant: Applicant;
+  editing: boolean;
+  onEditing: (v: boolean) => void;
+  canChange: boolean;
+  emailsPaused: boolean;
+  busy: boolean;
+  onSave: (m: { at: string; link: string; note: string; notify: boolean }) => Promise<boolean>;
+}) {
+  const [form, setForm] = useState(() => meetingDefaults(a));
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setForm(meetingDefaults(a));
+    setError(null);
+  }, [a.id, a.meeting_at, a.status, editing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const id = `meet-${a.id}`;
+  // Keyboard focus goes into the form when it opens, and back to the button
+  // that opened it when it closes.
+  const wasEditing = useRef(editing);
+  useEffect(() => {
+    if (editing && !wasEditing.current) document.getElementById(`${id}-date`)?.focus();
+    if (!editing && wasEditing.current) (document.getElementById(`${id}-change`) ?? document.getElementById(`${id}-schedule`))?.focus();
+    wasEditing.current = editing;
+  }, [editing, id]);
+
+  const current = isCurrentMeeting(a);
+  const at = a.meeting_at ? new Date(a.meeting_at) : null;
+  const first = a.full_name.trim().split(/\s+/)[0];
+  // Once they were emailed an earlier version, the WhatsApp message says what changed.
+  const toldBefore = !a.meeting_emailed_at && a.meeting_emailed_for ? new Date(a.meeting_emailed_for) : null;
+  const whatsapp =
+    current && at
+      ? meetingWhatsapp({ fullName: a.full_name, at, link: a.meeting_link, note: a.meeting_note, previousAt: toldBefore }, a.whatsapp)
+      : null;
+
+  if (!editing) {
+    if (!at) return null;
+    if (!current) {
+      // Called off (they moved on from Meeting scheduled), or in the past.
+      const past = at.getTime() < Date.now();
+      const told = Boolean(a.meeting_emailed_at || a.meeting_emailed_for);
+      return (
+        <section aria-label="Earlier meeting" className="mx-5 mb-4 rounded-lg border border-[#E5E2EC] bg-[#F8F7FB] px-4 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#686377]">
+            {past || a.status === "selected" ? "Earlier meeting" : "Meeting called off"}
+          </p>
+          <p className="mt-1 text-sm text-[#4B4659]">It was set for {meetingWhen(at)}.</p>
+          {!past && a.status !== "selected" && told && (
+            <p className="mt-1 text-xs font-semibold text-[#8A4B00]">{first} was emailed this time, so let them know it's off.</p>
+          )}
+        </section>
+      );
+    }
+    return (
+      <section aria-label="Meeting" className="mx-5 mb-4 rounded-lg border border-[#D9CCFF] bg-[#F7F4FF] px-4 py-3">
+        <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#5428C8]">Meeting</p>
+        <p className="mt-1 text-[15px] font-semibold">{meetingWhen(at)}</p>
+        {a.meeting_link && (
+          <p className="mt-0.5 text-sm [overflow-wrap:anywhere]">
+            <ExternalLink href={a.meeting_link}>{a.meeting_link}</ExternalLink>
+          </p>
+        )}
+        {a.meeting_note && <p className="mt-1 whitespace-pre-wrap text-sm text-[#4B4659]">{a.meeting_note}</p>}
+        <p className="mt-1 text-xs text-[#686377]">{emailedLine(a, first)}</p>
+        {canChange && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button id={`${id}-change`} type="button" onClick={() => onEditing(true)} className="rounded-lg border border-[#CDC8D9] bg-white px-3 py-1.5 text-sm font-semibold hover:border-[#6C3AE8]">
+            Change
+          </button>
+          {whatsapp && (
+            <a href={whatsapp} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[#CDC8D9] bg-white px-3 py-1.5 text-sm font-semibold hover:border-[#6C3AE8]">
+              Send on WhatsApp
+            </a>
+          )}
+        </div>
+        )}
+      </section>
+    );
+  }
+
+  // Saving the meeting they were already emailed, unchanged, sends nothing.
+  const typed = form.date && form.time ? new Date(`${form.date}T${form.time}:00+05:30`) : null;
+  const unchangedAndEmailed =
+    current &&
+    Boolean(a.meeting_emailed_at) &&
+    typed !== null &&
+    at !== null &&
+    typed.getTime() === at.getTime() &&
+    form.link.trim() === (a.meeting_link ?? "") &&
+    form.note.trim() === (a.meeting_note ?? "");
+  const willEmail = form.notify && !emailsPaused && !unchangedAndEmailed;
+  return (
+    <form
+      aria-label={`Schedule a meeting with ${a.full_name}`}
+      className="mx-5 mb-4 rounded-lg border border-[#D9CCFF] bg-[#F7F4FF] px-4 py-3"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        e.stopPropagation();
+        onEditing(false);
+      }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!form.date || !form.time) return setError("Pick a date and a time.");
+        const iso = new Date(`${form.date}T${form.time}:00+05:30`);
+        if (Number.isNaN(iso.getTime())) return setError("That date or time doesn't look right.");
+        setError(null);
+        const ok = await onSave({ at: iso.toISOString(), link: form.link.trim(), note: form.note.trim(), notify: willEmail });
+        if (ok) onEditing(false);
+      }}
+    >
+      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#5428C8]">{current ? "Change the meeting" : "Schedule a meeting"}</p>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <label className="text-xs font-semibold text-[#4B4659]" htmlFor={`${id}-date`}>
+          Date
+          <input id={`${id}-date`} type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#CDC8D9] bg-white px-2 py-1.5 text-sm font-normal" />
+        </label>
+        <label className="text-xs font-semibold text-[#4B4659]" htmlFor={`${id}-time`}>
+          Time (India)
+          <input id={`${id}-time`} type="time" value={form.time} onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#CDC8D9] bg-white px-2 py-1.5 text-sm font-normal" />
+        </label>
+      </div>
+      <label className="mt-2 block text-xs font-semibold text-[#4B4659]" htmlFor={`${id}-link`}>
+        Meeting link (optional)
+        <input id={`${id}-link`} type="url" inputMode="url" maxLength={1000} placeholder="https://meet.google.com/..." value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#CDC8D9] bg-white px-2 py-1.5 text-sm font-normal" />
+      </label>
+      <label className="mt-2 block text-xs font-semibold text-[#4B4659]" htmlFor={`${id}-note`}>
+        Note for them (optional)
+        <textarea id={`${id}-note`} rows={2} maxLength={500} value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#CDC8D9] bg-white px-2 py-1.5 text-sm font-normal" />
+      </label>
+      {unchangedAndEmailed ? (
+        <p className="mt-2 rounded-lg bg-white px-3 py-2 text-sm text-[#4B4659]">{first} already has the email for this meeting.</p>
+      ) : emailsPaused ? (
+        <p className="mt-2 rounded-lg bg-white px-3 py-2 text-sm text-[#4B4659]">
+          Emails are paused, so {first} won't be emailed. After saving, {whatsappHref(a.whatsapp) ? "send the time on WhatsApp" : "tell them the time yourself"}.
+        </p>
+      ) : (
+        <label className="mt-2 flex items-start gap-2 text-sm">
+          <input type="checkbox" checked={form.notify} onChange={(e) => setForm((f) => ({ ...f, notify: e.target.checked }))} className="mt-0.5 h-4 w-4 accent-[#6C3AE8]" />
+          <span>
+            Email {first} the time at <span className="font-semibold [overflow-wrap:anywhere]">{a.email}</span>
+          </span>
+        </label>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-sm font-semibold text-[#AE2539]">
+          {error}
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="submit" disabled={busy} className="rounded-lg bg-[#6C3AE8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#5428C8] disabled:opacity-60">
+          {busy ? "Saving..." : willEmail ? "Save and email" : "Save"}
+        </button>
+        <button type="button" onClick={() => onEditing(false)} className="rounded-lg border border-[#CDC8D9] bg-white px-4 py-2 text-sm font-semibold">
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// Every signal behind the score, with its points.
+function ScoreBreakdown({ applicant: a, links, score }: { applicant: Applicant; links: ShareLinks; score: number }) {
+  return (
+    <section aria-label="Stand-out score" className="mx-5 mb-4 rounded-lg border border-[#E5E2EC] px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-semibold">Stand-out score</h3>
+        <p className="text-[28px] font-semibold leading-none tabular-nums" style={{ fontFamily: SERIF }}>
+          {score}
+          <span className="text-sm font-normal text-[#686377]"> / {MAX_SCORE}</span>
+        </p>
+      </div>
+      <ScoreBlocks score={score} large />
+      <ul className="mt-3 space-y-1.5">
+        {HIGHLIGHTS.map((h) => {
+          const hit = h.test(a, links);
+          return (
+            <li key={h.key} className={`flex items-center justify-between gap-3 text-[13px] ${hit ? "" : "text-[#686377]"}`}>
+              <span className="flex items-center gap-2">
+                <svg viewBox="0 0 16 16" className={`h-3.5 w-3.5 shrink-0 ${hit ? "text-[#11724A]" : "text-[#CDC8D9]"}`} aria-hidden="true">
+                  {hit ? (
+                    <path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  ) : (
+                    <path d="M4 8h8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  )}
+                </svg>
+                {h.label}
+                <span className="sr-only">{hit ? "(yes)" : "(no)"}</span>
+              </span>
+              <span className={`tabular-nums ${hit && h.points ? "font-semibold" : ""}`}>{hit && h.points ? `+${h.points}` : "0"}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function ApplicantProfile({
+  applicant: a,
+  inSheet,
+  onClose,
   via,
   broughtIn,
-  standOutReasons,
+  links,
+  score,
   onOpenApplicant,
+  savingStatus,
+  onStatus,
   notes,
   notesDirty,
   savingNotes,
@@ -1690,21 +2286,74 @@ function ApplicantDetail({
   fellow,
   makingFellow,
   onMakeFellow,
+  savingOutcome,
+  onOutcome,
+  scheduling,
+  onScheduleMeeting,
+  emailsPaused,
 }: {
   applicant: Applicant;
+  inSheet: boolean;
+  onClose: () => void;
   via: CameVia | null;
   broughtIn: Applicant[];
-  standOutReasons: string[];
+  links: ShareLinks;
+  score: number;
   onOpenApplicant: (id: number) => void;
+  savingStatus: boolean;
+  onStatus: (status: string) => void;
   notes: string;
   notesDirty: boolean;
   savingNotes: boolean;
   onNotesChange: (value: string) => void;
   onNotesSave: () => void;
-  fellow: { id: number; link: string | null } | null;
+  fellow: Fellow | null;
   makingFellow: boolean;
   onMakeFellow: () => void;
+  savingOutcome: boolean;
+  onOutcome: (outcome: Outcome, on: boolean) => void;
+  scheduling: boolean;
+  onScheduleMeeting: (m: { at: string; link: string; note: string; notify: boolean }) => Promise<boolean>;
+  emailsPaused: boolean;
 }) {
+  const [editingMeeting, setEditingMeeting] = useState(false);
+  const [confirmFellow, setConfirmFellow] = useState(false);
+  const backRef = useRef<HTMLButtonElement>(null);
+  // The sheet takes focus when it opens.
+  useEffect(() => {
+    if (inSheet) backRef.current?.focus();
+  }, [inSheet]);
+  const first = a.full_name.trim().split(/\s+/)[0];
+  // A fellow (by their page, or by status) stays one: no status changes here.
+  const isFellow = Boolean(fellow) || a.status === "selected";
+  // Make fellow also puts a fellow whose status is out of step back to Fellow.
+  const offerMakeFellow = !fellow || a.status !== "selected";
+  // The selection meeting is for people still in review: not a fellow, and not
+  // someone rejected (move them back first).
+  const canMeet = !isFellow && a.status !== "rejected";
+  const rejectedHintId = `ugc-rejected-hint-${a.id}`;
+
+  // Keyboard focus follows the Make fellow confirm: to Cancel when it opens,
+  // back to the button when it closes, and to the fellow box once it's done.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (confirmFellow) {
+      asked.current = true;
+      document.getElementById(`fellow-${a.id}-cancel`)?.focus();
+    } else if (asked.current && !makingFellow) {
+      asked.current = false;
+      document.getElementById(`fellow-${a.id}-make`)?.focus();
+    }
+  }, [confirmFellow, makingFellow, a.id]);
+  const making = useRef(false);
+  useEffect(() => {
+    if (makingFellow) making.current = true;
+    else if (making.current) {
+      making.current = false;
+      asked.current = false;
+      document.getElementById(fellow ? `fellow-${a.id}-title` : `fellow-${a.id}-make`)?.focus();
+    }
+  }, [makingFellow, fellow, a.id]);
   const linkedin = httpsUrl(a.linkedin_url);
   const bestPost = httpsUrl(a.best_post_url);
   const whatsapp = whatsappHref(a.whatsapp);
@@ -1714,78 +2363,253 @@ function ApplicantDetail({
   const stories = STORIES.filter((s) => a[s.key]);
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title="Contact">
-          <dl className="space-y-3">
-            <Answer label="Email">
-              <a href={mailtoHref(a.email)} className="text-violet-700 underline underline-offset-2 hover:text-violet-900">
-                {a.email}
-              </a>
-            </Answer>
-            <Answer label="WhatsApp">
-              {whatsapp ? <ExternalLink href={whatsapp}>{a.whatsapp}</ExternalLink> : a.whatsapp}
-            </Answer>
-            <Answer label="College">{a.college}</Answer>
-            <Answer label="Course">{a.course}</Answer>
-            <Answer label="Year of study">
-              {a.year_of_study}
-              {a.graduation_year ? `, graduating ${a.graduation_year}` : ""}
-            </Answer>
-            <Answer label="City">{orBlank(a.city)}</Answer>
-          </dl>
-        </Panel>
+    <div
+      className={
+        inSheet
+          ? "min-h-full bg-white pb-10"
+          : "max-h-[calc(100vh-112px)] overflow-y-auto rounded-xl border border-[#E5E2EC] bg-white"
+      }
+    >
+      {inSheet && (
+        <div className="sticky top-0 z-10 flex items-center border-b border-[#E5E2EC] bg-white px-4 py-2">
+          <button ref={backRef} type="button" onClick={onClose} className="min-h-11 rounded-lg px-2 text-sm font-semibold text-[#5428C8]">
+            Back to the list
+          </button>
+        </div>
+      )}
 
-        <Panel title="LinkedIn">
-          {a.has_linkedin ? (
-            <dl className="space-y-3">
-              <Answer label="Profile">
-                {linkedin ? <ExternalLink href={linkedin}>{linkedin}</ExternalLink> : orBlank(a.linkedin_url)}
-              </Answer>
-              <Answer label="A post they're proud of">
-                {bestPost ? <ExternalLink href={bestPost}>Open the post</ExternalLink> : orBlank(a.best_post_url)}
-              </Answer>
-              {(a.connections || !a.followers) && <Answer label="Connections">{orBlank(a.connections)}</Answer>}
-              {a.followers && <Answer label="Followers (old form)">{a.followers}</Answer>}
-              <Answer label="How often they post">{orBlank(a.post_frequency)}</Answer>
-              <Answer label="Last posted">{orBlank(a.last_posted)}</Answer>
-              <Answer label="A post crossed 1,000 impressions">{orBlank(a.crossed_1k)}</Answer>
-            </dl>
-          ) : (
-            <div>
-              <NoLinkedinPill />
-              <p className="mt-2 text-sm text-gray-700">
-                They said they don't have a LinkedIn profile, so the LinkedIn questions were skipped.
-              </p>
-            </div>
+      <header className="flex gap-4 px-5 pb-4 pt-5">
+        <Avatar name={a.full_name} size="lg" />
+        <div className="min-w-0">
+          <h2 id="ugc-profile-title" tabIndex={-1} className="text-[26px] font-semibold leading-tight outline-none [overflow-wrap:anywhere]" style={{ fontFamily: SERIF }}>
+            {a.full_name}
+          </h2>
+          <p className="text-sm text-[#4B4659]">
+            {a.year_of_study} · {a.college}
+            {a.city ? ` · ${a.city}` : ""}
+          </p>
+          <p className="text-sm text-[#686377]">Applied {appliedAgo(a.created_at)}</p>
+          {via && (
+            <p className="mt-0.5 text-xs text-[#686377]">
+              Came via <CameViaName via={via} onOpen={onOpenApplicant} />
+            </p>
           )}
-        </Panel>
+        </div>
+      </header>
 
-        <Panel title="Where they're headed">
-          <dl className="space-y-3">
-            <Answer label="Field">{a.field}</Answer>
-            <Answer label="Roles they're aiming for">{a.target_roles}</Answer>
-            <Answer label="Companies they'd love to work at">{orBlank(a.dream_companies)}</Answer>
-            <Answer label="Looking for">{a.looking_for}</Answer>
-          </dl>
-        </Panel>
+      {isFellow ? (
+        <p className="px-5 pb-3">
+          <span className="inline-block rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[13px] font-semibold text-emerald-800">Fellow</span>
+        </p>
+      ) : (
+      <>
+      <div role="group" aria-label="Status" className="flex flex-wrap gap-2 px-5 pb-3">
+        {STATUS_BUTTONS.map((st) => {
+          const on = a.status === st;
+          const blocked = st === "meeting" && !canMeet;
+          return (
+            <button
+              key={st}
+              type="button"
+              aria-pressed={on}
+              // Not disabled while saving, so keyboard focus stays on the button.
+              aria-disabled={savingStatus || blocked || undefined}
+              aria-describedby={blocked && a.status === "rejected" ? rejectedHintId : undefined}
+              // "Meeting scheduled" means a meeting is set, so it opens the meeting form.
+              onClick={() => {
+                if (savingStatus || blocked) return;
+                if (st === "meeting") {
+                  if (!on) setEditingMeeting(true);
+                } else onStatus(st);
+              }}
+              className={`rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors aria-disabled:opacity-60 ${
+                on ? "border-[#1A1625] bg-[#1A1625] text-white" : "border-[#CDC8D9] bg-white hover:border-[#6C3AE8]"
+              } ${blocked ? "cursor-not-allowed" : ""}`}
+            >
+              {STATUS_LABELS[st]}
+            </button>
+          );
+        })}
+      </div>
+      {a.status === "rejected" && (
+        <p id={rejectedHintId} className="-mt-1 px-5 pb-3 text-xs text-[#686377]">
+          To schedule a meeting, move them back to New or Shortlisted first.
+        </p>
+      )}
+      </>
+      )}
+
+      <div className="flex flex-wrap gap-2 px-5 pb-4">
+        {/* While a meeting is set, its box below has the Change button. */}
+        {!editingMeeting && canMeet && (a.status !== "meeting" || !a.meeting_at) && (
+          <button
+            id={`meet-${a.id}-schedule`}
+            type="button"
+            onClick={() => setEditingMeeting(true)}
+            className="rounded-lg bg-[#6C3AE8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#5428C8]"
+          >
+            Schedule meeting
+          </button>
+        )}
+        {offerMakeFellow && !confirmFellow && (
+          <button
+            id={`fellow-${a.id}-make`}
+            type="button"
+            onClick={() => setConfirmFellow(true)}
+            disabled={makingFellow}
+            className="rounded-lg border border-[#1A1625] bg-white px-4 py-2 text-sm font-semibold hover:bg-[#F2F1F6] disabled:opacity-60"
+          >
+            {makingFellow ? "Setting up..." : "Make fellow"}
+          </button>
+        )}
       </div>
 
-      <Panel title="Growth Fellowship">
-        <dl className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Answer label="Why they stand out">
-            {standOutReasons.length ? (
-              <span className="mt-1 flex flex-wrap gap-1">
-                {standOutReasons.map((reason) => (
-                  <span key={reason} className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-800">
-                    {reason}
-                  </span>
-                ))}
-              </span>
-            ) : (
-              <span className="text-gray-400">Nothing yet</span>
-            )}
+      {offerMakeFellow && confirmFellow && (
+        <div
+          role="alertdialog"
+          aria-labelledby={`fellow-${a.id}-ask`}
+          aria-describedby={`fellow-${a.id}-what`}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            e.preventDefault();
+            e.stopPropagation();
+            setConfirmFellow(false);
+          }}
+          className="mx-5 mb-4 rounded-lg border border-[#1A1625] bg-white px-4 py-3"
+        >
+          <p id={`fellow-${a.id}-ask`} className="text-sm font-semibold">Make {first} a fellow?</p>
+          <p id={`fellow-${a.id}-what`} className="mt-0.5 text-sm text-[#4B4659]">
+            This sets up their fellow page and marks them as a fellow. It can't be undone from this page.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={makingFellow}
+              onClick={() => {
+                setConfirmFellow(false);
+                onMakeFellow();
+              }}
+              className="rounded-lg bg-[#1A1625] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              Yes, make fellow
+            </button>
+            <button
+              id={`fellow-${a.id}-cancel`}
+              type="button"
+              onClick={() => setConfirmFellow(false)}
+              className="rounded-lg border border-[#CDC8D9] bg-white px-4 py-2 text-sm font-semibold"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <MeetingPanel
+        applicant={a}
+        editing={editingMeeting && canMeet}
+        onEditing={setEditingMeeting}
+        canChange={canMeet}
+        emailsPaused={emailsPaused}
+        busy={scheduling}
+        onSave={onScheduleMeeting}
+      />
+
+      {fellow && (
+        <section aria-label="Fellowship" className="mx-5 mb-4 rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3">
+          <p id={`fellow-${a.id}-title`} tabIndex={-1} className="text-[11px] font-bold uppercase tracking-[0.08em] text-emerald-800 outline-none">
+            Fellow
+          </p>
+          <p className="mt-1 text-sm [overflow-wrap:anywhere]">
+            {a.full_name} is a fellow. Their page: <span className="font-mono text-xs">{fellow.link ?? "being set up"}</span>
+          </p>
+          <p className="text-xs text-[#686377]">Send it once the fellows' pages are live on studojo.com.</p>
+          {fellow.link && (
+            <button
+              type="button"
+              onClick={() =>
+                navigator.clipboard
+                  .writeText(fellow.link!)
+                  .then(() => toast.success("Link copied"))
+                  .catch(() => toast.error("Could not copy. Select the link instead."))
+              }
+              className="mt-2 rounded-lg border border-[#CDC8D9] bg-white px-3 py-1.5 text-sm font-semibold hover:border-[#6C3AE8]"
+            >
+              Copy link
+            </button>
+          )}
+          <h3 className="mt-3 text-sm font-semibold">What they went on to</h3>
+          <div role="group" aria-label="What they went on to" className="mt-1.5 flex flex-wrap gap-2">
+            {OUTCOMES.map((o) => {
+              const on = Boolean(fellow[o.field]);
+              return (
+                <button
+                  key={o.key}
+                  type="button"
+                  aria-pressed={on}
+                  aria-disabled={savingOutcome || undefined}
+                  onClick={() => !savingOutcome && onOutcome(o.key, !on)}
+                  className={`rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors aria-disabled:opacity-60 ${
+                    on ? "border-emerald-700 bg-emerald-700 text-white" : "border-[#CDC8D9] bg-white hover:border-emerald-700"
+                  }`}
+                >
+                  {on && <span aria-hidden="true">✓ </span>}
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-xs text-[#686377]">These count in the pipeline's Growth intern and Referred.</p>
+        </section>
+      )}
+
+      <ScoreBreakdown applicant={a} links={links} score={score} />
+
+      <section aria-label="Why they want to join" className="px-5 pb-4">
+        <h3 className="mb-2 text-sm font-semibold">Why they want to join</h3>
+        <blockquote className="whitespace-pre-wrap rounded-lg bg-[#F8F7FB] px-4 py-3 text-[17px] leading-relaxed [overflow-wrap:anywhere]" style={{ fontFamily: SERIF }}>
+          {a.why_join}
+        </blockquote>
+      </section>
+
+      <Panel title="Contact">
+        <dl className="space-y-3">
+          <Answer label="Email">
+            <a href={mailtoHref(a.email)} className="text-violet-700 underline underline-offset-2 hover:text-violet-900">
+              {a.email}
+            </a>
           </Answer>
+          <Answer label="WhatsApp">{whatsapp ? <ExternalLink href={whatsapp}>{a.whatsapp}</ExternalLink> : a.whatsapp}</Answer>
+          <Answer label="Course">{a.course}</Answer>
+          <Answer label="Year of study">
+            {a.year_of_study}
+            {a.graduation_year ? `, graduating ${a.graduation_year}` : ""}
+          </Answer>
+          <Answer label="City">{orBlank(a.city)}</Answer>
+        </dl>
+      </Panel>
+
+      <Panel title="LinkedIn">
+        {a.has_linkedin ? (
+          <dl className="space-y-3">
+            <Answer label="Profile">{linkedin ? <ExternalLink href={linkedin}>{linkedin}</ExternalLink> : orBlank(a.linkedin_url)}</Answer>
+            <Answer label="A post they're proud of">{bestPost ? <ExternalLink href={bestPost}>Open the post</ExternalLink> : orBlank(a.best_post_url)}</Answer>
+            {(a.connections || !a.followers) && <Answer label="Connections">{orBlank(a.connections)}</Answer>}
+            {a.followers && <Answer label="Followers (old form)">{a.followers}</Answer>}
+            <Answer label="How often they post">{orBlank(a.post_frequency)}</Answer>
+            <Answer label="Last posted">{orBlank(a.last_posted)}</Answer>
+            <Answer label="A post crossed 1,000 impressions">{orBlank(a.crossed_1k)}</Answer>
+          </dl>
+        ) : (
+          <div>
+            <NoLinkedinPill />
+            <p className="mt-2 text-sm">They said they don't have a LinkedIn profile, so the LinkedIn questions were skipped.</p>
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="Growth Fellowship">
+        <dl className="space-y-3">
           <Answer label="Wants from the fellowship">
             {a.fellowship_goals.length ? a.fellowship_goals.join(", ") : <span className="text-gray-400">Not asked (earlier form)</span>}
           </Answer>
@@ -1794,20 +2618,26 @@ function ApplicantDetail({
         </dl>
       </Panel>
 
+      <Panel title="Where they're headed">
+        <dl className="space-y-3">
+          <Answer label="Field">{a.field}</Answer>
+          <Answer label="Roles they're aiming for">{a.target_roles}</Answer>
+          <Answer label="Companies they'd love to work at">{orBlank(a.dream_companies)}</Answer>
+          <Answer label="Looking for">{a.looking_for}</Answer>
+        </dl>
+      </Panel>
+
       <Panel title="What they'd post">
-        <dl className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <dl className="space-y-3">
           <Answer label="Topics">
             {a.topics.length ? (
-              <div className="mt-1 flex flex-wrap gap-1.5">
+              <span className="mt-1 flex flex-wrap gap-1.5">
                 {a.topics.map((t) => (
-                  <span
-                    key={t}
-                    className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-700"
-                  >
+                  <span key={t} className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-700">
                     {t}
                   </span>
                 ))}
-              </div>
+              </span>
             ) : (
               orBlank(null)
             )}
@@ -1821,85 +2651,30 @@ function ApplicantDetail({
 
       {/* Stories are asked for after shortlisting now; applications from the
           first version of the form still have them. */}
-      {stories.length > 0 && (
-        <div className="grid gap-4 lg:grid-cols-3">
-          {stories.map((s) => (
-            <Panel key={s.key} title={`${s.title} (old form)`}>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800 [overflow-wrap:anywhere]">{a[s.key]}</p>
-            </Panel>
-          ))}
-        </div>
-      )}
-
-      <Panel title="Why they want to join">
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800 [overflow-wrap:anywhere]">{a.why_join}</p>
-      </Panel>
+      {stories.map((st) => (
+        <Panel key={st.key} title={`${st.title} (old form)`}>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">{a[st.key]}</p>
+        </Panel>
+      ))}
 
       <SharePanel applicant={a} broughtIn={broughtIn} onOpenApplicant={onOpenApplicant} />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title="How they heard">
-          <dl className="space-y-3">
-            <Answer label="Came via a share link">
-              {via ? <CameViaName via={via} onOpen={onOpenApplicant} /> : <span className="text-gray-400">No</span>}
-            </Answer>
-            <Answer label="Source">{orBlank(a.referral_source)}</Answer>
-            <Answer label="Referred by">{orBlank(a.referred_by)}</Answer>
-          </dl>
-        </Panel>
-        <Panel title="Dates">
-          <dl className="space-y-3">
-            <Answer label="Applied">{formatDateTime(a.created_at)}</Answer>
-            <Answer label="Consent given">{formatDateTime(a.consent_at)}</Answer>
-          </dl>
-        </Panel>
-        <Panel title="Attribution">
-          <dl className="space-y-3">
-            <Answer label="Page">{orBlank(a.source_path, "Not recorded")}</Answer>
-            <Answer label="UTM source / medium / campaign">{orBlank(utm, "None")}</Answer>
-            <Answer label="Referrer">{orBlank(a.referrer, "None")}</Answer>
-          </dl>
-        </Panel>
-      </div>
+      <Panel title="How they heard">
+        <dl className="space-y-3">
+          <Answer label="Came via a share link">{via ? <CameViaName via={via} onOpen={onOpenApplicant} /> : <span className="text-gray-400">No</span>}</Answer>
+          <Answer label="Source">{orBlank(a.referral_source)}</Answer>
+          <Answer label="Referred by">{orBlank(a.referred_by)}</Answer>
+        </dl>
+      </Panel>
 
-      <Panel title="Fellowship">
-        {fellow ? (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-gray-700 [overflow-wrap:anywhere]">
-              {a.full_name} is a fellow. Their page:{" "}
-              <span className="font-mono text-xs text-gray-900">{fellow.link ?? "being set up"}</span>
-              <span className="block text-xs text-gray-500">Send it once the fellows' pages are live on studojo.com.</span>
-            </p>
-            {fellow.link && (
-              <button
-                type="button"
-                onClick={() =>
-                  navigator.clipboard
-                    .writeText(fellow.link!)
-                    .then(() => toast.success("Link copied"))
-                    .catch(() => toast.error("Could not copy. Select the link instead."))
-                }
-                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:border-violet-400"
-              >
-                Copy link
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-gray-600">
-              Taking them on gives them their own page and marks them selected. Their posts are then written and approved in the fellowship admin.
-            </p>
-            <button
-              type="button"
-              onClick={onMakeFellow}
-              disabled={makingFellow}
-              className="rounded-lg border-2 border-neutral-900 bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
-            >
-              {makingFellow ? "Setting up..." : "Make fellow"}
-            </button>
-          </div>
-        )}
+      <Panel title="Dates and attribution">
+        <dl className="space-y-3">
+          <Answer label="Applied">{formatDateTime(a.created_at)}</Answer>
+          <Answer label="Consent given">{formatDateTime(a.consent_at)}</Answer>
+          <Answer label="Page">{orBlank(a.source_path, "Not recorded")}</Answer>
+          <Answer label="UTM source / medium / campaign">{orBlank(utm, "None")}</Answer>
+          <Answer label="Referrer">{orBlank(a.referrer, "None")}</Answer>
+        </dl>
       </Panel>
 
       <Panel title="Team notes">
@@ -1913,10 +2688,10 @@ function ApplicantDetail({
           maxLength={NOTES_MAX}
           rows={4}
           placeholder="Only the team sees these."
-          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+          className="w-full rounded-lg border border-[#CDC8D9] bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
         />
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-          <span className={`text-xs ${tooLong ? "font-medium text-red-600" : "text-gray-400"}`}>
+          <span className={`text-xs ${tooLong ? "font-medium text-red-600" : "text-[#686377]"}`}>
             {notes.length.toLocaleString("en-US")} / {NOTES_MAX.toLocaleString("en-US")}
           </span>
           <div className="flex items-center gap-3">
@@ -1925,7 +2700,7 @@ function ApplicantDetail({
               type="button"
               onClick={onNotesSave}
               disabled={!notesDirty || savingNotes || tooLong}
-              className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-1.5 text-sm font-semibold text-gray-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
+              className="rounded-lg border border-[#1A1625] bg-white px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
             >
               {savingNotes ? "Saving..." : "Save"}
             </button>
