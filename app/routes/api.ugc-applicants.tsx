@@ -114,6 +114,11 @@ async function ensureTable() {
   await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS meeting_link TEXT`);
   await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS meeting_note TEXT`);
   await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS meeting_emailed_at TIMESTAMPTZ`);
+  // While a meeting email is being sent (so a second save doesn't send it
+  // again), and the meeting time the applicant was last actually emailed,
+  // which a later change never clears: it is what they think the time is.
+  await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS meeting_email_sending_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE ugc_applications ADD COLUMN IF NOT EXISTS meeting_emailed_for TIMESTAMPTZ`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_ugc_applications_share_code
     ON ugc_applications (share_code) WHERE share_code IS NOT NULL
@@ -179,10 +184,17 @@ async function pipelineCounts(counts: Awaited<ReturnType<typeof statusCounts>>) 
 // Teams links run to a few hundred characters.
 const MEETING_LINK_MAX = 1000;
 const MEETING_NOTE_MAX = 500;
-// Control characters other than new lines and tabs, and direction overrides:
-// Postgres refuses NUL, and the rest can hide or reorder text in the email.
-const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u202A-\u202E\u2066-\u2069]/g;
-const SAFE_LINK = /^https:\/\/[^\s<>"\u0000-\u001F\u007F\u202A-\u202E\u2066-\u2069]+$/i;
+// Control characters other than new lines and tabs, direction marks and
+// overrides, and invisible spaces: Postgres refuses NUL, and the rest can hide
+// or reorder text in the email. Zero-width joiners stay: emoji and Indic
+// scripts need them.
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200B\u200E\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
+// Invisible characters a pasted link can carry; dropped before checking it,
+// since the person can't see them to fix them.
+const INVISIBLE = /[\u00AD\u061C\u200B-\u200F\u2060-\u2064\uFEFF]/g;
+const SAFE_LINK = /^https:\/\/[^\s<>"\u0000-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]+$/i;
+// A send older than this is taken as having died (nodemailer gives up well before).
+const STALE_SEND = sql`INTERVAL '15 minutes'`;
 const DAY_MS = 86400000;
 
 // The driver returns timestamptz as Postgres text ("2026-10-26 13:48:53.62+00").
@@ -564,24 +576,24 @@ export async function action({ request }: Route.ActionArgs) {
     if (status === "selected") {
       return Response.json({ error: "Use Make fellow to make them a fellow." }, { status: 400 });
     }
-    const isFellow = await db
-      .execute(sql`SELECT 1 FROM ugc_creators WHERE application_id = ${id} AND status <> 'removed'`)
-      .then((r) => r.rows.length > 0)
-      .catch(() => false); // no fellows table yet
-    if (isFellow) {
+    // The check and the change happen under a lock on the application row,
+    // which Make fellow takes too, so the two can't interleave.
+    await ensureCreatorTables();
+    const outcome = await db.transaction(async (tx) => {
+      const app = (await tx.execute(sql`SELECT id FROM ugc_applications WHERE id = ${id} FOR UPDATE`)).rows[0];
+      if (!app) return { notFound: true as const };
+      const fellow = (await tx.execute(sql`SELECT 1 FROM ugc_creators WHERE application_id = ${id} AND status <> 'removed'`)).rows.length > 0;
+      if (fellow) return { fellow: true as const };
+      const updated = await tx.execute(sql`UPDATE ugc_applications SET status = ${status} WHERE id = ${id} RETURNING id, status`);
+      return { row: updated.rows[0] };
+    });
+    if (outcome.fellow) {
       return Response.json({ error: "They're a fellow now, so their status stays Fellow." }, { status: 409 });
     }
-    const result = await db.execute(sql`
-      UPDATE ugc_applications SET status = ${status}
-      WHERE id = ${id}
-      RETURNING id, status
-    `);
-    if (result.rows.length === 0) {
-      return Response.json({ error: "Applicant not found" }, { status: 404 });
-    }
+    if (!outcome.row) return Response.json({ error: "Applicant not found" }, { status: 404 });
     // Fresh counts, so the header stays right without reloading every row.
     const counts = await statusCounts();
-    return Response.json({ ok: true, applicant: result.rows[0], counts, pipeline: await pipelineCounts(counts) });
+    return Response.json({ ok: true, applicant: outcome.row, counts, pipeline: await pipelineCounts(counts) });
   }
 
   // POST { intent: "schedule-meeting", id, at, link?, note?, notify? }: set the
@@ -598,65 +610,82 @@ export async function action({ request }: Route.ActionArgs) {
     if (Number.isNaN(at.getTime())) return Response.json({ error: "Pick a date and time for the meeting." }, { status: 400 });
     if (at.getTime() < now - 5 * 60000) return Response.json({ error: "That time has already passed." }, { status: 400 });
     if (at.getTime() > now + 60 * DAY_MS) return Response.json({ error: "Pick a time in the next 60 days." }, { status: 400 });
-    const link = typeof body.link === "string" ? body.link.trim() : "";
+    const link = typeof body.link === "string" ? body.link.replace(INVISIBLE, "").trim() : "";
     if (link.length > MEETING_LINK_MAX) return Response.json({ error: "Keep the meeting link under 1,000 characters." }, { status: 400 });
-    if (link && !SAFE_LINK.test(link)) return Response.json({ error: "The meeting link must start with https://" }, { status: 400 });
+    if (link && !/^https:\/\//i.test(link)) return Response.json({ error: "The meeting link must start with https://" }, { status: 400 });
+    if (link && !SAFE_LINK.test(link)) {
+      return Response.json({ error: "The meeting link has a space or a character links can't have. Copy it again from the meeting app." }, { status: 400 });
+    }
     const note = typeof body.note === "string" ? body.note.replace(/\r\n?/g, "\n").replace(CONTROL_CHARS, "").trim() : "";
     if (note.length > MEETING_NOTE_MAX) return Response.json({ error: "Keep the note under 500 characters." }, { status: 400 });
 
     // The selection meeting is for people still in review. A fellow has been
     // through it, and a rejected applicant must be moved back first, so that
-    // nobody gets "We'd like to meet you" by mistake.
+    // nobody gets "We'd like to meet you" by mistake. Checked and saved under
+    // the same row lock as status changes and Make fellow.
     await ensureCreatorTables();
-    const current = (await db.execute(sql`
-      SELECT a.status,
-             EXISTS (SELECT 1 FROM ugc_creators c WHERE c.application_id = a.id AND c.status <> 'removed') AS fellow
-      FROM ugc_applications a WHERE a.id = ${id}
-    `)).rows[0] as { status: string; fellow: boolean } | undefined;
-    if (!current) return Response.json({ error: "Applicant not found" }, { status: 404 });
-    if (current.status === "selected" || current.fellow) {
-      return Response.json({ error: "They're already a fellow, so there's no selection meeting to set." }, { status: 409 });
-    }
-    if (current.status === "rejected") {
-      return Response.json({ error: "They're rejected. Move them back to New or Shortlisted first." }, { status: 409 });
-    }
-
     const atIso = at.toISOString();
     const linkValue = link || null;
     const noteValue = note || null;
-    const updated = await db.execute(sql`
-      UPDATE ugc_applications
-      SET status = 'meeting',
-          meeting_emailed_at = CASE
-            WHEN meeting_at IS NOT DISTINCT FROM ${atIso}::timestamptz
-             AND meeting_link IS NOT DISTINCT FROM ${linkValue}::text
-             AND meeting_note IS NOT DISTINCT FROM ${noteValue}::text
-            THEN meeting_emailed_at
-          END,
-          meeting_at = ${atIso}::timestamptz, meeting_link = ${linkValue}, meeting_note = ${noteValue}
-      WHERE id = ${id} AND status IN ('new', 'shortlisted', 'meeting')
-      RETURNING id, full_name, email, meeting_emailed_at
-    `);
-    const row = updated.rows[0] as { id: number; full_name: string; email: string | null; meeting_emailed_at: unknown } | undefined;
-    if (!row) return Response.json({ error: "Their status just changed. Reload the page and try again." }, { status: 409 });
+    // The same meeting as the one saved: same time, link and note.
+    const same = sql`meeting_at IS NOT DISTINCT FROM ${atIso}::timestamptz
+      AND meeting_link IS NOT DISTINCT FROM ${linkValue}::text
+      AND meeting_note IS NOT DISTINCT FROM ${noteValue}::text`;
+    const saved = await db.transaction(async (tx) => {
+      const current = (await tx.execute(sql`
+        SELECT a.status,
+               EXISTS (SELECT 1 FROM ugc_creators c WHERE c.application_id = a.id AND c.status <> 'removed') AS fellow
+        FROM ugc_applications a WHERE a.id = ${id} FOR UPDATE OF a
+      `)).rows[0] as { status: string; fellow: boolean } | undefined;
+      if (!current) return { error: "Applicant not found", status: 404 };
+      if (current.status === "selected" || current.fellow) {
+        return { error: "They're already a fellow, so there's no selection meeting to set.", status: 409 };
+      }
+      if (current.status === "rejected") {
+        return { error: "They're rejected. Move them back to New or Shortlisted first.", status: 409 };
+      }
+      // A changed time, link or note means the email they have (if any) is out
+      // of date, so "emailed" and any send in progress no longer apply.
+      const updated = await tx.execute(sql`
+        UPDATE ugc_applications
+        SET status = 'meeting',
+            meeting_emailed_at = CASE WHEN ${same} THEN meeting_emailed_at END,
+            meeting_email_sending_at = CASE WHEN ${same} THEN meeting_email_sending_at END,
+            meeting_at = ${atIso}::timestamptz, meeting_link = ${linkValue}, meeting_note = ${noteValue}
+        WHERE id = ${id}
+        RETURNING id, full_name, email, meeting_emailed_at,
+                  COALESCE(meeting_email_sending_at > NOW() - ${STALE_SEND}, false) AS sending
+      `);
+      return { row: updated.rows[0] as { id: number; full_name: string; email: string | null; meeting_emailed_at: unknown; sending: boolean } };
+    });
+    const row = saved.row;
+    if (!row) return Response.json({ error: saved.error ?? "Applicant not found" }, { status: saved.status ?? 404 });
 
     const paused = emailsPaused();
     // They already have the email for exactly this meeting.
-    const alreadyEmailed = row.meeting_emailed_at != null;
+    let alreadyEmailed = row.meeting_emailed_at != null;
+    // Another save of this same meeting is sending it right now.
+    let sending = !alreadyEmailed && row.sending;
     let emailed = alreadyEmailed;
-    if (body.notify !== false && !paused && !alreadyEmailed && row.email) {
-      // Mark it sent before sending, so a retry that arrives while this one is
-      // still sending finds it marked and doesn't send a second copy.
+    if (body.notify !== false && !paused && !alreadyEmailed && !sending && row.email) {
+      // Claim the send before sending, so a second save that arrives meanwhile
+      // waits for this one's result instead of sending a second copy. Only a
+      // send that Gmail accepted marks the meeting emailed.
       const claim = (await db.execute(sql`
-        UPDATE ugc_applications SET meeting_emailed_at = NOW()
-        WHERE id = ${id} AND meeting_emailed_at IS NULL
-          AND meeting_at = ${atIso}::timestamptz
-          AND meeting_link IS NOT DISTINCT FROM ${linkValue}::text
-          AND meeting_note IS NOT DISTINCT FROM ${noteValue}::text
-        RETURNING meeting_emailed_at::text AS claimed
-      `)).rows[0] as { claimed: string } | undefined;
+        UPDATE ugc_applications SET meeting_email_sending_at = NOW()
+        WHERE id = ${id} AND meeting_emailed_at IS NULL AND ${same}
+          AND (meeting_email_sending_at IS NULL OR meeting_email_sending_at < NOW() - ${STALE_SEND})
+        RETURNING meeting_email_sending_at::text AS claimed, meeting_emailed_for
+      `)).rows[0] as { claimed: string; meeting_emailed_for: unknown } | undefined;
       if (claim) {
-        const message = meetingEmail({ fullName: row.full_name, at, link: linkValue, note: noteValue });
+        const before = claim.meeting_emailed_for ? new Date(String(claim.meeting_emailed_for)) : null;
+        const message = meetingEmail({
+          fullName: row.full_name,
+          at,
+          link: linkValue,
+          note: noteValue,
+          previousAt: before && !Number.isNaN(before.getTime()) ? before : null,
+        });
         emailed = await sendDirectGmail({
           to: row.email,
           subject: message.subject,
@@ -664,24 +693,43 @@ export async function action({ request }: Route.ActionArgs) {
           text: message.text,
           fromName: "Studojo Growth Fellowship",
         });
-        if (!emailed) {
-          await db.execute(sql`
-            UPDATE ugc_applications SET meeting_emailed_at = NULL
-            WHERE id = ${id} AND meeting_emailed_at = ${claim.claimed}::timestamptz
-          `);
-        }
+        await db.execute(sql`
+          UPDATE ugc_applications
+          SET meeting_emailed_for = CASE WHEN ${emailed}::boolean THEN ${atIso}::timestamptz ELSE meeting_emailed_for END,
+              meeting_emailed_at = CASE WHEN ${emailed}::boolean AND meeting_email_sending_at = ${claim.claimed}::timestamptz
+                                        THEN NOW() ELSE meeting_emailed_at END,
+              meeting_email_sending_at = CASE WHEN meeting_email_sending_at = ${claim.claimed}::timestamptz
+                                              THEN NULL ELSE meeting_email_sending_at END
+          WHERE id = ${id}
+        `);
+      } else {
+        // Another save of this meeting claimed it first: report what it did.
+        const other = (await db.execute(sql`
+          SELECT meeting_emailed_at IS NOT NULL AS done, meeting_email_sending_at IS NOT NULL AS busy
+          FROM ugc_applications WHERE id = ${id} AND ${same}
+        `)).rows[0] as { done: boolean; busy: boolean } | undefined;
+        alreadyEmailed = emailed = Boolean(other?.done);
+        sending = !emailed && Boolean(other?.busy);
       }
     }
     const fresh = (await db.execute(sql`
-      SELECT id, status, meeting_at, meeting_link, meeting_note, meeting_emailed_at FROM ugc_applications WHERE id = ${id}
+      SELECT id, status, meeting_at, meeting_link, meeting_note, meeting_emailed_at, meeting_emailed_for,
+             COALESCE(meeting_email_sending_at > NOW() - ${STALE_SEND}, false) AS meeting_sending
+      FROM ugc_applications WHERE id = ${id}
     `)).rows[0] as Record<string, unknown>;
     const counts = await statusCounts();
     return Response.json({
       ok: true,
       emailed,
       alreadyEmailed,
+      sending,
       emailsPaused: paused,
-      applicant: { ...fresh, meeting_at: isoTime(fresh.meeting_at), meeting_emailed_at: isoTime(fresh.meeting_emailed_at) },
+      applicant: {
+        ...fresh,
+        meeting_at: isoTime(fresh.meeting_at),
+        meeting_emailed_at: isoTime(fresh.meeting_emailed_at),
+        meeting_emailed_for: isoTime(fresh.meeting_emailed_for),
+      },
       counts,
       pipeline: await pipelineCounts(counts),
     });
@@ -748,7 +796,8 @@ export async function loader({ request }: Route.LoaderArgs) {
              story_work, story_setback, story_lesson, tone,
              can_commit, studojo_ok, why_join, referral_source, referred_by,
              consent_at, status, team_notes, share_code, came_from_code,
-             meeting_at, meeting_link, meeting_note, meeting_emailed_at,
+             meeting_at, meeting_link, meeting_note, meeting_emailed_at, meeting_emailed_for,
+             COALESCE(meeting_email_sending_at > NOW() - ${STALE_SEND}, false) AS meeting_sending,
              source_path, utm_source, utm_medium, utm_campaign, referrer,
              created_at
       FROM ugc_applications
@@ -767,6 +816,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     created_at: isoTime(row.created_at),
     meeting_at: isoTime(row.meeting_at),
     meeting_emailed_at: isoTime(row.meeting_emailed_at),
+    meeting_emailed_for: isoTime(row.meeting_emailed_for),
     share: shareStats ? (shareStats.get(row.id as number) ?? NO_SHARES) : null,
   }));
 

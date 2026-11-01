@@ -26,6 +26,16 @@ export interface MeetingInput {
   at: Date;
   link: string | null;
   note: string | null;
+  /** The time they were last told, when this replaces an earlier message. */
+  previousAt?: Date | null;
+}
+
+// A message that replaces an earlier one says so: a new time cancels the old
+// one, and the same time with a new link or note is an update.
+function change(m: MeetingInput): { moved: string | null; updated: boolean } {
+  if (!m.previousAt) return { moved: null, updated: false };
+  if (m.previousAt.getTime() !== m.at.getTime()) return { moved: meetingWhen(m.previousAt), updated: false };
+  return { moved: null, updated: true };
 }
 
 const firstName = (full: string) => full.trim().split(/\s+/)[0] || "there";
@@ -33,10 +43,20 @@ const firstName = (full: string) => full.trim().split(/\s+/)[0] || "there";
 export function meetingEmail(m: MeetingInput): { subject: string; html: string; text: string } {
   const when = meetingWhen(m.at);
   const first = firstName(m.fullName);
-  const subject = `Your Studojo Growth Fellowship meeting: ${when}`;
+  const { moved, updated } = change(m);
+  const subject = moved
+    ? `Your Studojo Growth Fellowship meeting has moved: ${when}`
+    : updated
+      ? `Updated details for your Studojo Growth Fellowship meeting: ${when}`
+      : `Your Studojo Growth Fellowship meeting: ${when}`;
+  const opening = moved
+    ? `We've moved your Studojo Growth Fellowship meeting. The earlier time, ${moved}, is off.`
+    : updated
+      ? "Here are the updated details for your Studojo Growth Fellowship meeting."
+      : "Thanks for applying to the Studojo Growth Fellowship. We'd like to meet you.";
   const lines = [
     `Hi ${first},`,
-    "Thanks for applying to the Studojo Growth Fellowship. We'd like to meet you.",
+    opening,
     `When: ${when}`,
     m.link ? `Join here: ${m.link}` : "We'll send you the link to join before the call.",
     ...(m.note ? [m.note] : []),
@@ -46,7 +66,7 @@ export function meetingEmail(m: MeetingInput): { subject: string; html: string; 
   const p = (inner: string) => `<p style="margin:0 0 14px">${inner}</p>`;
   const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#1a1625;max-width:560px">
 ${p(`Hi ${esc(first)},`)}
-${p("Thanks for applying to the Studojo Growth Fellowship. We'd like to meet you.")}
+${p(esc(opening))}
 ${p(`<b>When:</b> ${esc(when)}`)}
 ${m.link ? p(`<b>Join here:</b> <a href="${esc(m.link)}" style="color:#5b30da">${esc(m.link)}</a>`) : p("We'll send you the link to join before the call.")}
 ${m.note ? p(esc(m.note).replace(/\n/g, "<br>")) : ""}
@@ -61,8 +81,13 @@ export function meetingWhatsapp(m: MeetingInput, whatsapp: string | null): strin
   const digits = (whatsapp || "").replace(/\D/g, "");
   if (digits.length < 10) return null;
   const when = meetingWhen(m.at);
+  const { moved, updated } = change(m);
   const text = [
-    `Hi ${firstName(m.fullName)}, thanks for applying to the Studojo Growth Fellowship. We'd like to meet you: ${when}.`,
+    moved
+      ? `Hi ${firstName(m.fullName)}, we've moved your Studojo Growth Fellowship meeting to ${when}. The earlier time, ${moved}, is off.`
+      : updated
+        ? `Hi ${firstName(m.fullName)}, here are the updated details for your Studojo Growth Fellowship meeting: ${when}.`
+        : `Hi ${firstName(m.fullName)}, thanks for applying to the Studojo Growth Fellowship. We'd like to meet you: ${when}.`,
     m.link ? `Join here: ${m.link}` : "We'll send you the link to join before the call.",
     m.note || "",
     "If the time doesn't work, reply here and we'll find another.",

@@ -30,6 +30,11 @@ function getTransporter(): { transporter: Transporter; from: string; user: strin
     secure: false,
     requireTLS: true,
     auth: { user, pass: password },
+    // Fail in seconds rather than minutes, so the person waiting on a send
+    // hears whether it went before their request times out.
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
   });
   cached = { transporter, from: `Studojo Support <${user}>`, user };
   return cached;

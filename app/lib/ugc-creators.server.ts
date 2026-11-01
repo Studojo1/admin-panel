@@ -116,7 +116,7 @@ async function createTables() {
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_ugc_creators_slug ON ugc_creators (slug) WHERE slug IS NOT NULL`);
   await db.execute(sql`
     UPDATE ugc_creators
-    SET slug = COALESCE(NULLIF(lower(regexp_replace(split_part(full_name, ' ', 1), '[^a-zA-Z]', '', 'g')), ''), 'fellow')
+    SET slug = COALESCE(NULLIF(left(lower(regexp_replace(split_part(btrim(full_name), ' ', 1), '[^a-zA-Z]', '', 'g')), 20), ''), 'fellow')
                || '-' || substr(md5(random()::text || id::text || clock_timestamp()::text), 1, 8)
     WHERE slug IS NULL
   `);

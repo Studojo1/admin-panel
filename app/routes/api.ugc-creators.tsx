@@ -93,18 +93,25 @@ export async function action({ request }: Route.ActionArgs) {
     `).catch(() => ({ rows: [] }))).rows[0] as Record<string, string | null> | undefined;
     if (!app) return Response.json({ error: "Application not found" }, { status: 404 });
 
-    const inserted = await db.execute(sql`
-      INSERT INTO ugc_creators (application_id, token, slug, full_name, email, whatsapp, linkedin_url, college, field, created_by)
-      VALUES (${applicationId}, ${newCreatorToken()}, ${newCreatorSlug(String(app.full_name ?? ""))}, ${app.full_name}, ${app.email}, ${app.whatsapp}, ${app.linkedin_url}, ${app.college}, ${app.field}, ${admin.email})
-      ON CONFLICT (application_id) DO UPDATE SET status = 'active' WHERE ugc_creators.status = 'removed'
-      RETURNING id, token, slug, intern_at, referred_at
-    `);
-    const row = (inserted.rows[0] ??
-      (await db.execute(sql`SELECT id, token, slug, intern_at, referred_at FROM ugc_creators WHERE application_id = ${applicationId}`)).rows[0]) as
-      | { id: number; token: string; slug: string | null; intern_at: string | null; referred_at: string | null }
-      | undefined;
+    // The fellow row and the application's status change together, under the
+    // lock on the application row that status changes take too, so the two
+    // tables can't end up out of step.
+    const { inserted, row } = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM ugc_applications WHERE id = ${applicationId} FOR UPDATE`);
+      const inserted = await tx.execute(sql`
+        INSERT INTO ugc_creators (application_id, token, slug, full_name, email, whatsapp, linkedin_url, college, field, created_by)
+        VALUES (${applicationId}, ${newCreatorToken()}, ${newCreatorSlug(String(app.full_name ?? ""))}, ${app.full_name}, ${app.email}, ${app.whatsapp}, ${app.linkedin_url}, ${app.college}, ${app.field}, ${admin.email})
+        ON CONFLICT (application_id) DO UPDATE SET status = 'active' WHERE ugc_creators.status = 'removed'
+        RETURNING id, token, slug, intern_at, referred_at
+      `);
+      const row = (inserted.rows[0] ??
+        (await tx.execute(sql`SELECT id, token, slug, intern_at, referred_at FROM ugc_creators WHERE application_id = ${applicationId}`)).rows[0]) as
+        | { id: number; token: string; slug: string | null; intern_at: string | null; referred_at: string | null }
+        | undefined;
+      if (row) await tx.execute(sql`UPDATE ugc_applications SET status = 'selected' WHERE id = ${applicationId} AND status <> 'selected'`);
+      return { inserted, row };
+    });
     if (!row) return Response.json({ error: "Could not create the creator" }, { status: 500 });
-    await db.execute(sql`UPDATE ugc_applications SET status = 'selected' WHERE id = ${applicationId} AND status <> 'selected'`);
     return Response.json({
       ok: true,
       created: inserted.rows.length > 0,

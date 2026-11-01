@@ -100,6 +100,10 @@ interface Applicant {
   meeting_link: string | null;
   meeting_note: string | null;
   meeting_emailed_at: string | null;
+  // The meeting time they were last actually emailed (kept when it changes).
+  meeting_emailed_for?: string | null;
+  // Another save is sending the meeting email right now.
+  meeting_sending?: boolean;
   // Null when the numbers could not be counted.
   share: ShareStats | null;
 }
@@ -158,7 +162,9 @@ const STATUSES = ["new", "shortlisted", "meeting", "selected", "rejected"] as co
 const SETTABLE = ["new", "shortlisted", "rejected"] as const;
 // The profile's status row, in pipeline order.
 const STATUS_BUTTONS = ["new", "shortlisted", "meeting", "rejected"] as const;
-const WIDE = "(min-width: 1024px)";
+// Tailwind's lg breakpoint, in the same unit, so this agrees with lg:block and
+// lg:hidden at any browser font size.
+const WIDE = "(min-width: 64rem)";
 
 const STATUS_LABELS: Record<string, string> = {
   new: "New",
@@ -592,7 +598,8 @@ export default function UgcApplicants() {
         setFellowByApp(map);
       })
       .catch(() => {
-        // Without it, rows just offer "Make fellow", which is safe to press twice.
+        // Rows still offer "Make fellow", which is safe to press twice.
+        toast.error("Could not load the fellows' pages. Reload to see them.");
       });
   }, [isPending, isAuthorized]);
 
@@ -798,7 +805,12 @@ export default function UgcApplicants() {
   // The phone sheet locks the page behind it and closes with Escape.
   useEffect(() => {
     if (!sheetOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeSheet();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      // The meeting form and the Make fellow confirm close themselves first.
+      if ((e.target as Element | null)?.closest?.('form, [role="alertdialog"]')) return;
+      closeSheet();
+    };
     document.addEventListener("keydown", onKey);
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -911,6 +923,7 @@ export default function UgcApplicants() {
       const tell = whatsappHref(a.whatsapp) ? `send ${first} the time on WhatsApp` : `tell ${first} the time yourself`;
       if (data.alreadyEmailed) toast.success(`Meeting saved. ${first} already has the email with this time.`);
       else if (data.emailed) toast.success(`Meeting set. ${first} has been emailed at ${a.email}.`);
+      else if (data.sending) toast.info(`Meeting saved. The email to ${first} is still being sent. Reload in a minute to check it went.`);
       else if (data.emailsPaused) toast.success(`Meeting saved. Emails are paused, so ${tell}.`);
       else if (m.notify) toast.warning(`Meeting saved, but the email didn't go, so ${tell}.`);
       else toast.success("Meeting saved. No email was sent.");
@@ -1242,7 +1255,7 @@ export default function UgcApplicants() {
                           isSel ? "bg-[#F2EDFF] shadow-[inset_3px_0_0_#6C3AE8]" : "hover:bg-[#F8F7FB]"
                         }`}
                       >
-                        <div className="grid grid-cols-[22px_40px_minmax(0,1fr)] gap-x-3 sm:grid-cols-[22px_40px_minmax(0,1fr)_150px]">
+                        <div className="grid grid-cols-[22px_40px_minmax(0,1fr)] gap-x-3 sm:grid-cols-[22px_40px_minmax(0,1fr)_176px]">
                           <span className="pt-2.5 text-right text-xs tabular-nums text-[#686377]">{i + 1}</span>
                           <Avatar name={r.full_name} />
                           <div className="min-w-0">
@@ -1293,7 +1306,7 @@ export default function UgcApplicants() {
                               aria-label={`Status for ${r.full_name}`}
                               value={r.status}
                               // A fellow stays one: their page is live.
-                              disabled={savingStatus.has(r.id) || Boolean(fellowByApp[r.id])}
+                              disabled={savingStatus.has(r.id) || Boolean(fellowByApp[r.id]) || r.status === "selected"}
                               onChange={(e) => changeStatus(r, e.target.value)}
                               className={`mt-0 rounded-lg border px-2 py-1.5 text-[13px] font-semibold sm:mt-2 sm:w-full ${STATUS_STYLES[r.status] ?? STATUS_STYLES.new}`}
                             >
@@ -1319,7 +1332,7 @@ export default function UgcApplicants() {
 
             {/* Right: the selected applicant (a sheet on phones). It stays in view while the list scrolls. */}
             <aside aria-label="Applicant" className="hidden min-w-0 lg:sticky lg:top-[96px] lg:block lg:self-start">
-              {selected ? (
+              {selected && !sheetOpen ? (
                 profileFor(selected, false)
               ) : (
                 <div className="rounded-xl border border-dashed border-[#CDC8D9] bg-white p-10 text-center text-sm text-[#686377]">
@@ -1427,7 +1440,7 @@ function PipelineCard({ pipeline, active, onPick }: { pipeline: Pipeline; active
       </h2>
       <ol className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
         {stages.map((st, i) => {
-          const on = st.status !== null && st.status !== "" && active === st.status;
+          const on = st.status !== null && active === st.status;
           const body = (
             <>
               <span className="block text-[28px] font-semibold leading-none tabular-nums" style={{ fontFamily: SERIF }}>
@@ -2020,13 +2033,31 @@ function SharePanel({
 const IST_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
 const IST_TIME = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false });
 
+// A meeting is current only while they're at "Meeting scheduled". Moving them
+// to another status calls it off, and the box then says so.
+const isCurrentMeeting = (a: Applicant) => a.status === "meeting" && Boolean(a.meeting_at);
+
 function meetingDefaults(a: Applicant) {
-  const at = a.meeting_at ? new Date(a.meeting_at) : (() => {
+  const at = isCurrentMeeting(a) ? new Date(a.meeting_at!) : (() => {
     // Tomorrow, 11 am India time.
     const d = new Date(Date.now() + 86400000);
     return new Date(`${IST_DAY.format(d)}T11:00:00+05:30`);
   })();
   return { date: IST_DAY.format(at), time: IST_TIME.format(at), link: a.meeting_link ?? "", note: a.meeting_note ?? "", notify: true };
+}
+
+// What the applicant has been told about the current meeting.
+function emailedLine(a: Applicant, first: string): string {
+  if (a.meeting_emailed_at) return `Emailed to ${a.email} ${appliedAgo(a.meeting_emailed_at)}.`;
+  if (a.meeting_sending) return `The email to ${a.email} is being sent.`;
+  if (a.meeting_emailed_for && a.meeting_at) {
+    const told = new Date(a.meeting_emailed_for);
+    if (told.getTime() !== new Date(a.meeting_at).getTime()) {
+      return `Not emailed. ${first} was emailed an earlier time, ${meetingWhen(told)}, so tell them this one.`;
+    }
+    return `Not emailed. ${first} has the email for this time, but not the latest link or note.`;
+  }
+  return "Not emailed.";
 }
 
 function MeetingPanel({
@@ -2051,14 +2082,46 @@ function MeetingPanel({
   useEffect(() => {
     setForm(meetingDefaults(a));
     setError(null);
-  }, [a.id, a.meeting_at, editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [a.id, a.meeting_at, a.status, editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const id = `meet-${a.id}`;
+  // Keyboard focus goes into the form when it opens, and back to the button
+  // that opened it when it closes.
+  const wasEditing = useRef(editing);
+  useEffect(() => {
+    if (editing && !wasEditing.current) document.getElementById(`${id}-date`)?.focus();
+    if (!editing && wasEditing.current) (document.getElementById(`${id}-change`) ?? document.getElementById(`${id}-schedule`))?.focus();
+    wasEditing.current = editing;
+  }, [editing, id]);
+
+  const current = isCurrentMeeting(a);
   const at = a.meeting_at ? new Date(a.meeting_at) : null;
   const first = a.full_name.trim().split(/\s+/)[0];
-  const whatsapp = at ? meetingWhatsapp({ fullName: a.full_name, at, link: a.meeting_link, note: a.meeting_note }, a.whatsapp) : null;
+  // Once they were emailed an earlier version, the WhatsApp message says what changed.
+  const toldBefore = !a.meeting_emailed_at && a.meeting_emailed_for ? new Date(a.meeting_emailed_for) : null;
+  const whatsapp =
+    current && at
+      ? meetingWhatsapp({ fullName: a.full_name, at, link: a.meeting_link, note: a.meeting_note, previousAt: toldBefore }, a.whatsapp)
+      : null;
 
   if (!editing) {
     if (!at) return null;
+    if (!current) {
+      // Called off (they moved on from Meeting scheduled), or in the past.
+      const past = at.getTime() < Date.now();
+      const told = Boolean(a.meeting_emailed_at || a.meeting_emailed_for);
+      return (
+        <section aria-label="Earlier meeting" className="mx-5 mb-4 rounded-lg border border-[#E5E2EC] bg-[#F8F7FB] px-4 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#686377]">
+            {past || a.status === "selected" ? "Earlier meeting" : "Meeting called off"}
+          </p>
+          <p className="mt-1 text-sm text-[#4B4659]">It was set for {meetingWhen(at)}.</p>
+          {!past && a.status !== "selected" && told && (
+            <p className="mt-1 text-xs font-semibold text-[#8A4B00]">{first} was emailed this time, so let them know it's off.</p>
+          )}
+        </section>
+      );
+    }
     return (
       <section aria-label="Meeting" className="mx-5 mb-4 rounded-lg border border-[#D9CCFF] bg-[#F7F4FF] px-4 py-3">
         <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#5428C8]">Meeting</p>
@@ -2069,12 +2132,10 @@ function MeetingPanel({
           </p>
         )}
         {a.meeting_note && <p className="mt-1 whitespace-pre-wrap text-sm text-[#4B4659]">{a.meeting_note}</p>}
-        <p className="mt-1 text-xs text-[#686377]">
-          {a.meeting_emailed_at ? `Emailed to ${a.email} ${appliedAgo(a.meeting_emailed_at)}.` : "Not emailed."}
-        </p>
+        <p className="mt-1 text-xs text-[#686377]">{emailedLine(a, first)}</p>
         {canChange && (
         <div className="mt-2 flex flex-wrap gap-2">
-          <button type="button" onClick={() => onEditing(true)} className="rounded-lg border border-[#CDC8D9] bg-white px-3 py-1.5 text-sm font-semibold hover:border-[#6C3AE8]">
+          <button id={`${id}-change`} type="button" onClick={() => onEditing(true)} className="rounded-lg border border-[#CDC8D9] bg-white px-3 py-1.5 text-sm font-semibold hover:border-[#6C3AE8]">
             Change
           </button>
           {whatsapp && (
@@ -2088,22 +2149,38 @@ function MeetingPanel({
     );
   }
 
-  const id = `meet-${a.id}`;
+  // Saving the meeting they were already emailed, unchanged, sends nothing.
+  const typed = form.date && form.time ? new Date(`${form.date}T${form.time}:00+05:30`) : null;
+  const unchangedAndEmailed =
+    current &&
+    Boolean(a.meeting_emailed_at) &&
+    typed !== null &&
+    at !== null &&
+    typed.getTime() === at.getTime() &&
+    form.link.trim() === (a.meeting_link ?? "") &&
+    form.note.trim() === (a.meeting_note ?? "");
+  const willEmail = form.notify && !emailsPaused && !unchangedAndEmailed;
   return (
     <form
       aria-label={`Schedule a meeting with ${a.full_name}`}
       className="mx-5 mb-4 rounded-lg border border-[#D9CCFF] bg-[#F7F4FF] px-4 py-3"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        e.stopPropagation();
+        onEditing(false);
+      }}
       onSubmit={async (e) => {
         e.preventDefault();
         if (!form.date || !form.time) return setError("Pick a date and a time.");
         const iso = new Date(`${form.date}T${form.time}:00+05:30`);
         if (Number.isNaN(iso.getTime())) return setError("That date or time doesn't look right.");
         setError(null);
-        const ok = await onSave({ at: iso.toISOString(), link: form.link.trim(), note: form.note.trim(), notify: form.notify && !emailsPaused });
+        const ok = await onSave({ at: iso.toISOString(), link: form.link.trim(), note: form.note.trim(), notify: willEmail });
         if (ok) onEditing(false);
       }}
     >
-      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#5428C8]">{at ? "Change the meeting" : "Schedule a meeting"}</p>
+      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#5428C8]">{current ? "Change the meeting" : "Schedule a meeting"}</p>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <label className="text-xs font-semibold text-[#4B4659]" htmlFor={`${id}-date`}>
           Date
@@ -2122,7 +2199,9 @@ function MeetingPanel({
         Note for them (optional)
         <textarea id={`${id}-note`} rows={2} maxLength={500} value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#CDC8D9] bg-white px-2 py-1.5 text-sm font-normal" />
       </label>
-      {emailsPaused ? (
+      {unchangedAndEmailed ? (
+        <p className="mt-2 rounded-lg bg-white px-3 py-2 text-sm text-[#4B4659]">{first} already has the email for this meeting.</p>
+      ) : emailsPaused ? (
         <p className="mt-2 rounded-lg bg-white px-3 py-2 text-sm text-[#4B4659]">
           Emails are paused, so {first} won't be emailed. After saving, {whatsappHref(a.whatsapp) ? "send the time on WhatsApp" : "tell them the time yourself"}.
         </p>
@@ -2141,7 +2220,7 @@ function MeetingPanel({
       )}
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="submit" disabled={busy} className="rounded-lg bg-[#6C3AE8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#5428C8] disabled:opacity-60">
-          {busy ? "Saving..." : form.notify && !emailsPaused ? "Save and email" : "Save"}
+          {busy ? "Saving..." : willEmail ? "Save and email" : "Save"}
         </button>
         <button type="button" onClick={() => onEditing(false)} className="rounded-lg border border-[#CDC8D9] bg-white px-4 py-2 text-sm font-semibold">
           Cancel
@@ -2245,9 +2324,36 @@ function ApplicantProfile({
     if (inSheet) backRef.current?.focus();
   }, [inSheet]);
   const first = a.full_name.trim().split(/\s+/)[0];
+  // A fellow (by their page, or by status) stays one: no status changes here.
+  const isFellow = Boolean(fellow) || a.status === "selected";
+  // Make fellow also puts a fellow whose status is out of step back to Fellow.
+  const offerMakeFellow = !fellow || a.status !== "selected";
   // The selection meeting is for people still in review: not a fellow, and not
   // someone rejected (move them back first).
-  const canMeet = !fellow && a.status !== "selected" && a.status !== "rejected";
+  const canMeet = !isFellow && a.status !== "rejected";
+  const rejectedHintId = `ugc-rejected-hint-${a.id}`;
+
+  // Keyboard focus follows the Make fellow confirm: to Cancel when it opens,
+  // back to the button when it closes, and to the fellow box once it's done.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (confirmFellow) {
+      asked.current = true;
+      document.getElementById(`fellow-${a.id}-cancel`)?.focus();
+    } else if (asked.current && !makingFellow) {
+      asked.current = false;
+      document.getElementById(`fellow-${a.id}-make`)?.focus();
+    }
+  }, [confirmFellow, makingFellow, a.id]);
+  const making = useRef(false);
+  useEffect(() => {
+    if (makingFellow) making.current = true;
+    else if (making.current) {
+      making.current = false;
+      asked.current = false;
+      document.getElementById(fellow ? `fellow-${a.id}-title` : `fellow-${a.id}-make`)?.focus();
+    }
+  }, [makingFellow, fellow, a.id]);
   const linkedin = httpsUrl(a.linkedin_url);
   const bestPost = httpsUrl(a.best_post_url);
   const whatsapp = whatsappHref(a.whatsapp);
@@ -2291,40 +2397,53 @@ function ApplicantProfile({
         </div>
       </header>
 
-      {fellow ? (
+      {isFellow ? (
         <p className="px-5 pb-3">
           <span className="inline-block rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[13px] font-semibold text-emerald-800">Fellow</span>
         </p>
       ) : (
+      <>
       <div role="group" aria-label="Status" className="flex flex-wrap gap-2 px-5 pb-3">
         {STATUS_BUTTONS.map((st) => {
           const on = a.status === st;
+          const blocked = st === "meeting" && !canMeet;
           return (
             <button
               key={st}
               type="button"
               aria-pressed={on}
-              disabled={savingStatus || (st === "meeting" && !canMeet)}
+              // Not disabled while saving, so keyboard focus stays on the button.
+              aria-disabled={savingStatus || blocked || undefined}
+              aria-describedby={blocked && a.status === "rejected" ? rejectedHintId : undefined}
               // "Meeting scheduled" means a meeting is set, so it opens the meeting form.
-              onClick={() => (st === "meeting" ? !on && setEditingMeeting(true) : onStatus(st))}
-              className={`rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors disabled:opacity-60 ${
+              onClick={() => {
+                if (savingStatus || blocked) return;
+                if (st === "meeting") {
+                  if (!on) setEditingMeeting(true);
+                } else onStatus(st);
+              }}
+              className={`rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors aria-disabled:opacity-60 ${
                 on ? "border-[#1A1625] bg-[#1A1625] text-white" : "border-[#CDC8D9] bg-white hover:border-[#6C3AE8]"
-              }`}
+              } ${blocked ? "cursor-not-allowed" : ""}`}
             >
               {STATUS_LABELS[st]}
             </button>
           );
         })}
-        {a.status === "selected" && (
-          <span className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[13px] font-semibold text-emerald-800">Fellow</span>
-        )}
       </div>
+      {a.status === "rejected" && (
+        <p id={rejectedHintId} className="-mt-1 px-5 pb-3 text-xs text-[#686377]">
+          To schedule a meeting, move them back to New or Shortlisted first.
+        </p>
+      )}
+      </>
       )}
 
       <div className="flex flex-wrap gap-2 px-5 pb-4">
-        {/* Once a meeting is set, its box below has the Change button. */}
-        {!editingMeeting && !a.meeting_at && canMeet && (
+        {/* While a meeting is set, its box below has the Change button. */}
+        {!editingMeeting && canMeet && (a.status !== "meeting" || !a.meeting_at) && (
           <button
+            id={`meet-${a.id}-schedule`}
             type="button"
             onClick={() => setEditingMeeting(true)}
             className="rounded-lg bg-[#6C3AE8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#5428C8]"
@@ -2332,8 +2451,9 @@ function ApplicantProfile({
             Schedule meeting
           </button>
         )}
-        {!fellow && !confirmFellow && (
+        {offerMakeFellow && !confirmFellow && (
           <button
+            id={`fellow-${a.id}-make`}
             type="button"
             onClick={() => setConfirmFellow(true)}
             disabled={makingFellow}
@@ -2344,10 +2464,23 @@ function ApplicantProfile({
         )}
       </div>
 
-      {!fellow && confirmFellow && (
-        <div role="alertdialog" aria-label={`Make ${first} a fellow?`} className="mx-5 mb-4 rounded-lg border border-[#1A1625] bg-white px-4 py-3">
-          <p className="text-sm font-semibold">Make {first} a fellow?</p>
-          <p className="mt-0.5 text-sm text-[#4B4659]">This creates their page and marks them as a fellow.</p>
+      {offerMakeFellow && confirmFellow && (
+        <div
+          role="alertdialog"
+          aria-labelledby={`fellow-${a.id}-ask`}
+          aria-describedby={`fellow-${a.id}-what`}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            e.preventDefault();
+            e.stopPropagation();
+            setConfirmFellow(false);
+          }}
+          className="mx-5 mb-4 rounded-lg border border-[#1A1625] bg-white px-4 py-3"
+        >
+          <p id={`fellow-${a.id}-ask`} className="text-sm font-semibold">Make {first} a fellow?</p>
+          <p id={`fellow-${a.id}-what`} className="mt-0.5 text-sm text-[#4B4659]">
+            This sets up their fellow page and marks them as a fellow. It can't be undone from this page.
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <button
               type="button"
@@ -2360,7 +2493,12 @@ function ApplicantProfile({
             >
               Yes, make fellow
             </button>
-            <button type="button" onClick={() => setConfirmFellow(false)} className="rounded-lg border border-[#CDC8D9] bg-white px-4 py-2 text-sm font-semibold">
+            <button
+              id={`fellow-${a.id}-cancel`}
+              type="button"
+              onClick={() => setConfirmFellow(false)}
+              className="rounded-lg border border-[#CDC8D9] bg-white px-4 py-2 text-sm font-semibold"
+            >
               Cancel
             </button>
           </div>
@@ -2379,7 +2517,9 @@ function ApplicantProfile({
 
       {fellow && (
         <section aria-label="Fellowship" className="mx-5 mb-4 rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3">
-          <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-emerald-800">Fellow</p>
+          <p id={`fellow-${a.id}-title`} tabIndex={-1} className="text-[11px] font-bold uppercase tracking-[0.08em] text-emerald-800 outline-none">
+            Fellow
+          </p>
           <p className="mt-1 text-sm [overflow-wrap:anywhere]">
             {a.full_name} is a fellow. Their page: <span className="font-mono text-xs">{fellow.link ?? "being set up"}</span>
           </p>
@@ -2407,9 +2547,9 @@ function ApplicantProfile({
                   key={o.key}
                   type="button"
                   aria-pressed={on}
-                  disabled={savingOutcome}
-                  onClick={() => onOutcome(o.key, !on)}
-                  className={`rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors disabled:opacity-60 ${
+                  aria-disabled={savingOutcome || undefined}
+                  onClick={() => !savingOutcome && onOutcome(o.key, !on)}
+                  className={`rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors aria-disabled:opacity-60 ${
                     on ? "border-emerald-700 bg-emerald-700 text-white" : "border-[#CDC8D9] bg-white hover:border-emerald-700"
                   }`}
                 >
