@@ -69,6 +69,7 @@ export default [
     route("api/posthog", "routes/api.posthog.tsx"),
     route("api/analytics", "routes/api.analytics.tsx"),
     route("api/outreach", "routes/api.outreach.tsx"),
+    route("api/career-coach", "routes/api.career-coach.tsx"),
     route("api/webinar-registrations", "routes/api.webinar-registrations.tsx"),
     route("api/campus-ambassadors", "routes/api.campus-ambassadors.tsx"),
     route("api/b2b-gtm", "routes/api.b2b-gtm.tsx"),
