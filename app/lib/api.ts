@@ -27,6 +27,7 @@ export function getControlPlaneUrl(): string {
 }
 
 import { authClient } from "./auth-client";
+import { reportRetired } from "./retired-service";
 
 /**
  * Get the frontend URL for Better Auth
@@ -496,7 +497,7 @@ async function outreachProxyFetch<T>(type: string, params: Record<string, string
   const token = await getToken();
   if (!token) throw new Error("No authentication token available. Please sign in.");
   const qs = new URLSearchParams({ type, ...params, _t: Date.now().toString() }).toString();
-  const fullUrl = `/api/outreach?${qs}`;
+  const fullUrl = `/old/api/outreach?${qs}`;
   const response = await fetch(fullUrl, {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     credentials: "include",
@@ -508,6 +509,7 @@ async function outreachProxyFetch<T>(type: string, params: Record<string, string
       throw new Error("Authentication failed. Please sign in again.");
     }
     const err = await response.json().catch(() => ({}));
+    reportRetired(err);
     throw new Error((err as any).error || `HTTP ${response.status}`);
   }
   return response.json() as T;
@@ -739,7 +741,7 @@ export async function listPayments(
     status_filter: statusFilter,
   });
   if (search) params.append("search", search);
-  const res = await fetch(`/api/outreach?${params.toString()}`, {
+  const res = await fetch(`/old/api/outreach?${params.toString()}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
@@ -747,6 +749,7 @@ export async function listPayments(
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    reportRetired(err);
     throw new Error((err as any).error || `HTTP ${res.status}`);
   }
   return res.json();
@@ -767,13 +770,14 @@ export interface RefundResult {
 export async function refundPayment(paymentId: number, reason: string): Promise<RefundResult> {
   const token = await getToken();
   if (!token) throw new Error("Please sign in again.");
-  const res = await fetch("/api/outreach", {
+  const res = await fetch("/old/api/outreach", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ op: "refund_payment", payment_id: paymentId, reason }),
     cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
+  reportRetired(data);
   if (!res.ok) throw new Error((data as any).detail || (data as any).error || `HTTP ${res.status}`);
   return data as RefundResult;
 }

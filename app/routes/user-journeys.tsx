@@ -124,8 +124,8 @@ export default function UserJourneys() {
       const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
       const [res, paidRes, stageRes] = await Promise.all([
         phQuery(listHogql(d, e)),
-        fetch(`/api/paid-emails`, { credentials: "include", headers: authHeaders }).then((r) => r.json()).catch(() => ({ emails: [] })),
-        fetch(`/api/journeys`, { credentials: "include", headers: authHeaders }).then((r) => r.json()).catch(() => ({ stages: {} })),
+        fetch(`/old/api/paid-emails`, { credentials: "include", headers: authHeaders }).then((r) => r.json()).catch(() => ({ emails: [] })),
+        fetch(`/old/api/journeys`, { credentials: "include", headers: authHeaders }).then((r) => r.json()).catch(() => ({ stages: {} })),
       ]);
       const paidSet = new Set<string>((paidRes.emails ?? []).map((x: string) => (x || "").toLowerCase()));
       // Authoritative server-side funnel stages (immune to client event loss).

@@ -79,7 +79,7 @@ export default function DailyDashboard() {
       setRange({ start, end });
       const token = await getToken();
       const [dbRes, visRes] = await Promise.all([
-        fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()),
+        fetch(`/old/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()),
         // uniq(distinct_id) not uniq(person_id): person_id forces a person_distinct_id_overrides
         // JOIN that made the 30d pageview query run ~5min and hit the 300s gateway timeout (500),
         // hanging the whole dashboard. distinct_id needs no join — same query returns in ~1.5s.

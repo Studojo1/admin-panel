@@ -197,7 +197,7 @@ export default function OutreachCampaignPage() {
       <main className="mx-auto max-w-[var(--section-max-width)] px-4 py-8 md:px-8 md:py-12">
         {/* Back button */}
         <button
-          onClick={() => navigate("/outreach-orders")}
+          onClick={() => navigate("/old/outreach-orders")}
           className="mb-6 inline-flex items-center gap-2 font-['Satoshi'] text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors"
         >
           ← Back to Outreach Orders
@@ -233,7 +233,7 @@ export default function OutreachCampaignPage() {
                   </div>
                   <div className="mt-1 font-['Satoshi'] text-sm text-neutral-500">
                     Daily limit: {data.campaign.daily_limit} emails ·{" "}
-                    <Link to={`/campaign-refund-check?campaign_id=${campaignId}`} className="font-medium text-violet-700 underline">
+                    <Link to={`/old/campaign-refund-check?campaign_id=${campaignId}`} className="font-medium text-violet-700 underline">
                       Refund check
                     </Link>
                   </div>

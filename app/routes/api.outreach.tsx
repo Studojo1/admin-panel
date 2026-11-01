@@ -1,125 +1,103 @@
 /**
- * Server-side proxy for outreach admin endpoints.
- * Forwards requests to job-outreach-svc — no CORS issue.
+ * Outreach admin reads for the /old archive.
  *
- * GET /api/outreach?type=overview
- * GET /api/outreach?type=users&limit=&offset=&search=&status_filter=
- * GET /api/outreach?type=user_detail&user_id=
- * POST /api/outreach  { op: "refund_payment", payment_id, reason }  (audit PP-P05)
+ * job-outreach-svc served these until the old product was retired
+ * (2 Nov 2026). They now read its tables directly, read only, with the same
+ * rules and the same JSON (~/lib/outreach-archive).
+ *
+ * GET /old/api/outreach?type=overview
+ * GET /old/api/outreach?type=users&limit=&offset=&search=&status_filter=
+ * GET /old/api/outreach?type=user_detail&user_id=
+ * GET /old/api/outreach?type=campaign_emails&campaign_id=
+ * GET /old/api/outreach?type=payments&limit=&offset=&search=&status_filter=
+ * GET /old/api/outreach?type=paid_funnel
+ * GET /old/api/outreach?type=opened_emails&limit=&offset=
+ * POST: refunds are not possible from the read-only archive.
  */
 
 import type { Route } from "./+types/api.outreach";
 import { requireAdmin } from "~/lib/auth-helper.server";
+import { archiveReadOnly } from "~/lib/archive.server";
+import { readFailed, readOnly } from "~/lib/outreach-archive/db.server";
+import {
+  campaignEmails,
+  openedEmails,
+  overview,
+  paidFunnel,
+  payments,
+  userDetail,
+  users,
+} from "~/lib/outreach-archive/outreach.server";
 
-const JOB_OUTREACH_URL =
-  process.env.JOB_OUTREACH_URL ??
-  (process.env.JOB_OUTREACH_SVC_SERVICE_HOST
-    ? `http://${process.env.JOB_OUTREACH_SVC_SERVICE_HOST}:${process.env.JOB_OUTREACH_SVC_SERVICE_PORT ?? 8000}`
-    : "http://job-outreach-svc:8000");
+const noCache = { "Cache-Control": "no-store" };
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers: noCache });
+const invalid = (error: string) => json({ error, detail: error }, 422);
+
+/** An integer query parameter in [min, max], its default when absent, or null when invalid. */
+function intParam(url: URL, name: string, dflt: number, min: number, max = Number.MAX_SAFE_INTEGER): number | null {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw === "") return dflt;
+  if (!/^-?\d+$/.test(raw.trim())) return null;
+  const n = Number(raw.trim());
+  return n >= min && n <= max ? n : null;
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
-  // Checked here too, not only by job-outreach-svc: a proxy must not rely on
-  // the backend to be the only gate (audit AS-N01).
   if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const url = new URL(request.url);
   const type = url.searchParams.get("type");
-  const headers = { Authorization: authHeader, "Content-Type": "application/json" };
-
-  const noCache = { "Cache-Control": "no-store" };
 
   try {
-    if (type === "overview") {
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/overview`, { headers });
-      return Response.json(await res.json(), { status: res.status, headers: noCache });
-    }
+    if (type === "overview") return json(await readOnly((q) => overview(q)));
 
-    if (type === "users") {
-      const limit = url.searchParams.get("limit") ?? "50";
-      const offset = url.searchParams.get("offset") ?? "0";
-      const search = url.searchParams.get("search");
-      const statusFilter = url.searchParams.get("status_filter");
-      let qs = `?limit=${limit}&offset=${offset}`;
-      if (search) qs += `&search=${encodeURIComponent(search)}`;
-      if (statusFilter) qs += `&status_filter=${encodeURIComponent(statusFilter)}`;
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/users${qs}`, { headers });
-      return Response.json(await res.json(), { status: res.status, headers: noCache });
+    if (type === "users" || type === "payments") {
+      const limit = intParam(url, "limit", 50, 1, 200);
+      const offset = intParam(url, "offset", 0, 0);
+      const search = url.searchParams.get("search") ?? "";
+      const statusFilter = url.searchParams.get("status_filter") ?? (type === "payments" ? "paid" : "");
+      if (limit === null) return invalid("limit must be 1 to 200");
+      if (offset === null) return invalid("offset must be a whole number");
+      if (search.length > 200) return invalid("search is too long");
+      if (statusFilter.length > 50) return invalid("status_filter is too long");
+      const p = { limit, offset, search, statusFilter };
+      if (type === "users") return json(await readOnly((q) => users(q, p)));
+      return json(await readOnly((q) => payments(q, p)));
     }
 
     if (type === "user_detail") {
       const userId = url.searchParams.get("user_id");
-      if (!userId) return Response.json({ error: "user_id required" }, { status: 400 });
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/users/${userId}/detail`, { headers });
-      return Response.json(await res.json(), { status: res.status, headers: noCache });
+      if (!userId) return json({ error: "user_id required" }, 400);
+      const detail = await readOnly((q) => userDetail(q, userId));
+      return detail ? json(detail) : json({ error: "User not found", detail: "User not found" }, 404);
     }
 
     if (type === "campaign_emails") {
       const campaignId = url.searchParams.get("campaign_id");
-      if (!campaignId) return Response.json({ error: "campaign_id required" }, { status: 400 });
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/campaign/${campaignId}/emails`, { headers });
-      return Response.json(await res.json(), { status: res.status, headers: noCache });
+      if (!campaignId) return json({ error: "campaign_id required" }, 400);
+      if (!/^\d+$/.test(campaignId) || Number(campaignId) > 2147483647) return invalid("campaign_id must be a number");
+      const data = await readOnly((q) => campaignEmails(q, Number(campaignId)));
+      return data ? json(data) : json({ error: "Campaign not found", detail: "Campaign not found" }, 404);
     }
 
-    if (type === "payments") {
-      const limit = url.searchParams.get("limit") ?? "50";
-      const offset = url.searchParams.get("offset") ?? "0";
-      const search = url.searchParams.get("search");
-      const statusFilter = url.searchParams.get("status_filter") ?? "paid";
-      let qs = `?limit=${limit}&offset=${offset}&status_filter=${encodeURIComponent(statusFilter)}`;
-      if (search) qs += `&search=${encodeURIComponent(search)}`;
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/payments${qs}`, { headers });
-      return Response.json(await res.json(), { status: res.status, headers: noCache });
-    }
-
-    if (type === "paid_funnel") {
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/paid-funnel`, { headers });
-      return Response.json(await res.json(), { status: res.status, headers: noCache });
-    }
+    if (type === "paid_funnel") return json(await readOnly((q) => paidFunnel(q)));
 
     if (type === "opened_emails") {
-      const limit = url.searchParams.get("limit") ?? "100";
-      const offset = url.searchParams.get("offset") ?? "0";
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/opened-emails?limit=${limit}&offset=${offset}`, { headers });
-      return Response.json(await res.json(), { status: res.status, headers: noCache });
+      const limit = intParam(url, "limit", 100, 1, 500);
+      const offset = intParam(url, "offset", 0, 0);
+      if (limit === null) return invalid("limit must be 1 to 500");
+      if (offset === null) return invalid("offset must be a whole number");
+      return json(await readOnly((q) => openedEmails(q, { limit, offset })));
     }
 
-    return Response.json({ error: "Unknown type" }, { status: 400 });
-  } catch (err: any) {
-    return Response.json({ error: err.message }, { status: 500 });
+    return json({ error: "Unknown type" }, 400);
+  } catch (e) {
+    return readFailed(`outreach ${type}`, e);
   }
 }
 
-/**
- * Full refund of one payment through Razorpay/Dodo (audit PP-P05).
- * job-outreach-svc checks the admin JWT, refuses anything not refundable,
- * refunds at the provider first, then cancels unfinished campaigns and revokes
- * the credits the payment bought through the ledger. Nothing is decided here.
- */
+// The archive is read only: no refunds (audit PP-P05 flow retired with the product).
 export async function action({ request }: Route.ActionArgs) {
   if (!(await requireAdmin(request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const body = (await request.json().catch(() => ({}))) as {
-    op?: string; payment_id?: number; reason?: string;
-  };
-  if (body.op !== "refund_payment") return Response.json({ detail: "Unknown op" }, { status: 400 });
-  if (!body.payment_id || !Number.isInteger(body.payment_id)) {
-    return Response.json({ detail: "payment_id must be a number" }, { status: 400 });
-  }
-  if (!body.reason || !body.reason.trim()) {
-    return Response.json({ detail: "A reason is required." }, { status: 400 });
-  }
-  try {
-    const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/payments/${body.payment_id}/refund`, {
-      method: "POST",
-      headers: { Authorization: authHeader, "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: body.reason.trim(), confirm: true }),
-    });
-    const data = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
-    return Response.json(data, { status: res.status, headers: { "Cache-Control": "no-store" } });
-  } catch (e) {
-    return Response.json({ detail: `Outreach service unreachable: ${(e as Error).message}` }, { status: 502 });
-  }
+  return archiveReadOnly();
 }

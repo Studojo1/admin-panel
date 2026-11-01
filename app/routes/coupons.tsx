@@ -5,7 +5,7 @@ import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/coupons";
-import { bannedCouponWord } from "~/lib/coupon-words";
+import { ARCHIVE_READ_ONLY } from "~/lib/archive";
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Coupons — Studojo Admin" }];
@@ -33,16 +33,6 @@ interface Coupon {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function randomCode(prefix = "") {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  // Re-roll until the random part spells nothing on the banned list (OP-N13).
-  for (;;) {
-    let code = prefix ? prefix.toUpperCase() + "" : "";
-    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-    if (!bannedCouponWord(code)) return code;
-  }
-}
-
 function couponStatus(c: Coupon): "pending" | "rejected" | "active" | "expired" | "exhausted" | "inactive" {
   if (c.review_status === "pending") return "pending";
   if (c.review_status === "rejected") return "rejected";
@@ -50,10 +40,6 @@ function couponStatus(c: Coupon): "pending" | "rejected" | "active" | "expired" 
   if (c.valid_until && new Date(c.valid_until) < new Date()) return "expired";
   if (c.max_uses != null && c.uses >= c.max_uses) return "exhausted";
   return "active";
-}
-
-function expiresInHours(h: number): string {
-  return new Date(Date.now() + h * 60 * 60 * 1000).toISOString();
 }
 
 async function authedFetch(url: string, opts: RequestInit = {}) {
@@ -75,18 +61,7 @@ export default function Coupons() {
   const { isAuthorized } = useAdminGuard();
 
   const [coupons, setCoupons] = useState<Coupon[]>([]);
-  const [me, setMe] = useState("");
   const [loading, setLoading] = useState(true);
-
-  // Form state
-  const [code, setCode] = useState(() => randomCode());
-  const [discountType, setDiscountType] = useState<"percent" | "fixed">("percent");
-  const [discountValue, setDiscountValue] = useState("10");
-  const [expiryPreset, setExpiryPreset] = useState<"24h" | "7d" | "30d" | "never" | "custom">("24h");
-  const [customExpiry, setCustomExpiry] = useState("");
-  const [maxUses, setMaxUses] = useState("");
-  const [distributorName, setDistributorName] = useState("");
-  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     loadCoupons();
@@ -94,81 +69,12 @@ export default function Coupons() {
 
   async function loadCoupons() {
     setLoading(true);
-    const res = await authedFetch("/api/coupons");
+    const res = await authedFetch("/old/api/coupons");
     if (res.ok) {
       const data = await res.json();
       setCoupons(data.coupons ?? []);
-      setMe(data.me ?? "");
     }
     setLoading(false);
-  }
-
-  async function createCoupon() {
-    if (!code.trim()) { toast.error("Enter a coupon code"); return; }
-    const val = parseFloat(discountValue);
-    if (isNaN(val) || val <= 0) { toast.error("Enter a valid discount value"); return; }
-    if (discountType === "percent" && val > 100) { toast.error("Percentage can't exceed 100"); return; }
-    const bad = bannedCouponWord(code) ?? bannedCouponWord(distributorName);
-    if (bad) { toast.error(`Code or source contains a banned word (${bad}). Pick a neutral code.`); return; }
-
-    let expires_at: string | null = null;
-    if (expiryPreset === "24h") expires_at = expiresInHours(24);
-    else if (expiryPreset === "7d") expires_at = expiresInHours(24 * 7);
-    else if (expiryPreset === "30d") expires_at = expiresInHours(24 * 30);
-    else if (expiryPreset === "custom" && customExpiry) expires_at = new Date(customExpiry).toISOString();
-
-    setCreating(true);
-    const res = await authedFetch("/api/coupons", {
-      method: "POST",
-      body: JSON.stringify({
-        code: code.trim(),
-        discount_type: discountType,
-        discount_value: val,
-        max_uses: maxUses ? parseInt(maxUses) : null,
-        valid_until: expires_at,
-        distributor_name: distributorName.trim() || null,
-      }),
-    });
-
-    setCreating(false);
-
-    if (!res.ok) {
-      const err = await res.json();
-      toast.error(err.error ?? "Failed to create coupon");
-      return;
-    }
-
-    toast.success(`Coupon ${code.toUpperCase()} created. Another admin must approve it before it works.`);
-    setCode(randomCode());
-    setDistributorName("");
-    setMaxUses("");
-    await loadCoupons();
-  }
-
-  async function deleteCoupon(id: string, code: string) {
-    const res = await authedFetch("/api/coupons", {
-      method: "DELETE",
-      body: JSON.stringify({ id }),
-    });
-    if (!res.ok) { toast.error("Failed to delete coupon"); return; }
-    toast.success(`Coupon ${code} deleted`);
-    setCoupons((prev) => prev.filter((c) => c.id !== id));
-  }
-
-  // OP-N13: approve / reject a pending code, or switch a live one off.
-  async function reviewCoupon(id: number, action: "approve" | "reject" | "deactivate", code: string) {
-    const res = await authedFetch("/api/coupons", {
-      method: "PATCH",
-      body: JSON.stringify({ id, action }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      toast.error(err.error ?? `Failed to ${action} coupon`);
-      return;
-    }
-    const verb = action === "approve" ? "approved and live" : action === "reject" ? "rejected" : "deactivated";
-    toast.success(`Coupon ${code} ${verb}`);
-    await loadCoupons();
   }
 
   function copyCode(code: string) {
@@ -197,129 +103,21 @@ export default function Coupons() {
             Coupon Codes
           </h1>
           <p className="mt-1 font-['Satoshi'] text-sm text-neutral-500">
-            Generate and manage discount codes for checkout
+            Discount codes from the old product checkout
           </p>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* ── LEFT: Generator ───────────────────────────────────────────── */}
-          <div className="rounded-xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
+          {/* ── LEFT: was the generator; the archive is read only ──────────── */}
+          <div className="h-fit rounded-xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
             <div className="border-b-2 border-neutral-900 px-6 py-4">
               <h2 className="font-['Clash_Display'] text-base font-semibold text-neutral-900">
                 New Coupon
               </h2>
             </div>
-            <div className="p-6 space-y-5">
-              {/* Code */}
-              <Field label="Code" required>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.toUpperCase())}
-                    placeholder="WELCOME10"
-                    className={`${inputCls} flex-1 font-mono tracking-widest`}
-                  />
-                  <button
-                    onClick={() => setCode(randomCode())}
-                    title="Generate random code"
-                    className="shrink-0 rounded-lg border-2 border-neutral-900 bg-white px-3 py-2 font-['Satoshi'] text-sm shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:translate-x-px hover:translate-y-px hover:shadow-none"
-                  >
-                    ↻
-                  </button>
-                </div>
-              </Field>
-
-              {/* Discount type + value */}
-              <Field label="Discount" required>
-                <div className="flex gap-2">
-                  <div className="flex rounded-lg border-2 border-neutral-900 overflow-hidden">
-                    {(["percent", "fixed"] as const).map((t) => (
-                      <button
-                        key={t}
-                        onClick={() => setDiscountType(t)}
-                        className={`px-4 py-2 font-['Satoshi'] text-sm font-semibold transition-colors ${
-                          discountType === t
-                            ? "bg-violet-500 text-white"
-                            : "bg-white text-neutral-600 hover:bg-neutral-50"
-                        }`}
-                      >
-                        {t === "percent" ? "%" : "₹ Fixed"}
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    type="number"
-                    value={discountValue}
-                    onChange={(e) => setDiscountValue(e.target.value)}
-                    min="1"
-                    max={discountType === "percent" ? "100" : undefined}
-                    className={`${inputCls} w-28`}
-                    placeholder={discountType === "percent" ? "10" : "500"}
-                  />
-                  <span className="flex items-center font-['Satoshi'] text-sm text-neutral-400">
-                    {discountType === "percent" ? "%" : "₹"}
-                  </span>
-                </div>
-              </Field>
-
-              {/* Expiry */}
-              <Field label="Expires">
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {(["24h", "7d", "30d", "never", "custom"] as const).map((p) => (
-                    <Pill
-                      key={p}
-                      label={p === "24h" ? "24 hours" : p === "7d" ? "7 days" : p === "30d" ? "30 days" : p === "never" ? "Never" : "Custom"}
-                      active={expiryPreset === p}
-                      onClick={() => setExpiryPreset(p)}
-                    />
-                  ))}
-                </div>
-                {expiryPreset === "custom" && (
-                  <input
-                    type="datetime-local"
-                    value={customExpiry}
-                    onChange={(e) => setCustomExpiry(e.target.value)}
-                    className={inputCls}
-                  />
-                )}
-              </Field>
-
-              {/* Max uses */}
-              <Field label="Max uses (leave blank for unlimited)">
-                <input
-                  type="number"
-                  value={maxUses}
-                  onChange={(e) => setMaxUses(e.target.value)}
-                  min="1"
-                  placeholder="100 (every coupon needs a cap)"
-                  className={inputCls}
-                />
-              </Field>
-
-              {/* Distributor / source */}
-              <Field label="Source / distributor (internal)">
-                <input
-                  type="text"
-                  value={distributorName}
-                  onChange={(e) => setDistributorName(e.target.value)}
-                  placeholder="e.g. leads-ready email, George, CU Chalants"
-                  className={inputCls}
-                />
-              </Field>
-
-              <p className="font-['Satoshi'] text-xs text-neutral-500">
-                New coupons start switched off. A second admin reads the code and approves it under Pending review before anyone can use it.
-              </p>
-
-              <button
-                onClick={createCoupon}
-                disabled={creating}
-                className="w-full rounded-lg border-2 border-neutral-900 bg-violet-500 py-3 font-['Satoshi'] text-sm font-bold text-white shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:translate-x-px hover:translate-y-px hover:shadow-none disabled:opacity-50"
-              >
-                {creating ? "Creating…" : "Create Coupon"}
-              </button>
-            </div>
+            <p className="p-6 font-['Satoshi'] text-sm text-neutral-600">
+              Coupons are not created, approved, switched off or deleted from here. {ARCHIVE_READ_ONLY}
+            </p>
           </div>
 
           {/* ── RIGHT: List ───────────────────────────────────────────────── */}
@@ -333,20 +131,10 @@ export default function Coupons() {
                     {pending.length}
                   </span>
                 </h2>
-                <p className="mt-1 font-['Satoshi'] text-xs text-neutral-500">
-                  Read each code out loud. Approve only if it is neutral and you would be happy to see it on a receipt.
-                </p>
               </div>
               <div className="divide-y divide-neutral-100">
                 {pending.map((c) => (
-                  <CouponRow
-                    key={c.id}
-                    coupon={c}
-                    onCopy={copyCode}
-                    onDelete={deleteCoupon}
-                    onReview={reviewCoupon}
-                    canApprove={!c.created_by || !me || c.created_by.toLowerCase() !== me.toLowerCase()}
-                  />
+                  <CouponRow key={c.id} coupon={c} onCopy={copyCode} />
                 ))}
               </div>
             </div>
@@ -369,11 +157,11 @@ export default function Coupons() {
               )}
               {!loading && active.length === 0 && (
                 <p className="px-6 py-10 text-center font-['Satoshi'] text-sm text-neutral-400">
-                  No active coupons. Create one on the left.
+                  No active coupons.
                 </p>
               )}
               {active.map((c) => (
-                <CouponRow key={c.id} coupon={c} onCopy={copyCode} onDelete={deleteCoupon} onReview={reviewCoupon} />
+                <CouponRow key={c.id} coupon={c} onCopy={copyCode} />
               ))}
             </div>
 
@@ -386,7 +174,7 @@ export default function Coupons() {
                 </div>
                 <div className="divide-y divide-neutral-100 max-h-48 overflow-y-auto opacity-60">
                   {inactive.map((c) => (
-                    <CouponRow key={c.id} coupon={c} onCopy={copyCode} onDelete={deleteCoupon} />
+                    <CouponRow key={c.id} coupon={c} onCopy={copyCode} />
                   ))}
                 </div>
               </>
@@ -401,19 +189,7 @@ export default function Coupons() {
 
 // ── CouponRow ──────────────────────────────────────────────────────────────
 
-function CouponRow({
-  coupon: c,
-  onCopy,
-  onDelete,
-  onReview,
-  canApprove,
-}: {
-  coupon: Coupon;
-  onCopy: (code: string) => void;
-  onDelete: (id: string, code: string) => void;
-  onReview?: (id: number, action: "approve" | "reject" | "deactivate", code: string) => void;
-  canApprove?: boolean;
-}) {
+function CouponRow({ coupon: c, onCopy }: { coupon: Coupon; onCopy: (code: string) => void }) {
   const status = couponStatus(c);
 
   const statusBadge = {
@@ -472,92 +248,12 @@ function CouponRow({
           {c.reviewed_by && status !== "pending" && ` · Reviewed by ${c.reviewed_by}`}
         </p>
       </div>
-      {onReview && status === "pending" && (
-        <>
-          <button
-            onClick={() => onReview(c.id, "approve", c.code)}
-            disabled={!canApprove}
-            title={canApprove ? "Make this code live" : "Another admin has to approve a coupon you created"}
-            className="shrink-0 rounded border border-emerald-400 px-2 py-1 font-['Satoshi'] text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Approve
-          </button>
-          <button
-            onClick={() => onReview(c.id, "reject", c.code)}
-            className="shrink-0 rounded border border-red-300 px-2 py-1 font-['Satoshi'] text-xs font-semibold text-red-600 hover:bg-red-50"
-          >
-            Reject
-          </button>
-        </>
-      )}
-      {onReview && status === "active" && (
-        <button
-          onClick={() => onReview(c.id, "deactivate", c.code)}
-          title="Switch this code off without deleting its history"
-          className="shrink-0 rounded border border-neutral-300 px-2 py-1 font-['Satoshi'] text-xs text-neutral-500 hover:border-red-400 hover:text-red-600"
-        >
-          Deactivate
-        </button>
-      )}
       <button
         onClick={() => onCopy(c.code)}
         className="shrink-0 rounded border border-neutral-300 px-2 py-1 font-['Satoshi'] text-xs text-neutral-500 hover:border-violet-400 hover:text-violet-600"
       >
         Copy
       </button>
-      <button
-        onClick={() => onDelete(c.id, c.code)}
-        className="shrink-0 text-neutral-300 hover:text-red-400 text-sm"
-        title="Delete"
-      >
-        ✕
-      </button>
     </div>
-  );
-}
-
-// ── Micro components ───────────────────────────────────────────────────────
-
-const inputCls =
-  "w-full rounded-lg border-2 border-neutral-200 bg-white px-3 py-2 font-['Satoshi'] text-sm outline-none transition-colors focus:border-violet-500";
-
-function Field({
-  label,
-  required,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="mb-1.5 block font-['Satoshi'] text-sm font-semibold text-neutral-700">
-        {label}
-        {required && <span className="ml-1 text-red-400">*</span>}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function Pill({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full border-2 border-neutral-900 px-3 py-1 font-['Satoshi'] text-xs font-medium shadow-[1px_1px_0px_0px_rgba(25,26,35,1)] transition-all hover:translate-x-px hover:translate-y-px hover:shadow-none ${
-        active ? "bg-violet-500 text-white" : "bg-white text-neutral-600"
-      }`}
-    >
-      {label}
-    </button>
   );
 }

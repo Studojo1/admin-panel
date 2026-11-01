@@ -56,7 +56,7 @@ function visitorsHogql(start: string, end: string) {
 
 async function loadSources(start: string, end: string): Promise<SourcesData> {
   const token = await getToken();
-  const res = await fetch(`/api/sources?start=${start}&end=${end}`, {
+  const res = await fetch(`/old/api/sources?start=${start}&end=${end}`, {
     credentials: "include",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

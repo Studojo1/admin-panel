@@ -1,10 +1,12 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { toast } from "sonner";
 import { useRouteError } from "react-router";
 import type { Route } from "./+types/career-coach";
+import { getToken } from "~/lib/api";
+import { reportRetired } from "~/lib/retired-service";
 
 export function ErrorBoundary() {
   const error = useRouteError();
@@ -26,14 +28,32 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Career Coach — Studojo Admin" }];
 }
 
-// Read the career-coach backend that matches this admin panel's environment.
-// Always point at the production coach backend — that is where real students are.
-const CC_API = "https://studojo.com/api/v1/cc";
-const CC_ADMIN_KEY = import.meta.env.VITE_CC_ADMIN_KEY || "";
-const ccAdminHeaders = () => ({
-  "Content-Type": "application/json",
-  ...(CC_ADMIN_KEY ? { "x-admin-key": CC_ADMIN_KEY } : {}),
-});
+// cc-backend is retired with the old product (2 Nov 2026). This archive reads
+// its data from the careercoach database through /old/api/career-coach (admin
+// login, read only), so the coach's admin key no longer reaches the browser.
+// Only resume files still come from cc-backend, while it runs.
+async function ccFetch(view: string, params: Record<string, string> = {}): Promise<Response> {
+  const token = await getToken();
+  const qs = new URLSearchParams({ view, ...params });
+  return fetch(`/old/api/career-coach?${qs}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: "include",
+    cache: "no-store",
+  });
+}
+
+// A view's JSON, or null with the reason (not configured, retired, error).
+async function ccJson(view: string, params: Record<string, string> = {}): Promise<{ data: any; error: string | null }> {
+  try {
+    const r = await ccFetch(view, params);
+    const body = await r.json().catch(() => null);
+    if (r.ok) return { data: body, error: null };
+    reportRetired(body);
+    return { data: null, error: body?.error || body?.detail || `HTTP ${r.status}` };
+  } catch (e) {
+    return { data: null, error: (e as Error).message };
+  }
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -334,7 +354,7 @@ interface AnonMessage { role: string; content: string; state?: string | null; at
 interface AnonSession { conversation_id: string; created_at?: string | null; last_state?: string | null; message_count: number; title: string; messages: AnonMessage[]; }
 interface AnonStudent { student_id: string; first_seen?: string | null; last_seen?: string | null; session_count: number; message_count: number; sessions: AnonSession[]; }
 
-function AnonSessionsPanel({ ccHeaders }: { ccHeaders: () => Record<string, string> }) {
+function AnonSessionsPanel() {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<AnonStudent[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -345,7 +365,7 @@ function AnonSessionsPanel({ ccHeaders }: { ccHeaders: () => Record<string, stri
     setLoading(true);
     setOpen(true);
     try {
-      const r = await fetch(`${CC_API}/admin/anonymous-sessions`, { headers: ccHeaders() });
+      const r = await ccFetch("anonymous-sessions");
       const d = r.ok ? await r.json() : null;
       setData(Array.isArray(d?.anonymous_students) ? d.anonymous_students : []);
     } catch { setData([]); }
@@ -480,6 +500,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   const { isAuthorized, isPending } = useAdminGuard();
 
   const [keyError, setKeyError] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
 
   const [tab, setTab] = useState<Tab>("overview");
@@ -525,9 +546,8 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
 
   async function loadPathDrilldown(label: string, type: "role" | "industry") {
     setPathDrilldown({ label, type, students: [], loading: true });
-    const param = type === "role" ? `role=${encodeURIComponent(label)}` : `industry=${encodeURIComponent(label)}`;
     try {
-      const r = await fetch(`${CC_API}/admin/career-paths/students?${param}`, { headers: ccAdminHeaders() });
+      const r = await ccFetch("career-paths-students", type === "role" ? { role: label } : { industry: label });
       const d = r.ok ? await r.json() : [];
       setPathDrilldown({ label, type, students: Array.isArray(d) ? d : [], loading: false });
     } catch {
@@ -536,8 +556,8 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   }
 
   // Fire data load immediately on mount — don't wait for the two-round-trip auth
-  // check to complete first. The CC API has no secrets (admin panel login is the
-  // only gate), so loading optimistically is safe. Auth redirect still fires if
+  // check to complete first. Every call carries the admin token and the server
+  // checks it, so loading optimistically is safe. Auth redirect still fires if
   // the user isn't an admin; they just won't see the data.
   useEffect(() => {
     loadAll();
@@ -549,8 +569,6 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     }
   }, [isAuthorized]);
 
-  const ccHeaders = useCallback(() => ccAdminHeaders(), []);
-
   // Lazy-load the dropout analysis the first time the Dropouts tab is opened
   // (it scans all messages, so we don't run it on every dashboard load).
   // Use a ref to prevent re-firing after a failed fetch (avoids infinite loop).
@@ -559,7 +577,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     if (tab !== "dropouts" || dropouts || dropoutFetchedRef.current) return;
     dropoutFetchedRef.current = true;
     setLoadingDropouts(true);
-    fetch(`${CC_API}/admin/dropouts`, { headers: ccAdminHeaders() })
+    ccFetch("dropouts")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (d) setDropouts(d); })
       .catch(() => {})
@@ -569,25 +587,18 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
   async function loadAll(_key?: string) {
     setLoading(true);
     try {
-      const headers = ccHeaders();
-      const safeJson = (r: Response) => r.ok ? r.json() : Promise.resolve(null);
-      const [ov, fu, dr, st, sc, pa, qu] = await Promise.all([
-        fetch(`${CC_API}/admin/overview`, { headers }).then(safeJson),
-        fetch(`${CC_API}/admin/funnel`, { headers }).then(safeJson),
-        fetch(`${CC_API}/admin/dropoffs`, { headers }).then(safeJson),
-        fetch(`${CC_API}/admin/students`, { headers }).then(safeJson),
-        fetch(`${CC_API}/admin/scores`, { headers }).then(safeJson),
-        fetch(`${CC_API}/admin/career-paths`, { headers }).then(safeJson),
-        fetch(`${CC_API}/admin/questions`, { headers }).then(safeJson),
-      ]);
-      if (!ov?.students) { setKeyError(true); setLoading(false); return; }
+      const views = ["overview", "funnel", "dropoffs", "students", "scores", "career-paths", "questions"];
+      const results = await Promise.all(views.map((v) => ccJson(v)));
+      const [ov, fu, dr, st, sc, pa, qu] = results.map((r) => r.data);
+      if (!ov?.students) {
+        setLoadError(results[0].error ?? "The Career Coach archive returned no data.");
+        setKeyError(true);
+        setLoading(false);
+        return;
+      }
       setOverview(ov);
-      // Locations does live (rate-limited) geo lookups on first run — fetch it
-      // separately so it never blocks the dashboard load.
-      fetch(`${CC_API}/admin/locations`, { headers })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => { if (d) setLocations(d); })
-        .catch(() => {});
+      // Locations reads cached geo data; fetched separately so it never blocks the load.
+      ccJson("locations").then(({ data }) => { if (data) setLocations(data); });
       setFunnel(fu);
       setDropoffs(dr);
       setStudents(Array.isArray(st) ? st : []);
@@ -596,14 +607,15 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       setQuestions(qu);
       toast.success("Career Coach data refreshed");
       setKeyError(false);
-      // The data loaded, so the CC admin key is valid — render the dashboard.
+      setLoadError(null);
+      // The data loaded: render the dashboard.
       // Don't wait on useAdminGuard: it resolves independently and stays null
       // if the control-plane admin check fails, which would otherwise leave
       // this page stuck on "Loading career coach analytics…" forever.
       setAuthenticated(true);
     } catch (e) {
       toast.error("Failed to load career coach data");
-      if (!overview) setKeyError(true);
+      if (!overview) { setLoadError((e as Error).message); setKeyError(true); }
     } finally {
       setLoading(false);
     }
@@ -614,8 +626,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     setBucketStudents(null);
     setLoadingBucket(true);
     try {
-      const url = `${CC_API}/admin/active-students?granularity=${activeGranularity}&bucket=${encodeURIComponent(bucketHour)}`;
-      const r = await fetch(url, { headers: ccHeaders() });
+      const r = await ccFetch("active-students", { granularity: activeGranularity, bucket: bucketHour });
       const d = r.ok ? await r.json() : null;
       setBucketStudents(Array.isArray(d?.students) ? d.students : []);
     } catch {
@@ -630,7 +641,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     if (transcripts) return; // already loaded for this open student
     setLoadingTranscripts(true);
     try {
-      const r = await fetch(`${CC_API}/admin/student/${id}/transcripts`, { headers: ccHeaders() });
+      const r = await ccFetch("transcripts", { id });
       const d = r.ok ? await r.json() : null;
       setTranscripts(Array.isArray(d?.conversations) ? d.conversations : []);
     } catch {
@@ -648,9 +659,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     setTranscripts(null);
     setShowTranscripts(false);
     try {
-      const dash = await fetch(`${CC_API}/dashboard/${id}`, {
-        headers: ccHeaders(),
-      }).then((r) => r.json());
+      const dash = await ccFetch("dashboard", { id }).then((r) => r.json());
       setStudentDetail(dash);
     } catch {
       toast.error("Could not load student detail");
@@ -658,12 +667,9 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       setLoadingDetail(false);
     }
     // Activity + cross-platform sign-in/tool log (best-effort, non-blocking).
-    // The coach backend reads the main platform's Postgres directly and returns
-    // both coach events and the merged main-platform activity in one response.
+    // Coach events plus the merged main-platform activity, in one response.
     try {
-      const act = await fetch(`${CC_API}/admin/student/${id}/activity`, {
-        headers: ccHeaders(),
-      }).then((r) => (r.ok ? r.json() : null));
+      const act = await ccFetch("activity", { id }).then((r) => (r.ok ? r.json() : null));
       setStudentActivity((act as StudentActivity) ?? {});
     } catch {
       setStudentActivity({});
@@ -692,8 +698,11 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
     setResumeView(null);
     setLoadingResume(true);
     try {
-      const r = await fetch(`${CC_API}/admin/student/${studentId}/resume-view`, { headers: ccHeaders() });
-      setResumeView(r.ok ? await r.json() : null);
+      const r = await ccFetch("resume-view", { id: studentId });
+      const d = r.ok ? await r.json() : null;
+      // The file check needs cc-backend; once it is gone the layout says so.
+      reportRetired(d);
+      setResumeView(d);
     } catch {
       setResumeView(null);
     } finally {
@@ -703,10 +712,13 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
 
   async function downloadResume(studentId: string, filename: string) {
     try {
-      const r = await fetch(`${CC_API}/admin/student/${studentId}/resume`, {
-        headers: ccHeaders(),
-      });
-      if (!r.ok) { toast.error("Could not download resume"); return; }
+      const r = await ccFetch("resume-file", { id: studentId });
+      if (!r.ok) {
+        const body = await r.json().catch(() => null);
+        reportRetired(body);
+        toast.error(body?.error || body?.detail || "Could not download resume");
+        return;
+      }
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -735,9 +747,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
               <div className="mb-2 font-['Clash_Display'] text-xl font-black text-neutral-900">
                 Career Coach analytics unavailable
               </div>
-              <p className="text-sm text-neutral-500">
-                The dashboard could not reach the career coach backend. Please try refreshing.
-              </p>
+              <p className="text-sm text-neutral-500">{loadError ?? "The Career Coach archive returned no data."}</p>
             </div>
           ) : (
             <div className="text-neutral-500 font-['Satoshi']">Loading career coach analytics…</div>
@@ -771,7 +781,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
             <p className="mt-1 text-sm text-neutral-500">
               {overview
                 ? `Updated ${fmtDateTime(overview.generated_at)}`
-                : "Live student analytics from the career coaching agent."}
+                : "Archived student analytics from the career coaching agent."}
             </p>
           </div>
           <button
@@ -782,6 +792,12 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
             {loading ? "Refreshing…" : "↻ Refresh"}
           </button>
         </div>
+
+        {keyError && (
+          <div className="mb-6 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 font-['Satoshi'] text-sm text-amber-800">
+            {loadError ?? "The Career Coach archive returned no data."}
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="mb-6 flex flex-wrap gap-2">
@@ -1354,7 +1370,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
           </div>
 
           {/* Anonymous / pre-login sessions */}
-          <AnonSessionsPanel ccHeaders={ccHeaders} />
+          <AnonSessionsPanel />
           </>
         )}
 

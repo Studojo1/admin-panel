@@ -96,7 +96,7 @@ export default function Dashboard() {
   const load = async (start?: string, end?: string) => {
     const qs = start && end ? `?start=${start}&end=${end}` : "";
     const token = await getToken();
-    fetch(`/api/overview${qs}`, {
+    fetch(`/old/api/overview${qs}`, {
       credentials: "include",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
@@ -248,10 +248,10 @@ export default function Dashboard() {
 
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {[
-                { to: "/funnel", label: "Funnel" },
-                { to: "/analytics", label: "Analytics" },
-                { to: "/outreach-orders", label: "Outreach Orders" },
-                { to: "/paid-users", label: "Paid Users" },
+                { to: "/old/funnel", label: "Funnel" },
+                { to: "/old/analytics", label: "Analytics" },
+                { to: "/old/outreach-orders", label: "Outreach Orders" },
+                { to: "/old/paid-users", label: "Paid Users" },
               ].map((l) => (
                 <Link
                   key={l.to}

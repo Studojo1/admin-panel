@@ -90,6 +90,9 @@ jobs:
           secret_adopt BOB_SUPERADMIN_SECRET bob-superadmin-secret
           # Ticket replies are emailed from studojo@gmail.com over SMTP (gmail-direct.server.ts).
           secret_ref STUDOJO_GMAIL_APP_PASSWORD studojo-gmail-app-password
+          # The /old Career Coach archive reads cc-backend's database (careercoach),
+          # read only. Skipped with a warning until app-secrets has the key.
+          secret_ref CAREERCOACH_DATABASE_URL careercoach-database-url
           secret_audit
 
       - name: Deploy to Kubernetes

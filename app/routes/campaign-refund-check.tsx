@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { toast } from "sonner";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
+import { reportRetired } from "~/lib/retired-service";
+import { ARCHIVE_READ_ONLY } from "~/lib/archive";
 
 // Refund Policy v3.0 §3.3: did an outreach campaign fail completely?
-// Everything here is computed by job-outreach-svc (services/refund_check.py),
-// which also re-checks it before the refund button moves any money.
+// Computed as job-outreach-svc (services/refund_check.py) did, now straight
+// from the database (app/lib/outreach-archive). Read only: no restarts or refunds.
 
 type Result = "yes" | "no" | "check" | "open";
 
@@ -55,13 +56,14 @@ function day(iso: string | null) {
 async function call(method: "GET" | "POST", query: string, body?: unknown) {
   const token = await getToken();
   if (!token) throw new Error("Please sign in again.");
-  const res = await fetch(`/api/refund-check${query}`, {
+  const res = await fetch(`/old/api/refund-check${query}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
+  reportRetired(data);
   if (!res.ok) throw new Error((data as any).detail || (data as any).error || `HTTP ${res.status}`);
   return data;
 }
@@ -114,11 +116,6 @@ export default function CampaignRefundCheck() {
   const [data, setData] = useState<RefundCheck | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState<"restart" | "refund" | null>(null);
-  const [refundOpen, setRefundOpen] = useState(false);
-  const [reason, setReason] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
-
   const load = useCallback(async () => {
     if (!campaignId) return;
     setLoading(true);
@@ -144,35 +141,6 @@ export default function CampaignRefundCheck() {
     setParams(next, { replace: true });
   };
 
-  const restart = async () => {
-    setBusy("restart");
-    try {
-      const r = await call("POST", "", { op: "restart", campaign_id: Number(campaignId) });
-      toast.success(`Campaign restarted${r.previous_pause_reason === "gmail_auth" ? ". It will pause again until the user reconnects Gmail." : "."}`);
-      await load();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const refund = async () => {
-    setBusy("refund");
-    try {
-      const r = await call("POST", "", { op: "refund", campaign_id: Number(campaignId), reported_on: reportedOn, reason });
-      toast.success(`Refunded ${money(r.refunded_cents, r.currency)}. ${r.credits_revoked} credits revoked, campaign cancelled.`);
-      setRefundOpen(false);
-      setReason("");
-      setConfirmed(false);
-      await load();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
   if (isPending || isAuthorized === null) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -184,7 +152,6 @@ export default function CampaignRefundCheck() {
 
   const c = data?.campaign;
   const r = data?.refund;
-  const canRefund = data?.verdict === "met" && !!r && r.amount_cents > 0 && !!reportedOn;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -248,7 +215,7 @@ export default function CampaignRefundCheck() {
                   {c.user_email ?? "unknown user"} · {c.credits_reserved} credits reserved · created {day(c.created_at)}
                   {r && <> · paid {money(r.paid_cents, r.currency)} · {r.provider} {r.provider_payment_id ?? `#${r.payment_id}`}</>}
                   {" · "}
-                  <Link to={`/outreach-campaign?campaign_id=${c.id}`} className="text-violet-700 underline">emails</Link>
+                  <Link to={`/old/outreach-campaign?campaign_id=${c.id}`} className="text-violet-700 underline">emails</Link>
                 </div>
                 <div className="mt-1 font-['Satoshi'] text-xs text-neutral-500">
                   Status: {c.status}{c.pause_reason ? ` (${c.pause_reason})` : ""} · days in {c.timezone}
@@ -314,63 +281,9 @@ export default function CampaignRefundCheck() {
               </table>
             </div>
 
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={restart}
-                disabled={c.status !== "paused" || busy !== null}
-                title={c.status !== "paused" ? `Only a paused campaign can be restarted (this one is ${c.status})` : undefined}
-                className="h-11 rounded-xl border-2 border-neutral-900 bg-violet-600 px-5 font-['Satoshi'] text-sm font-bold text-white shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-40"
-              >
-                {busy === "restart" ? "Restarting…" : "Restart campaign"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setRefundOpen(true)}
-                disabled={!canRefund || busy !== null}
-                title={!canRefund ? "Available once §3.3 is met and a report date is entered" : undefined}
-                className="h-11 rounded-xl border-2 border-neutral-900 bg-white px-5 font-['Satoshi'] text-sm font-bold text-neutral-900 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-40"
-              >
-                Issue partial refund{r ? ` ${money(r.amount_cents, r.currency)}` : ""}
-              </button>
-            </div>
-
-            {refundOpen && r && (
-              <div className="rounded-2xl border-2 border-red-500 bg-red-50 p-5 shadow-[3px_3px_0px_0px_rgba(220,38,38,1)]">
-                <div className="mb-2 font-['Clash_Display'] text-xl font-medium text-red-700">
-                  Refund {money(r.amount_cents, r.currency)} to {c.user_email}?
-                </div>
-                <p className="mb-3 font-['Satoshi'] text-sm text-neutral-800">
-                  This refunds real money through {r.provider}, cancels the campaign and removes its {r.unsent_credits} unsent credits.
-                  Only continue if the failure was on our side (condition 4).
-                </p>
-                <label htmlFor="refund-reason" className="mb-1 block font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-600">Reason (what failed on our side)</label>
-                <input
-                  id="refund-reason"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g. enrichment timeouts stopped the worker from 19 Sep"
-                  className="mb-3 h-10 w-full max-w-xl rounded-xl border-2 border-neutral-900 bg-white px-3 font-['Satoshi'] text-sm"
-                />
-                <label className="mb-4 flex items-start gap-2 font-['Satoshi'] text-sm">
-                  <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-1" />
-                  I've confirmed the failure was caused by Studojo's systems.
-                </label>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={refund}
-                    disabled={!confirmed || !reason.trim() || busy !== null}
-                    className="h-10 rounded-xl border-2 border-neutral-900 bg-red-600 px-4 font-['Satoshi'] text-sm font-bold text-white disabled:opacity-40"
-                  >
-                    {busy === "refund" ? "Refunding…" : `Refund ${money(r.amount_cents, r.currency)}`}
-                  </button>
-                  <button type="button" onClick={() => setRefundOpen(false)} className="h-10 rounded-xl border-2 border-neutral-900 bg-white px-4 font-['Satoshi'] text-sm font-bold">
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
+            <p className="font-['Satoshi'] text-sm text-neutral-600">
+              Restarts and refunds are not made from here. {ARCHIVE_READ_ONLY}
+            </p>
           </div>
         )}
       </main>

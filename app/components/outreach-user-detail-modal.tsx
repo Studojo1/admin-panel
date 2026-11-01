@@ -238,7 +238,7 @@ function OrderCard({ order }: { order: OutreachOrderDetail }) {
 
           {/* Admin campaign dashboard link */}
           <button
-            onClick={() => navigate(`/outreach-campaign?campaign_id=${campaign.id}`)}
+            onClick={() => navigate(`/old/outreach-campaign?campaign_id=${campaign.id}`)}
             className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-1.5 hover:bg-violet-100 transition-colors w-fit"
           >
             View Campaign Dashboard →
@@ -449,7 +449,7 @@ export function OutreachUserDetailModal({ userId, isOpen, onClose }: Props) {
                             {c.credits_reserved != null ? ` · credits ${c.credits_reserved} held, ${c.credits_released ?? 0} returned` : ""}
                           </p>
                           <button
-                            onClick={() => navigate(`/outreach-campaign?campaign_id=${c.id}`)}
+                            onClick={() => navigate(`/old/outreach-campaign?campaign_id=${c.id}`)}
                             className="mt-1 font-['Satoshi'] text-xs font-medium text-violet-600 hover:underline"
                           >
                             Open campaign
