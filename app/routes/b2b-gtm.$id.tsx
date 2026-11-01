@@ -65,7 +65,7 @@ export default function B2BCompany() {
 
   const load = useCallback(async () => {
     try {
-      const d = await authedFetch(`/api/b2b-gtm?company_id=${id}`);
+      const d = await authedFetch(`/old/api/b2b-gtm?company_id=${id}`);
       setCompany(d.company);
       setLogs(d.logs || []);
       setMe(d.me || "");
@@ -88,7 +88,7 @@ export default function B2BCompany() {
     <div className="min-h-screen bg-[#F5F5F0]">
       <AdminHeader />
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Link to="/b2b-gtm" className="text-sm text-gray-500 hover:text-gray-900">
+        <Link to="/old/b2b-gtm" className="text-sm text-gray-500 hover:text-gray-900">
           ← Back to B2B GTM
         </Link>
 
@@ -424,7 +424,7 @@ function TimelineRow({ l, onSaved }: { l: CallLog; onSaved: () => void }) {
     if (!ok) return;
     setDeleting(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=delete_note", {
+      await authedFetch("/old/api/b2b-gtm?action=delete_note", {
         method: "POST",
         body: JSON.stringify({ log_id: l.id }),
       });
@@ -492,7 +492,7 @@ function NoteComposer({ companyId, onSaved }: { companyId: number; onSaved: () =
     if (!text.trim()) return;
     setSaving(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=note", {
+      await authedFetch("/old/api/b2b-gtm?action=note", {
         method: "POST",
         body: JSON.stringify({ company_id: companyId, note: text.trim() }),
       });
@@ -546,7 +546,7 @@ function BuyDecisionButton({ company, onSaved }: { company: Company; onSaved: ()
   const advance = async (owner: string, stage: Stage, reason: string) => {
     setBusy(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=note", {
+      await authedFetch("/old/api/b2b-gtm?action=note", {
         method: "POST",
         body: JSON.stringify({
           company_id: company.id,
@@ -652,7 +652,7 @@ function ContactRow({ contact, onSaved }: { contact: Contact; onSaved: () => voi
   const save = async () => {
     setSaving(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=contact", {
+      await authedFetch("/old/api/b2b-gtm?action=contact", {
         method: "PATCH",
         body: JSON.stringify({
           id: contact.id,
@@ -726,7 +726,7 @@ function AddPerson({ companyId, onSaved }: { companyId: number; onSaved: () => v
   const save = async () => {
     setSaving(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=contact", {
+      await authedFetch("/old/api/b2b-gtm?action=contact", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyId,
@@ -795,7 +795,7 @@ function NextActionPanel({
   const save = async () => {
     setSaving(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=company", {
+      await authedFetch("/old/api/b2b-gtm?action=company", {
         method: "PATCH",
         body: JSON.stringify({
           id: company.id,
@@ -1005,7 +1005,7 @@ function EditPanel({
   const save = async () => {
     setSaving(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=company", {
+      await authedFetch("/old/api/b2b-gtm?action=company", {
         method: "PATCH",
         body: JSON.stringify({
           id: company.id,

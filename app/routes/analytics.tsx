@@ -39,7 +39,7 @@ export function meta(_: Route.MetaArgs) {
 // ── PostHog proxy helpers ──────────────────────────────────────────────────
 
 async function phQuery(query: object) {
-  const res = await posthogFetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/old/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -51,7 +51,7 @@ async function phQuery(query: object) {
 
 async function phGet(type: string, params: Record<string, string> = {}) {
   const qs = new URLSearchParams({ type, ...params }).toString();
-  const res = await posthogFetch(`/api/posthog?${qs}`, { credentials: "include" });
+  const res = await posthogFetch(`/old/api/posthog?${qs}`, { credentials: "include" });
   if (!res.ok) throw new Error(`PostHog ${type} failed: ${res.status}`);
   return res.json();
 }
@@ -261,7 +261,7 @@ export default function Analytics() {
         // Signups and payments, total and per day, from Postgres. Payments are
         // not counted from the payment_confirmed event: it also fires for
         // credit-covered orders and more than once per sale.
-        fetch(`/api/analytics?start=${startDate}&end=${endDate}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} })
+        fetch(`/old/api/analytics?start=${startDate}&end=${endDate}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} })
           .then((r) => r.ok ? r.json() : { count: 0, daily: [] })
           .catch(() => ({ count: 0, daily: [] })),
         // Daily visitors/campaigns

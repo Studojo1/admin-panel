@@ -10,7 +10,11 @@
 
 import type { Route } from "./+types/api.outreach";
 import { requireAdmin } from "~/lib/auth-helper.server";
+import { fetchRetiring } from "~/lib/retired-service.server";
 
+// Retired with the old product: once it stops, every call here answers 503
+// { retired: true } and the page shows "Service retired" (retired-service.server.ts).
+const JOB_OUTREACH = "job-outreach-svc";
 const JOB_OUTREACH_URL =
   process.env.JOB_OUTREACH_URL ??
   (process.env.JOB_OUTREACH_SVC_SERVICE_HOST
@@ -32,7 +36,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   try {
     if (type === "overview") {
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/overview`, { headers });
+      const res = await fetchRetiring(JOB_OUTREACH, `${JOB_OUTREACH_URL}/api/v1/admin/outreach/overview`, { headers });
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
@@ -44,21 +48,21 @@ export async function loader({ request }: Route.LoaderArgs) {
       let qs = `?limit=${limit}&offset=${offset}`;
       if (search) qs += `&search=${encodeURIComponent(search)}`;
       if (statusFilter) qs += `&status_filter=${encodeURIComponent(statusFilter)}`;
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/users${qs}`, { headers });
+      const res = await fetchRetiring(JOB_OUTREACH, `${JOB_OUTREACH_URL}/api/v1/admin/outreach/users${qs}`, { headers });
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
     if (type === "user_detail") {
       const userId = url.searchParams.get("user_id");
       if (!userId) return Response.json({ error: "user_id required" }, { status: 400 });
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/users/${userId}/detail`, { headers });
+      const res = await fetchRetiring(JOB_OUTREACH, `${JOB_OUTREACH_URL}/api/v1/admin/outreach/users/${userId}/detail`, { headers });
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
     if (type === "campaign_emails") {
       const campaignId = url.searchParams.get("campaign_id");
       if (!campaignId) return Response.json({ error: "campaign_id required" }, { status: 400 });
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/campaign/${campaignId}/emails`, { headers });
+      const res = await fetchRetiring(JOB_OUTREACH, `${JOB_OUTREACH_URL}/api/v1/admin/outreach/campaign/${campaignId}/emails`, { headers });
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
@@ -69,19 +73,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       const statusFilter = url.searchParams.get("status_filter") ?? "paid";
       let qs = `?limit=${limit}&offset=${offset}&status_filter=${encodeURIComponent(statusFilter)}`;
       if (search) qs += `&search=${encodeURIComponent(search)}`;
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/payments${qs}`, { headers });
+      const res = await fetchRetiring(JOB_OUTREACH, `${JOB_OUTREACH_URL}/api/v1/admin/outreach/payments${qs}`, { headers });
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
     if (type === "paid_funnel") {
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/paid-funnel`, { headers });
+      const res = await fetchRetiring(JOB_OUTREACH, `${JOB_OUTREACH_URL}/api/v1/admin/outreach/paid-funnel`, { headers });
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
     if (type === "opened_emails") {
       const limit = url.searchParams.get("limit") ?? "100";
       const offset = url.searchParams.get("offset") ?? "0";
-      const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/opened-emails?limit=${limit}&offset=${offset}`, { headers });
+      const res = await fetchRetiring(JOB_OUTREACH, `${JOB_OUTREACH_URL}/api/v1/admin/outreach/opened-emails?limit=${limit}&offset=${offset}`, { headers });
       return Response.json(await res.json(), { status: res.status, headers: noCache });
     }
 
@@ -112,7 +116,7 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ detail: "A reason is required." }, { status: 400 });
   }
   try {
-    const res = await fetch(`${JOB_OUTREACH_URL}/api/v1/admin/outreach/payments/${body.payment_id}/refund`, {
+    const res = await fetchRetiring(JOB_OUTREACH, `${JOB_OUTREACH_URL}/api/v1/admin/outreach/payments/${body.payment_id}/refund`, {
       method: "POST",
       headers: { Authorization: authHeader, "Content-Type": "application/json" },
       body: JSON.stringify({ reason: body.reason.trim(), confirm: true }),

@@ -62,7 +62,7 @@ export default function OpsAlerts() {
       const token = await getToken();
       if (!token) throw new Error("Not authenticated");
       const params = new URLSearchParams({ status: filter, limit: "100" });
-      const res = await fetch(`/api/ops-alerts?${params}`, {
+      const res = await fetch(`/old/api/ops-alerts?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
       });
@@ -93,7 +93,7 @@ export default function OpsAlerts() {
     try {
       const token = await getToken();
       if (!token) throw new Error("Not authenticated");
-      const res = await fetch(`/api/ops-alerts/${id}`, {
+      const res = await fetch(`/old/api/ops-alerts/${id}`, {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",

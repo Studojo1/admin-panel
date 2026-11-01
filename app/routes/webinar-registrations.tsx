@@ -73,7 +73,7 @@ export default function WebinarRegistrations() {
         const token = await getToken();
         if (!token) throw new Error("Not authenticated");
         const qs = webinarFilter ? `?webinar=${encodeURIComponent(webinarFilter)}` : "";
-        const res = await fetch(`/api/webinar-registrations${qs}`, {
+        const res = await fetch(`/old/api/webinar-registrations${qs}`, {
           headers: { Authorization: `Bearer ${token}` },
           credentials: "include",
         });
@@ -100,7 +100,7 @@ export default function WebinarRegistrations() {
   async function postWebinarAction(payload: Record<string, unknown>): Promise<any> {
     const token = await getToken();
     if (!token) throw new Error("Not authenticated");
-    const res = await fetch("/api/webinar-registrations", {
+    const res = await fetch("/old/api/webinar-registrations", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       credentials: "include",

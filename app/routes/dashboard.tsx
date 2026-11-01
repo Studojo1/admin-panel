@@ -36,7 +36,7 @@ const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 const usd = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
 
 async function phQuery(query: string) {
-  const res = await posthogFetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/old/api/posthog?type=query", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
     body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
   });
@@ -60,7 +60,7 @@ export default function Dashboard() {
     if (!isAuthorized) return;
     (async () => {
       const token = await getToken();
-      fetch(`/api/tickets?status=open`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      fetch(`/old/api/tickets?status=open`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} })
         .then((r) => r.json())
         .then((d) => setTickets({ open: Number(d?.stats?.open) || 0, high: Number(d?.stats?.high_open) || 0 }))
         .catch(() => setTickets(null));
@@ -96,7 +96,7 @@ export default function Dashboard() {
   const load = async (start?: string, end?: string) => {
     const qs = start && end ? `?start=${start}&end=${end}` : "";
     const token = await getToken();
-    fetch(`/api/overview${qs}`, {
+    fetch(`/old/api/overview${qs}`, {
       credentials: "include",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
@@ -141,7 +141,7 @@ export default function Dashboard() {
       <div className="mx-auto max-w-7xl px-4 py-8 md:px-8">
         {tickets && tickets.open > 0 && (
           <Link
-            to="/tickets"
+            to="/old/tickets"
             className="mb-6 flex items-center justify-between gap-3 rounded-2xl border-2 border-red-700 bg-red-600 px-5 py-4 text-white shadow-[4px_4px_0px_0px_rgba(127,29,29,1)] transition-transform hover:-translate-y-0.5"
           >
             <span className="flex items-center gap-3">
@@ -248,10 +248,10 @@ export default function Dashboard() {
 
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {[
-                { to: "/funnel", label: "Funnel" },
-                { to: "/analytics", label: "Analytics" },
-                { to: "/outreach-orders", label: "Outreach Orders" },
-                { to: "/paid-users", label: "Paid Users" },
+                { to: "/old/funnel", label: "Funnel" },
+                { to: "/old/analytics", label: "Analytics" },
+                { to: "/old/outreach-orders", label: "Outreach Orders" },
+                { to: "/old/paid-users", label: "Paid Users" },
               ].map((l) => (
                 <Link
                   key={l.to}

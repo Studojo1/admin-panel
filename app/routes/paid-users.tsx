@@ -343,7 +343,7 @@ function DetailModal({ payment, onClose, onRefunded }: DetailModalProps) {
               </Section>
 
               <a
-                href={`/outreach-orders?search=${encodeURIComponent(payment.user_email)}`}
+                href={`/old/outreach-orders?search=${encodeURIComponent(payment.user_email)}`}
                 className="mt-2 inline-block rounded-lg border-2 border-neutral-900 bg-violet-500 px-4 py-2 font-['Satoshi'] text-sm font-medium text-white shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
               >
                 View in Outreach Orders →

@@ -188,7 +188,7 @@ export default function B2BGtm() {
 
   const load = useCallback(async () => {
     try {
-      const data = await authedFetch("/api/b2b-gtm");
+      const data = await authedFetch("/old/api/b2b-gtm");
       setCompanies(data.companies || []);
       setStats(data.stats || null);
       setObjectionStats(data.objection_stats || []);
@@ -281,7 +281,7 @@ export default function B2BGtm() {
     );
     if (!ok) return;
     try {
-      const r = await authedFetch("/api/b2b-gtm?action=seed", { method: "POST", body: "{}" });
+      const r = await authedFetch("/old/api/b2b-gtm?action=seed", { method: "POST", body: "{}" });
       toast.success(r.seeded ? `Imported ${r.count} companies` : `Already has ${r.count} companies`);
       load();
     } catch (e: any) {
@@ -428,7 +428,7 @@ export default function B2BGtm() {
                 {i > 0 && <span className="text-gray-300 text-xs">→</span>}
                 {/* Each sheet is a real page you can bookmark / link to. */}
                 <Link
-                  to={`/b2b-gtm/team/${slugForOwner(t.owner)}`}
+                  to={`/old/b2b-gtm/team/${slugForOwner(t.owner)}`}
                   title={t.does}
                   className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
                     active
@@ -764,7 +764,7 @@ function AddsAudit({ companies }: { companies: Company[] }) {
                       <tr key={c.id}>
                         <td className="py-1.5 pr-3 text-gray-400 tabular-nums text-xs">{i + 1}</td>
                         <td className="py-1.5 pr-3 font-medium text-gray-900 whitespace-nowrap">
-                          <Link to={`/b2b-gtm/${c.id}`} className="hover:underline">
+                          <Link to={`/old/b2b-gtm/${c.id}`} className="hover:underline">
                             {c.name}
                           </Link>
                         </td>
@@ -915,7 +915,7 @@ function DemoCalendar({ companies }: { companies: Company[] }) {
                   return (
                     <Link
                       key={c.id}
-                      to={`/b2b-gtm/${c.id}`}
+                      to={`/old/b2b-gtm/${c.id}`}
                       title={`${c.name}${contact?.name ? ` · ${contact.name}` : ""} — ${time}`}
                       className="block w-full text-left rounded-md bg-emerald-100 border border-emerald-200 px-1.5 py-0.5 text-[11px] text-emerald-900 hover:bg-emerald-200 truncate"
                     >
@@ -965,7 +965,7 @@ function UpcomingDemos({ companies }: { companies: Company[] }) {
             const contact = (c.contacts || []).find((x) => !x.is_inactive) ?? c.contacts?.[0];
             return (
               <div key={c.id} className="flex items-center justify-between gap-3 text-sm">
-                <Link to={`/b2b-gtm/${c.id}`} className="font-medium text-gray-900 hover:underline">
+                <Link to={`/old/b2b-gtm/${c.id}`} className="font-medium text-gray-900 hover:underline">
                   {c.name}
                   {contact?.name && <span className="font-normal text-gray-500"> · {contact.name}</span>}
                 </Link>
@@ -1020,7 +1020,7 @@ function PersonHeader({
             {label}'s pipeline
           </h2>
           {role && <p className="text-xs text-gray-500 mt-0.5">{role.does}</p>}
-          <Link to="/b2b-gtm" className="text-[11px] text-violet-600 hover:underline">
+          <Link to="/old/b2b-gtm" className="text-[11px] text-violet-600 hover:underline">
             ← Whole board
           </Link>
         </div>
@@ -1291,7 +1291,7 @@ function NextActionEditor({ c, onSaved }: { c: Company; onSaved: () => void }) {
   const save = async () => {
     setSaving(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=company", {
+      await authedFetch("/old/api/b2b-gtm?action=company", {
         method: "PATCH",
         body: JSON.stringify({
           id: c.id,
@@ -1400,7 +1400,7 @@ function DemoEditor({ c, onSaved }: { c: Company; onSaved: () => void }) {
   const save = async (clear = false) => {
     setSaving(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=company", {
+      await authedFetch("/old/api/b2b-gtm?action=company", {
         method: "PATCH",
         body: JSON.stringify({
           id: c.id,
@@ -1528,7 +1528,7 @@ function ActionBar({
   const advance = async (owner: string, stage: Stage, reason: string) => {
     setBusy(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=note", {
+      await authedFetch("/old/api/b2b-gtm?action=note", {
         method: "POST",
         body: JSON.stringify({
           company_id: c.id,
@@ -1595,7 +1595,7 @@ function ActionBar({
               </button>
               {/* Exited companies still open their full page for all the info. */}
               <Link
-                to={`/b2b-gtm/${c.id}`}
+                to={`/old/b2b-gtm/${c.id}`}
                 className="px-4 py-2 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
               >
                 Study past interactions →
@@ -1628,7 +1628,7 @@ function ActionBar({
               </button>
               {/* The only way to the full page. */}
               <Link
-                to={`/b2b-gtm/${c.id}`}
+                to={`/old/b2b-gtm/${c.id}`}
                 className="px-4 py-2 rounded-xl bg-white text-gray-800 text-sm font-medium border border-gray-300 hover:border-gray-400"
               >
                 Study past interactions →
@@ -1711,7 +1711,7 @@ function OwnerPicker({ c, onSaved }: { c: Company; onSaved: () => void }) {
   const assign = async (value: string) => {
     setSaving(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=company", {
+      await authedFetch("/old/api/b2b-gtm?action=company", {
         method: "PATCH",
         body: JSON.stringify({ id: c.id, fields: { owner: value } }),
       });
@@ -1791,7 +1791,7 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
       ].filter(Boolean);
 
       const demoIso = demoAt ? new Date(demoAt).toISOString() : null;
-      await authedFetch("/api/b2b-gtm?action=company", {
+      await authedFetch("/old/api/b2b-gtm?action=company", {
         method: "POST",
         body: JSON.stringify({
           name,

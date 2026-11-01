@@ -94,7 +94,7 @@ export default function Coupons() {
 
   async function loadCoupons() {
     setLoading(true);
-    const res = await authedFetch("/api/coupons");
+    const res = await authedFetch("/old/api/coupons");
     if (res.ok) {
       const data = await res.json();
       setCoupons(data.coupons ?? []);
@@ -118,7 +118,7 @@ export default function Coupons() {
     else if (expiryPreset === "custom" && customExpiry) expires_at = new Date(customExpiry).toISOString();
 
     setCreating(true);
-    const res = await authedFetch("/api/coupons", {
+    const res = await authedFetch("/old/api/coupons", {
       method: "POST",
       body: JSON.stringify({
         code: code.trim(),
@@ -146,7 +146,7 @@ export default function Coupons() {
   }
 
   async function deleteCoupon(id: string, code: string) {
-    const res = await authedFetch("/api/coupons", {
+    const res = await authedFetch("/old/api/coupons", {
       method: "DELETE",
       body: JSON.stringify({ id }),
     });
@@ -157,7 +157,7 @@ export default function Coupons() {
 
   // OP-N13: approve / reject a pending code, or switch a live one off.
   async function reviewCoupon(id: number, action: "approve" | "reject" | "deactivate", code: string) {
-    const res = await authedFetch("/api/coupons", {
+    const res = await authedFetch("/old/api/coupons", {
       method: "PATCH",
       body: JSON.stringify({ id, action }),
     });

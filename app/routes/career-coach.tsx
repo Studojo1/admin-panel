@@ -5,6 +5,7 @@ import { useAdminGuard } from "~/lib/auth-guard";
 import { toast } from "sonner";
 import { useRouteError } from "react-router";
 import type { Route } from "./+types/career-coach";
+import { reportRetiredService, retiredNote } from "~/lib/retired-service";
 
 export function ErrorBoundary() {
   const error = useRouteError();
@@ -29,6 +30,9 @@ export function meta(_: Route.MetaArgs) {
 // Read the career-coach backend that matches this admin panel's environment.
 // Always point at the production coach backend — that is where real students are.
 const CC_API = "https://studojo.com/api/v1/cc";
+// cc-backend is retired with the old product (2 Nov 2026). When it stops
+// answering, this page shows the "Service retired" note instead of data.
+const CC_SERVICE = "cc-backend";
 const CC_ADMIN_KEY = import.meta.env.VITE_CC_ADMIN_KEY || "";
 const ccAdminHeaders = () => ({
   "Content-Type": "application/json",
@@ -580,7 +584,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
         fetch(`${CC_API}/admin/career-paths`, { headers }).then(safeJson),
         fetch(`${CC_API}/admin/questions`, { headers }).then(safeJson),
       ]);
-      if (!ov?.students) { setKeyError(true); setLoading(false); return; }
+      if (!ov?.students) { setKeyError(true); reportRetiredService(CC_SERVICE); setLoading(false); return; }
       setOverview(ov);
       // Locations does live (rate-limited) geo lookups on first run — fetch it
       // separately so it never blocks the dashboard load.
@@ -603,7 +607,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
       setAuthenticated(true);
     } catch (e) {
       toast.error("Failed to load career coach data");
-      if (!overview) setKeyError(true);
+      if (!overview) { setKeyError(true); reportRetiredService(CC_SERVICE); }
     } finally {
       setLoading(false);
     }
@@ -735,9 +739,7 @@ export default function CareerCoachAdmin(_: Route.ComponentProps) {
               <div className="mb-2 font-['Clash_Display'] text-xl font-black text-neutral-900">
                 Career Coach analytics unavailable
               </div>
-              <p className="text-sm text-neutral-500">
-                The dashboard could not reach the career coach backend. Please try refreshing.
-              </p>
+              <p className="text-sm text-neutral-500">{retiredNote(CC_SERVICE)}</p>
             </div>
           ) : (
             <div className="text-neutral-500 font-['Satoshi']">Loading career coach analytics…</div>

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
+import { reportRetired } from "~/lib/retired-service";
 import { toast } from "sonner";
 export function meta() {
   return [
@@ -522,7 +523,7 @@ function DetailModal({ user, onClose }: { user: PaidUser | null; onClose: () => 
                     ) : null;
                   })()}
                   <a
-                    href={`/outreach-campaign?campaign_id=${c.id}`}
+                    href={`/old/outreach-campaign?campaign_id=${c.id}`}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-3 inline-block rounded-lg border-2 border-violet-900 bg-violet-500 px-4 py-2 font-['Satoshi'] text-sm font-medium text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
@@ -821,7 +822,7 @@ function BreakingDetail({ u, onSelect }: { u: PaidUser; onSelect: (u: PaidUser) 
           </details>
         )}
         <a
-          href={`/outreach-campaign?campaign_id=${c.id}`}
+          href={`/old/outreach-campaign?campaign_id=${c.id}`}
           target="_blank"
           rel="noreferrer"
           onClick={e => e.stopPropagation()}
@@ -982,7 +983,7 @@ function BreakingTable({ breaking, onSelect }: { breaking: PaidUser[]; onSelect:
                             <span>Last email: <strong className="text-neutral-800">{ago(s.last_email_sent)}</strong></span>
                           )}
                           <a
-                            href={`/outreach-campaign?campaign_id=${c.id}`}
+                            href={`/old/outreach-campaign?campaign_id=${c.id}`}
                             target="_blank"
                             rel="noreferrer"
                             className="ml-auto rounded-lg border-2 border-red-700 bg-red-600 px-3 py-1.5 font-['Satoshi'] text-xs font-semibold text-white shadow-[2px_2px_0px_0px_rgba(153,27,27,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
@@ -1257,12 +1258,16 @@ const PAID_FUNNEL_VERSION = "v4"; // bump to bust browser cache
 async function fetchPaidFunnel(): Promise<PaidUser[]> {
   const token = await getToken();
   if (!token) throw new Error("Not authenticated");
-  const res = await fetch(`/api/outreach?type=paid_funnel&_v=${PAID_FUNNEL_VERSION}&_t=${Date.now()}`, {
+  const res = await fetch(`/old/api/outreach?type=paid_funnel&_v=${PAID_FUNNEL_VERSION}&_t=${Date.now()}`, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "include",
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    reportRetired(err);
+    throw new Error((err as any).error || `HTTP ${res.status}`);
+  }
   const data = await res.json();
   return data.users ?? [];
 }

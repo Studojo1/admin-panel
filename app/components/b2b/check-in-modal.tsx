@@ -189,7 +189,7 @@ export function CheckInModal({
       // Only send a stage if the confirmed choice actually differs — never
       // rewrite the stage to what it already is.
       const stage = stageChoice !== company.stage ? stageChoice : null;
-      await authedFetch("/api/b2b-gtm?action=log", {
+      await authedFetch("/old/api/b2b-gtm?action=log", {
         method: "POST",
         body: JSON.stringify({
           company_id: company.id,
@@ -664,7 +664,7 @@ export function ContactChangeModal({
   const save = async () => {
     setSaving(true);
     try {
-      await authedFetch("/api/b2b-gtm?action=contact_change", {
+      await authedFetch("/old/api/b2b-gtm?action=contact_change", {
         method: "POST",
         body: JSON.stringify({
           company_id: company.id,

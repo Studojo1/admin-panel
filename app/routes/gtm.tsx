@@ -29,7 +29,7 @@ export default function GtmDashboards() {
       try {
         const token = await getToken();
         if (!token) throw new Error("Not authenticated");
-        const res = await fetch("/api/gtm-dashboards", {
+        const res = await fetch("/old/api/gtm-dashboards", {
           headers: { Authorization: `Bearer ${token}` },
           credentials: "include",
         });
@@ -61,7 +61,7 @@ export default function GtmDashboards() {
           {cards?.map((c) => (
             <Link
               key={c.slug}
-              to={`/gtm/${c.slug}`}
+              to={`/old/gtm/${c.slug}`}
               className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm hover:border-violet-400 hover:shadow transition"
             >
               <div className="text-lg font-semibold text-neutral-900">{c.title}</div>

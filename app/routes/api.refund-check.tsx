@@ -10,7 +10,11 @@
  */
 import type { Route } from "./+types/api.refund-check";
 import { requireAdmin } from "~/lib/auth-helper.server";
+import { fetchRetiring } from "~/lib/retired-service.server";
 
+// Retired with the old product: once it stops, every call here answers 503
+// { retired: true } and the page shows "Service retired" (retired-service.server.ts).
+const JOB_OUTREACH = "job-outreach-svc";
 const JOB_OUTREACH_URL =
   process.env.JOB_OUTREACH_URL ??
   (process.env.JOB_OUTREACH_SVC_SERVICE_HOST
@@ -35,7 +39,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const reported = url.searchParams.get("reported_on");
   const qs = reported ? `?reported_on=${encodeURIComponent(reported)}` : "";
   try {
-    return forward(await fetch(`${BASE}/${id}/refund-check${qs}`, { headers: { Authorization: auth } }));
+    return forward(await fetchRetiring(JOB_OUTREACH, `${BASE}/${id}/refund-check${qs}`, { headers: { Authorization: auth } }));
   } catch (e) {
     return Response.json({ detail: `Outreach service unreachable: ${(e as Error).message}` }, { status: 502 });
   }
@@ -54,10 +58,10 @@ export async function action({ request }: Route.ActionArgs) {
   const headers = { Authorization: auth, "Content-Type": "application/json" };
   try {
     if (body.op === "restart") {
-      return forward(await fetch(`${BASE}/${body.campaign_id}/restart`, { method: "POST", headers }));
+      return forward(await fetchRetiring(JOB_OUTREACH, `${BASE}/${body.campaign_id}/restart`, { method: "POST", headers }));
     }
     if (body.op === "refund") {
-      return forward(await fetch(`${BASE}/${body.campaign_id}/refund-unsent`, {
+      return forward(await fetchRetiring(JOB_OUTREACH, `${BASE}/${body.campaign_id}/refund-unsent`, {
         method: "POST",
         headers,
         body: JSON.stringify({ reported_on: body.reported_on, reason: body.reason ?? "", confirm: true }),

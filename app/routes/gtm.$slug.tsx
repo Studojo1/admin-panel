@@ -115,7 +115,7 @@ export default function GtmDashboard() {
       setError(null);
       const token = await getToken();
       if (!token) throw new Error("Not authenticated");
-      const res = await fetch(`/api/gtm-dashboards?slug=${encodeURIComponent(slug || "")}`, {
+      const res = await fetch(`/old/api/gtm-dashboards?slug=${encodeURIComponent(slug || "")}`, {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
       });
@@ -141,7 +141,7 @@ export default function GtmDashboard() {
     <div className="min-h-screen bg-neutral-50">
       <AdminHeader />
       <main className="mx-auto max-w-[1280px] px-4 sm:px-6 py-8">
-        <Link to="/gtm" className="text-xs text-violet-600 hover:underline">All GTM dashboards</Link>
+        <Link to="/old/gtm" className="text-xs text-violet-600 hover:underline">All GTM dashboards</Link>
         {error && <p className="mt-6 text-sm text-red-600">{error}</p>}
         {!data && !error && <p className="mt-6 text-sm text-neutral-500">Loading dashboard...</p>}
         {data && <DashboardBody d={data} updatedAt={updatedAt} onReload={load} />}

@@ -100,7 +100,7 @@ async function authed(path: string, init: RequestInit = {}) {
 }
 
 async function phQuery(query: string) {
-  const res = await posthogFetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/old/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -199,8 +199,8 @@ export default function UTMLinks() {
   async function loadLinks() {
     setLinksLoading(true);
     const [lr, sr] = await Promise.all([
-      authed("/api/utm-campaigns"),
-      authed("/api/utm-report?view=links"),
+      authed("/old/api/utm-campaigns"),
+      authed("/old/api/utm-report?view=links"),
     ]);
     if (lr.ok) setLinks((await lr.json()).campaigns ?? []);
     else toast.error("Could not load links");
@@ -210,14 +210,14 @@ export default function UTMLinks() {
 
   async function loadSources(d: number) {
     setSources(null);
-    const r = await authed(`/api/utm-report?view=sources&days=${d}`);
+    const r = await authed(`/old/api/utm-report?view=sources&days=${d}`);
     if (r.ok) setSources(await r.json());
     else toast.error("Could not load sources");
   }
 
   async function loadProblems() {
     const found: Problem[] = [];
-    const r = await authed("/api/utm-report?view=hygiene&days=90");
+    const r = await authed("/old/api/utm-report?view=hygiene&days=90");
     if (r.ok) {
       for (const p of (await r.json()).problems ?? [])
         found.push({ where: "signups", source: p.source, medium: p.medium, campaign: p.campaign, count: p.signups, reasons: p.reasons });
@@ -269,7 +269,7 @@ export default function UTMLinks() {
       return;
     }
     setSaving(true);
-    const res = await authed("/api/utm-campaigns", {
+    const res = await authed("/old/api/utm-campaigns", {
       method: "POST",
       body: JSON.stringify({ ...draft, name: effectiveSlug }),
     });
@@ -290,7 +290,7 @@ export default function UTMLinks() {
   }
 
   async function remove(id: string) {
-    const res = await authed("/api/utm-campaigns", { method: "DELETE", body: JSON.stringify({ id }) });
+    const res = await authed("/old/api/utm-campaigns", { method: "DELETE", body: JSON.stringify({ id }) });
     if (!res.ok) {
       toast.error("Could not delete");
       return;

@@ -56,7 +56,7 @@ function visitorsHogql(start: string, end: string) {
 
 async function loadSources(start: string, end: string): Promise<SourcesData> {
   const token = await getToken();
-  const res = await fetch(`/api/sources?start=${start}&end=${end}`, {
+  const res = await fetch(`/old/api/sources?start=${start}&end=${end}`, {
     credentials: "include",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
@@ -66,7 +66,7 @@ async function loadSources(start: string, end: string): Promise<SourcesData> {
 }
 
 async function loadVisitors(start: string, end: string): Promise<Partial<Record<ChannelKey, number>>> {
-  const res = await posthogFetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/old/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query: { kind: "HogQLQuery", query: visitorsHogql(start, end) } }),

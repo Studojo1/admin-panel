@@ -65,7 +65,7 @@ export default function ChatLogs() {
       if (src) params.append("source", src);
       const token = await getToken();
       if (!token) throw new Error("Not authenticated");
-      const res = await fetch(`/api/chat-logs?${params}`, {
+      const res = await fetch(`/old/api/chat-logs?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
       });

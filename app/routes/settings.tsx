@@ -72,7 +72,7 @@ export default function Settings() {
     try {
       const token = await getToken();
       const keys = SETTINGS.map((s) => s.key).join(",");
-      const res = await fetch(`/api/settings?keys=${keys}`, {
+      const res = await fetch(`/old/api/settings?keys=${keys}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -107,7 +107,7 @@ export default function Settings() {
     setSaving((p) => ({ ...p, [key]: true }));
     try {
       const token = await getToken();
-      const res = await fetch("/api/settings", {
+      const res = await fetch("/old/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ key, value }),
@@ -127,7 +127,7 @@ export default function Settings() {
     if (!confirm("Remove this key? Any integration using it will stop working.")) return;
     try {
       const token = await getToken();
-      const res = await fetch("/api/settings", {
+      const res = await fetch("/old/api/settings", {
         method: "DELETE",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ key }),

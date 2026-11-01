@@ -687,7 +687,7 @@ export default function OutreachOrders() {
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      navigate(`/outreach-campaign?campaign_id=${u.active_campaign_id}&user_id=${u.user_id}`);
+                                      navigate(`/old/outreach-campaign?campaign_id=${u.active_campaign_id}&user_id=${u.user_id}`);
                                     }}
                                     className="inline-flex items-center gap-1 rounded-lg border-2 border-violet-900 bg-violet-500 px-3 py-1.5 font-['Satoshi'] text-xs font-medium text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-transform hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
                                   >

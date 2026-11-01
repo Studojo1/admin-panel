@@ -6,7 +6,7 @@ import { posthogFetch } from "~/lib/posthog-client";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 async function phQuery(query: string) {
-  const res = await posthogFetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/old/api/posthog?type=query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -253,7 +253,7 @@ export default function FunnelPage() {
         phQuery(detailHogql(tc, e)),
         phQuery(timingHogql(tc, e)),
         phQuery(forkHogql(tc, e)).catch(() => ({ results: [] })),
-        fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()).catch(() => ({ daily: [] })),
+        fetch(`/old/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()).catch(() => ({ daily: [] })),
       ]);
       const fk = forkRes.results?.[0] ?? [];
       setFork(fk.length ? {

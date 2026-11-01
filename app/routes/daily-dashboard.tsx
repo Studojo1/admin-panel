@@ -13,7 +13,7 @@ import { posthogFetch } from "~/lib/posthog-client";
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
 async function phQuery(query: string) {
-  const res = await posthogFetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/old/api/posthog?type=query", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
     body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
   });
@@ -79,7 +79,7 @@ export default function DailyDashboard() {
       setRange({ start, end });
       const token = await getToken();
       const [dbRes, visRes] = await Promise.all([
-        fetch(`/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()),
+        fetch(`/old/api/dashboard?start=${start}&end=${end}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} }).then((r) => r.json()),
         // uniq(distinct_id) not uniq(person_id): person_id forces a person_distinct_id_overrides
         // JOIN that made the 30d pageview query run ~5min and hit the 300s gateway timeout (500),
         // hanging the whole dashboard. distinct_id needs no join — same query returns in ~1.5s.

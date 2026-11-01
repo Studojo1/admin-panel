@@ -12,7 +12,11 @@
  */
 import type { Route } from "./+types/api.suppression";
 import { requireAdmin } from "~/lib/auth-helper.server";
+import { fetchRetiring } from "~/lib/retired-service.server";
 
+// Retired with the old product: once it stops, every call here answers 503
+// { retired: true } and the page shows "Service retired" (retired-service.server.ts).
+const JOB_OUTREACH = "job-outreach-svc";
 const JOB_OUTREACH_URL =
   process.env.JOB_OUTREACH_URL ??
   (process.env.JOB_OUTREACH_SVC_SERVICE_HOST
@@ -58,7 +62,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     return bad("view must be suppression or requests");
   }
   try {
-    return forward(await fetch(target, { headers: { Authorization: auth } }));
+    return forward(await fetchRetiring(JOB_OUTREACH, target, { headers: { Authorization: auth } }));
   } catch (e) {
     return unreachable(e);
   }
@@ -78,13 +82,13 @@ export async function action({ request }: Route.ActionArgs) {
   try {
     if (body.op === "suppress") {
       if (!EMAIL_RE.test(email) || email.length > 320) return bad("Enter a valid email address");
-      return forward(await fetch(`${BASE}/suppression`, { method: "POST", headers, body: JSON.stringify({ email }) }));
+      return forward(await fetchRetiring(JOB_OUTREACH, `${BASE}/suppression`, { method: "POST", headers, body: JSON.stringify({ email }) }));
     }
     if (body.op === "request") {
       if (!EMAIL_RE.test(email) || email.length > 320) return bad("Enter a valid email address");
       const received = typeof body.received_on === "string" ? body.received_on : "";
       if (!DATE_RE.test(received) || Number.isNaN(Date.parse(received))) return bad("received_on must be YYYY-MM-DD");
-      return forward(await fetch(`${BASE}/removal-requests`, {
+      return forward(await fetchRetiring(JOB_OUTREACH, `${BASE}/removal-requests`, {
         method: "POST",
         headers,
         body: JSON.stringify({ email, received_on: received }),
@@ -93,7 +97,7 @@ export async function action({ request }: Route.ActionArgs) {
     if (body.op === "delete-data") {
       const id = String(body.id ?? "");
       if (!ID_RE.test(id)) return bad("id is required");
-      return forward(await fetch(`${BASE}/removal-requests/${encodeURIComponent(id)}/delete-data`, { method: "POST", headers }));
+      return forward(await fetchRetiring(JOB_OUTREACH, `${BASE}/removal-requests/${encodeURIComponent(id)}/delete-data`, { method: "POST", headers }));
     }
     return bad("op must be suppress, request or delete-data");
   } catch (e) {

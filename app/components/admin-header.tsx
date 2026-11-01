@@ -4,31 +4,31 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { authClient } from "~/lib/auth-client";
 
 const NAV_LINKS = [
-  { to: "/", label: "Dashboard" },
-  { to: "/users", label: "Users" },
-  { to: "/daily", label: "Daily Dashboard" },
-  { to: "/funnel", label: "Funnel" },
-  { to: "/journeys", label: "User Journeys" },
-  { to: "/outreach-orders", label: "Outreach Orders" },
-  { to: "/campaign-health", label: "Campaign Health" },
-  { to: "/campaign-refund-check", label: "Refund Check" },
-  { to: "/suppression", label: "Opt-outs" },
-  { to: "/paid-users", label: "Paid Users" },
-  { to: "/outreach", label: "Outreach Stats" },
-  { to: "/chat-logs", label: "Chat Logs" },
-  { to: "/ops-alerts", label: "Ops Alerts" },
-  { to: "/tickets", label: "Tickets" },
-  { to: "/webinar-registrations", label: "Webinar Signups" },
-  { to: "/campus-ambassadors", label: "Studojo Insiders" },
-  { to: "/email-sequences", label: "Emails" },
-  { to: "/sensei", label: "Sensei" },
-  { to: "/analytics", label: "Analytics" },
-  { to: "/utm-builder", label: "UTM Links" },
-  { to: "/coupons", label: "Coupons" },
-  { to: "/b2b-gtm", label: "B2B GTM" },
-  { to: "/gtm", label: "GTM Dashboards" },
-  { to: "/career-coach", label: "Career Coach" },
-  { to: "/settings", label: "Settings" },
+  { to: "/old", label: "Dashboard" },
+  { to: "/old/users", label: "Users" },
+  { to: "/old/daily", label: "Daily Dashboard" },
+  { to: "/old/funnel", label: "Funnel" },
+  { to: "/old/journeys", label: "User Journeys" },
+  { to: "/old/outreach-orders", label: "Outreach Orders" },
+  { to: "/old/campaign-health", label: "Campaign Health" },
+  { to: "/old/campaign-refund-check", label: "Refund Check" },
+  { to: "/old/suppression", label: "Opt-outs" },
+  { to: "/old/paid-users", label: "Paid Users" },
+  { to: "/old/outreach", label: "Outreach Stats" },
+  { to: "/old/chat-logs", label: "Chat Logs" },
+  { to: "/old/ops-alerts", label: "Ops Alerts" },
+  { to: "/old/tickets", label: "Tickets" },
+  { to: "/old/webinar-registrations", label: "Webinar Signups" },
+  { to: "/old/campus-ambassadors", label: "Studojo Insiders" },
+  { to: "/old/email-sequences", label: "Emails" },
+  { to: "/old/sensei", label: "Sensei" },
+  { to: "/old/analytics", label: "Analytics" },
+  { to: "/old/utm-builder", label: "UTM Links" },
+  { to: "/old/coupons", label: "Coupons" },
+  { to: "/old/b2b-gtm", label: "B2B GTM" },
+  { to: "/old/gtm", label: "GTM Dashboards" },
+  { to: "/old/career-coach", label: "Career Coach" },
+  { to: "/old/settings", label: "Settings" },
 ] as const;
 
 export function AdminHeader() {
@@ -146,7 +146,7 @@ export function AdminHeader() {
             whileTap={{ scale: 0.95 }}
           >
             <Link
-              to="/sensei"
+              to="/old/sensei"
               className="rounded-lg border-2 border-neutral-900 bg-neutral-900 px-4 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
             >
               ◈ Sensei

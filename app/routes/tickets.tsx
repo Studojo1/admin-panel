@@ -93,7 +93,7 @@ export default function TicketsList() {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (priorityFilter !== "all") params.set("priority", priorityFilter);
-      const res = await fetch(`/api/tickets?${params}`, {
+      const res = await fetch(`/old/api/tickets?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
       });
@@ -223,7 +223,7 @@ export default function TicketsList() {
                     >
                       <td className="px-4 py-3 align-top">
                         <Link
-                          to={`/tickets/${t.id}`}
+                          to={`/old/tickets/${t.id}`}
                           className="block text-neutral-700"
                         >
                           <div>{relativeTime(t.created_at)}</div>
@@ -240,7 +240,7 @@ export default function TicketsList() {
                         </span>
                       </td>
                       <td className="px-4 py-3 align-top">
-                        <Link to={`/tickets/${t.id}`} className="block">
+                        <Link to={`/old/tickets/${t.id}`} className="block">
                           <div className="font-semibold text-neutral-900">
                             {CATEGORY_LABELS[t.category] || t.category}
                           </div>
@@ -250,7 +250,7 @@ export default function TicketsList() {
                         </Link>
                       </td>
                       <td className="px-4 py-3 align-top">
-                        <Link to={`/tickets/${t.id}`} className="block">
+                        <Link to={`/old/tickets/${t.id}`} className="block">
                           <div className="text-neutral-900">
                             {t.user_name || t.user_email}
                           </div>
@@ -261,7 +261,7 @@ export default function TicketsList() {
                       </td>
                       <td className="px-4 py-3 align-top max-w-[400px]">
                         <Link
-                          to={`/tickets/${t.id}`}
+                          to={`/old/tickets/${t.id}`}
                           className="block text-neutral-700 line-clamp-2"
                         >
                           {t.first_message}

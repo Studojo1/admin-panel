@@ -39,7 +39,7 @@ function ago(iso: string) {
 
 async function loadHealthWatch(): Promise<HealthWatch> {
   const token = await getToken();
-  const res = await fetch("/api/health-watch", {
+  const res = await fetch("/old/api/health-watch", {
     credentials: "include",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

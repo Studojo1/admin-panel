@@ -98,7 +98,7 @@ export default function TicketDetailPage({ params }: Route.ComponentProps) {
     try {
       const token = await getToken();
       if (!token) throw new Error("Not authenticated");
-      const res = await fetch(`/api/tickets/${id}`, {
+      const res = await fetch(`/old/api/tickets/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
       });
@@ -128,7 +128,7 @@ export default function TicketDetailPage({ params }: Route.ComponentProps) {
     try {
       const token = await getToken();
       if (!token) throw new Error("Not authenticated");
-      const res = await fetch(`/api/tickets/${id}/messages`, {
+      const res = await fetch(`/old/api/tickets/${id}/messages`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -155,7 +155,7 @@ export default function TicketDetailPage({ params }: Route.ComponentProps) {
     try {
       const token = await getToken();
       if (!token) throw new Error("Not authenticated");
-      const res = await fetch(`/api/tickets/${id}`, {
+      const res = await fetch(`/old/api/tickets/${id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -188,7 +188,7 @@ export default function TicketDetailPage({ params }: Route.ComponentProps) {
       <div className="min-h-screen bg-neutral-50">
         <AdminHeader />
         <main className="mx-auto max-w-[1100px] px-6 py-8">
-          <Link to="/tickets" className="text-sm font-semibold text-violet-700">
+          <Link to="/old/tickets" className="text-sm font-semibold text-violet-700">
             ← Back to tickets
           </Link>
           <p className="mt-4 text-red-700">{error || "Not found"}</p>
@@ -203,7 +203,7 @@ export default function TicketDetailPage({ params }: Route.ComponentProps) {
       <main className="mx-auto max-w-[1100px] px-6 py-8">
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
           <Link
-            to="/tickets"
+            to="/old/tickets"
             className="inline-block mb-4 text-sm font-semibold text-violet-700 hover:underline"
           >
             ← Back to tickets

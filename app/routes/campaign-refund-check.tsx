@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
+import { reportRetired } from "~/lib/retired-service";
 
 // Refund Policy v3.0 §3.3: did an outreach campaign fail completely?
 // Everything here is computed by job-outreach-svc (services/refund_check.py),
@@ -55,13 +56,14 @@ function day(iso: string | null) {
 async function call(method: "GET" | "POST", query: string, body?: unknown) {
   const token = await getToken();
   if (!token) throw new Error("Please sign in again.");
-  const res = await fetch(`/api/refund-check${query}`, {
+  const res = await fetch(`/old/api/refund-check${query}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
+  reportRetired(data);
   if (!res.ok) throw new Error((data as any).detail || (data as any).error || `HTTP ${res.status}`);
   return data;
 }
@@ -248,7 +250,7 @@ export default function CampaignRefundCheck() {
                   {c.user_email ?? "unknown user"} · {c.credits_reserved} credits reserved · created {day(c.created_at)}
                   {r && <> · paid {money(r.paid_cents, r.currency)} · {r.provider} {r.provider_payment_id ?? `#${r.payment_id}`}</>}
                   {" · "}
-                  <Link to={`/outreach-campaign?campaign_id=${c.id}`} className="text-violet-700 underline">emails</Link>
+                  <Link to={`/old/outreach-campaign?campaign_id=${c.id}`} className="text-violet-700 underline">emails</Link>
                 </div>
                 <div className="mt-1 font-['Satoshi'] text-xs text-neutral-500">
                   Status: {c.status}{c.pause_reason ? ` (${c.pause_reason})` : ""} · days in {c.timezone}

@@ -4,7 +4,7 @@ import { AdminHeader } from "~/components";
 import { posthogFetch } from "~/lib/posthog-client";
 
 async function phQuery(query: string) {
-  const res = await posthogFetch("/api/posthog?type=query", {
+  const res = await posthogFetch("/old/api/posthog?type=query", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
     body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
   });
@@ -13,7 +13,7 @@ async function phQuery(query: string) {
 }
 async function phGet(type: string, params: Record<string, string>) {
   const qs = new URLSearchParams({ type, ...params }).toString();
-  const res = await posthogFetch(`/api/posthog?${qs}`, { credentials: "include" });
+  const res = await posthogFetch(`/old/api/posthog?${qs}`, { credentials: "include" });
   if (!res.ok) throw new Error(`PostHog ${type} ${res.status}`);
   return res.json();
 }
@@ -194,8 +194,8 @@ export default function UserJourneys() {
       const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const [res, paidRes, stageRes] = await Promise.all([
         phQuery(listHogql(d, e)),
-        getJson(`/api/paid-emails`, authHeaders),
-        getJson(`/api/journeys`, authHeaders),
+        getJson(`/old/api/paid-emails`, authHeaders),
+        getJson(`/old/api/journeys`, authHeaders),
       ]);
       if (my !== loadSeq.current) return;
       const warn: string[] = [];

@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
+import { reportRetired } from "~/lib/retired-service";
 
 // Outreach suppression list and data-removal requests. job-outreach-svc owns
 // the rules (masking, 30-day deadline, what "delete data" removes); this page
@@ -56,13 +57,14 @@ function deadlineUrgent(r: RemovalRequest) {
 async function call(method: "GET" | "POST", query: string, body?: unknown) {
   const token = await getToken();
   if (!token) throw new Error("Please sign in again.");
-  const res = await fetch(`/api/suppression${query}`, {
+  const res = await fetch(`/old/api/suppression${query}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
+  reportRetired(data);
   if (!res.ok) throw new Error((data as any).detail || (data as any).error || `HTTP ${res.status}`);
   return data;
 }
