@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminHeader } from "~/components";
+import { FellowshipProgramSwitch } from "~/components/fellowship-program-switch";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
 import type { Route } from "./+types/fellowship-program";
@@ -139,7 +140,7 @@ function Dashboard({ D, at }: { D: Dash; at: string | null }) {
             <p>Growth Fellowship · Week {weekNo(D.thisWeek)} · {DOWL[day(today).getUTCDay()]} {fmt(today)} · {daysLeft} days to {fmt(G.by)}{at ? ` · Updated ${new Date(at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}` : ""}</p>
           </div>
           <div className="head-actions">
-            <a className="btn btn-outline" href="/fellowship-program/calendar">Open the calendar</a>
+            <FellowshipProgramSwitch />
           </div>
         </div>
 
