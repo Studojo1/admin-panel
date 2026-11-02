@@ -7,7 +7,8 @@ import { authClient } from "~/lib/auth-client";
 // paths. The retired student product's dashboards follow under /old (read-only
 // archive, relaunch 2 Nov 2026).
 const NAV_LINKS: readonly { to: string; label: string; archive?: true; stu?: true }[] = [
-  { to: "/", label: "Stu: Daily", stu: true },
+  { to: "/", label: "Stu: Overview", stu: true },
+  { to: "/daily", label: "Stu: Daily", stu: true },
   { to: "/funnel", label: "Stu: Funnel", stu: true },
   { to: "/ratios", label: "Stu: Ratios", stu: true },
   { to: "/drop-offs", label: "Stu: Drop-offs", stu: true },

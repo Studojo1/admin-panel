@@ -7,9 +7,12 @@ import { type RouteConfig, index, layout, prefix, route } from "@react-router/de
 // are at the root: Daily, Funnel, Ratios, Drop-offs, Sources, Journeys,
 // Retention and the self-check, under one layout (app/routes/stu-layout.tsx).
 // On main, api.journeys.tsx stays unrouted, as it was before.
+// The Overview (2 Nov 2026) is the root and the landing page after login: one
+// graphic screen with its own range control, so it sits outside that layout.
 export default [
+  index("routes/stu-overview.tsx"),
   layout("routes/stu-layout.tsx", [
-    index("routes/stu-daily.tsx"),
+    route("daily", "routes/stu-daily.tsx"),
     route("funnel", "routes/stu-funnel.tsx"),
     route("ratios", "routes/stu-ratios.tsx"),
     route("drop-offs", "routes/stu-dropoffs.tsx"),
@@ -19,6 +22,7 @@ export default [
     route("self-check", "routes/stu-check.tsx"),
   ]),
   route("api/stu", "routes/api.stu.tsx"),
+  route("api/stu/overview", "routes/api.stu-overview.tsx"),
   route("login", "routes/login.tsx"),
   route("users", "routes/users.tsx"),
   route("chat-logs", "routes/chat-logs.tsx"),

@@ -1,6 +1,7 @@
 // Stu Journeys: every person as a timeline: source, every step with its time,
 // the furthest step, last active. Search by email, name or id; filter to the
-// people stuck at a step. ?u=<id> opens one person.
+// people stuck at a step. ?u=<id> opens one person; ?stuck=<step>&cohort=1 (the
+// Overview's drop-off bar) opens the list filtered to that step.
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { CARD, PageTitle, SourceNote, channelLabel, useStu } from "~/components/stu/ui";
@@ -11,8 +12,8 @@ export default function StuJourneys() {
   const { data, filters } = useStu();
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState("");
-  const [stuck, setStuck] = useState("any");
-  const [onlyCohort, setOnlyCohort] = useState(false);
+  const [stuck, setStuck] = useState(() => (USER_STEPS.some((s) => s.key === params.get("stuck")) ? params.get("stuck")! : "any"));
+  const [onlyCohort, setOnlyCohort] = useState(() => params.get("cohort") === "1");
   const open = params.get("u");
   const acts = useMemo(() => lastActDay(data), [data]);
 

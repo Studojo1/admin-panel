@@ -42,6 +42,13 @@ export const STEPS = [
   { key: "paid", n: "23", label: "Paid (real)", phase: "Pay", journey: ["paid"], truth: "career_credit_orders paid (not test), career_plans not test" },
 ] as const satisfies readonly StepDef[];
 
+/**
+ * Activity beacons (career-agent, 2 Nov 2026): active_day (once a person a day,
+ * props.first_path, props.via) and feature_used (once a person, feature and day,
+ * props.feature). Not funnel steps; they feed the activity model below.
+ */
+export const ACTIVITY_EVENTS = ["active_day", "feature_used"] as const;
+
 /** Journey names that are not funnel steps but feed drop-offs (reason: mic_denied, no_mic, no_network, error, dropped, finish_failed). */
 export const EXTRA_EVENTS = {
   call_failed: ["call_failed"],
@@ -298,6 +305,88 @@ export const pct = (n: number, dnm: number): number | null => (dnm > 0 ? Math.ro
 
 // --------------------------------------------------------------------- daily
 
+// ------------------------------------------------------------------ activity
+
+/** The features a person can use, in career-agent's feature_used names. */
+export const FEATURES = ["desk", "jobs", "job_open", "apply", "save", "chat", "call", "outreach", "email_send", "resume", "plans", "whatsapp"] as const;
+export const FEATURE_LABELS: Record<string, string> = {
+  desk: "Desk", jobs: "Saw jobs", job_open: "Opened a job", apply: "Apply click", save: "Saved a job", chat: "Chat",
+  call: "Call", outreach: "Outreach", email_send: "Sent email", resume: "Resume", plans: "Plans", whatsapp: "WhatsApp",
+};
+
+/** Product-table and journey rows (Act kinds) that show a person used a feature that day. */
+const ACT_FEATURE: Record<string, string> = {
+  desk: "desk", job_view: "jobs", job_open: "job_open", apply: "apply", save: "save", chat_desk: "chat", chat_wa: "whatsapp",
+  chat_call: "call", outreach_row: "outreach", email: "email_send", email_test: "email_send", plan_view: "plans", digest_tapped: "whatsapp",
+};
+
+export interface Activity {
+  /** person index -> IST day -> features used that day (empty set: active, feature not known) */
+  days: Map<number, Map<string, Set<string>>>;
+  /** the journey log has active_day / feature_used rows */
+  beacons: boolean;
+}
+
+const activityCache = new WeakMap<StuData, Activity>();
+
+/**
+ * Who was active on which IST day, and with which features. Active means any of:
+ * the journey's active_day and feature_used beacons (when the log has them), the
+ * desk, job, apply and plan events, and the product's own timestamped rows (chat
+ * messages, calls, job views, saves, outreach, emails, WhatsApp digest taps). The
+ * beacons add to the tables rather than replace them, so days before the beacons
+ * went live still count.
+ */
+export function activity(d: StuData): Activity {
+  const hit = activityCache.get(d);
+  if (hit) return hit;
+  const days = new Map<number, Map<string, Set<string>>>();
+  const add = (u: number, day: string, feature: string) => {
+    if (u < 0) return;
+    let m = days.get(u);
+    if (!m) days.set(u, (m = new Map()));
+    let s = m.get(day);
+    if (!s) m.set(day, (s = new Set()));
+    if (feature) s.add(feature);
+  };
+  let beacons = false;
+  for (const [k, u, day] of d.act) {
+    if (k === "active_day") {
+      beacons = true;
+      add(u, day, "");
+    } else if (k.startsWith("f:")) {
+      beacons = true;
+      add(u, day, k.slice(2));
+    } else if (ACT_FEATURE[k]) add(u, day, ACT_FEATURE[k]);
+  }
+  for (const c of d.calls) if (c[5] != null) add(c[0], istDay(c[5]), "call");
+  const out = { days, beacons };
+  activityCache.set(d, out);
+  return out;
+}
+
+export const activitySource = (d: StuData): string =>
+  activity(d).beacons
+    ? "journey active_day and feature_used, plus the product tables (chats, calls, job views, saves, outreach, emails)"
+    : "product tables (chats, calls, job views, saves, outreach, emails) and journey desk, job, apply and plan events; active_day not in the log yet";
+
+/** People in scope active on any of `days`. */
+export function activeCell(d: StuData, days: Set<string>, scope: Set<number>, which: "all" | "new" | "returning" = "all"): Cell {
+  const users: number[] = [];
+  for (const [u, m] of activity(d).days) {
+    if (!scope.has(u)) continue;
+    const joined = istDay(d.users[u].joined);
+    for (const day of m.keys()) {
+      if (!days.has(day)) continue;
+      if (which === "new" && day !== joined) continue;
+      if (which === "returning" && day <= joined) continue;
+      users.push(u);
+      break;
+    }
+  }
+  return cellOf(users);
+}
+
 export interface DailyMetricDef {
   key: string;
   label: string;
@@ -346,7 +435,8 @@ function visitorCell(d: StuData, f: Filters, key: string, days: Set<string>): Ce
 }
 
 type CallPred = (c: WireCall) => boolean;
-const NON_DESK = (c: WireCall) => c[1] !== "desk" && c[1] !== "interview";
+/** The onboarding path: not a desk chat call or a practice interview. */
+export const NON_DESK = (c: WireCall) => c[1] !== "desk" && c[1] !== "interview";
 export const callOutcome = (c: WireCall): string => {
   const [, , status, error, , started, , dur, dropped, , completed] = c;
   if (completed) return "completed";
@@ -403,6 +493,9 @@ export const DAILY_METRICS: DailyMetricDef[] = [
   { key: "calls_hung_early", label: "Hung up in first minute", group: "Call", source: T("career_voice_calls: under 60 s, not completed, not dropped"), cell: (d, _f, days, s) => callCell(d, days, s, (c) => NON_DESK(c) && callOutcome(c) === "hung_up_first_minute", (c) => c[5] ?? c[4]) },
   { key: "resumes", label: "Resumes in call", group: "Call", source: T("career_voice_calls: onboarding calls with a resume read (each call)"), cell: (d, _f, days, s) => callCell(d, days, s, (c) => c[1] === "onboarding" && c[9] === 1, (c) => c[5] ?? c[4]) },
   { key: "onboarded", label: "Onboarded", group: "Call", source: (d) => stepSource(d, "onboarded"), cell: (d, _f, days, s) => firstStepCell(d, "onboarded", days, s) },
+  { key: "active", label: "Active (any activity)", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s) },
+  { key: "active_new", label: "  of them new (joined that day)", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s, "new") },
+  { key: "active_returning", label: "  of them returning", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s, "returning") },
   { key: "dau", label: "Daily actives (desk)", group: "Use", source: (d) => `${J(d)}: opened_desk, distinct people a day`, cell: (d, _f, days, s) => actCell(d, ["desk"], days, s, "users", !d.journeyLive) },
   { key: "dau_new", label: "  of them new", group: "Use", source: (d) => `${J(d)}: opened_desk on the day they joined`, cell: (d, _f, days, s) => {
     const all = actCell(d, ["desk"], days, s, "users", !d.journeyLive);
@@ -709,20 +802,23 @@ export interface RetentionRow {
 
 export const RETENTION_DAYS = [1, 7, 30] as const;
 
-/** Returned to the desk (journey opened_desk) on day N after the IST day they joined; `orLater` counts day N or any later day. */
-export function retention(d: StuData, f: Filters, orLater: boolean): RetentionRow[] {
+/**
+ * Returned to the desk (journey opened_desk) on day N after the IST day they joined; `orLater` counts day N or any later day.
+ * Rows are weeks of joining (Monday), or IST days of joining with `by` "day" (the Overview's cohort heatmap).
+ */
+export function retention(d: StuData, f: Filters, orLater: boolean, by: "week" | "day" = "week", ns: readonly number[] = RETENTION_DAYS): RetentionRow[] {
   const cohort = cohortOf(d, f);
   const deskDays = new Map<number, Set<string>>();
   for (const [k, u, day] of d.act) if (k === "desk") (deskDays.get(u) ?? deskDays.set(u, new Set()).get(u)!).add(day);
   const today = todayIst();
   const weeks = new Map<string, number[]>();
   for (const i of cohort) {
-    const w = weekOf(istDay(d.users[i].joined));
+    const w = by === "day" ? istDay(d.users[i].joined) : weekOf(istDay(d.users[i].joined));
     weeks.set(w, [...(weeks.get(w) ?? []), i]);
   }
   return [...weeks.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([week, us]) => {
     const row: RetentionRow = { week, size: cellOf(us), d: {} };
-    for (const n of RETENTION_DAYS) {
+    for (const n of ns) {
       const eligible = us.filter((i) => addDays(istDay(d.users[i].joined), n) <= today);
       const back = eligible.filter((i) => {
         const j = istDay(d.users[i].joined);

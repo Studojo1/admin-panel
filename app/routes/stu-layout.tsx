@@ -14,7 +14,8 @@ export function meta() {
 }
 
 const TABS = [
-  { to: "/", label: "Daily", end: true },
+  { to: "/", label: "Overview", end: true },
+  { to: "/daily", label: "Daily" },
   { to: "/funnel", label: "Funnel" },
   { to: "/ratios", label: "Ratios" },
   { to: "/drop-offs", label: "Drop-offs" },
