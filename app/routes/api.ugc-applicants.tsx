@@ -570,13 +570,9 @@ export async function action({ request }: Route.ActionArgs) {
     if (!isStatus(status)) {
       return Response.json({ error: "Invalid status" }, { status: 400 });
     }
-    // Fellow comes only from Make fellow, which also creates their page, and a
-    // fellow stays one here: their page is live, so moving them back would
-    // leave the two out of step.
-    if (status === "selected") {
-      return Response.json({ error: "Use Make fellow to make them a fellow." }, { status: 400 });
-    }
-    // The check and the change happen under a lock on the application row,
+    // Someone with a live fellow page (made by Make fellow) stays Selected:
+    // moving them back would leave the page and the status out of step. The
+    // check and the change happen under a lock on the application row,
     // which Make fellow takes too, so the two can't interleave.
     await ensureCreatorTables();
     const outcome = await db.transaction(async (tx) => {
@@ -588,7 +584,7 @@ export async function action({ request }: Route.ActionArgs) {
       return { row: updated.rows[0] };
     });
     if (outcome.fellow) {
-      return Response.json({ error: "They're a fellow now, so their status stays Fellow." }, { status: 409 });
+      return Response.json({ error: "They're a fellow with a live page, so their status stays Selected." }, { status: 409 });
     }
     if (!outcome.row) return Response.json({ error: "Applicant not found" }, { status: 404 });
     // Fresh counts, so the header stays right without reloading every row.
