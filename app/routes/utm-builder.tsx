@@ -1,27 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import QRCode from "qrcode";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
 import { toast } from "sonner";
 import {
-  UTM_SOURCES,
-  UTM_MEDIUMS,
-  SOURCE_MEDIUMS,
+  DESTINATIONS,
   META_URL_TEMPLATE,
+  SOURCE_MEDIUMS,
+  UTM_MEDIUMS,
+  UTM_SOURCES,
+  autoSlug,
+  cleanCampaign,
+  cleanContent,
+  cleanSlug,
+  fullUrl,
   validateLink,
-  toSlugPart,
-  normalizeTags,
-  type UtmSource,
   type UtmMedium,
+  type UtmSource,
 } from "~/lib/utm-dictionary";
+import { rate, type Stats } from "~/lib/utm-attribution";
 import type { Route } from "./+types/utm-builder";
-import { posthogFetch } from "~/lib/posthog-client";
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "UTM Links | Studojo Admin" }];
 }
 
-// ── Types ──────────────────────────────────────────────────────────────────
+// UTM links for the relaunched product (2 Nov 2026). Build a link from the one
+// naming scheme (app/lib/utm-dictionary.ts), share it as studojo.com/go/<slug>
+// (which adds utm_id=<slug>), and see what each link and campaign brought into
+// Stu: clicks, visitors, sign-ups, onboarded, paid and revenue, IST days, the
+// dashboards' exclusions (app/routes/api.utm-report.tsx).
 
 interface SavedLink {
   id: string;
@@ -37,54 +46,39 @@ interface SavedLink {
   created_at: string;
 }
 
-interface LinkStats {
-  clicks: number;
-  botClicks: number;
-  signups: number;
-  payers: number;
-  inr: number;
-  usd: number;
-}
-
-interface SourceRow {
-  source: string;
-  medium: string;
+interface CampaignRow extends Stats {
   campaign: string;
-  tagged: boolean;
-  signups: number;
-  payers: number;
-  inr: number;
-  usd: number;
+  links: number;
 }
 
-interface SourcesReport {
-  days: number;
-  total: number;
-  taggedSignups: number;
-  notCaptured: number;
-  rows: SourceRow[];
+interface Report {
+  start: string;
+  end: string;
+  touch: "first" | "last";
+  live: { links: boolean; clicks: boolean; journey: boolean; source: boolean };
+  links: Record<string, Stats>;
+  campaigns: CampaignRow[];
+  totals: { signups: number; viaLink: number; tagged: number; visitors: number };
 }
 
-interface Problem {
-  where: "signups" | "visits";
-  source: string | null;
-  medium: string | null;
-  campaign: string | null;
-  count: number;
-  reasons: string[];
+const RANGES = [
+  { key: "today", label: "Today", days: 1 },
+  { key: "7", label: "7 days", days: 7 },
+  { key: "30", label: "30 days", days: 30 },
+  { key: "all", label: "All time", days: 0 },
+] as const;
+
+/** IST day, n days back from today (0 = today). */
+function istDayAgo(n: number): string {
+  return new Date(Date.now() + 330 * 60_000 - n * 86_400_000).toISOString().slice(0, 10);
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-const SHORT_HOST = "studojo.com/go/";
-
-const DESTINATIONS = [
-  { label: "Outreach", url: "https://studojo.com/outreach" },
-  { label: "Upload resume", url: "https://studojo.com/outreach/onboarding/upload" },
-  { label: "Internships", url: "https://studojo.com/dojos/internships" },
-  { label: "Insider", url: "https://studojo.com/insider" },
-  { label: "Home", url: "https://studojo.com/" },
-];
+/** The short link host for this admin: studojo.pro on the staging admin, else studojo.com. */
+function shortHost(): string {
+  if (typeof window !== "undefined" && window.location.hostname.endsWith("studojo.pro")) return "studojo.pro";
+  return "studojo.com";
+}
+const shortUrl = (slug: string) => `https://${shortHost()}/go/${slug}`;
 
 async function authed(path: string, init: RequestInit = {}) {
   const token = await getToken();
@@ -99,58 +93,19 @@ async function authed(path: string, init: RequestInit = {}) {
   });
 }
 
-async function phQuery(query: string) {
-  const res = await posthogFetch("/api/posthog?type=query", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
-  });
-  if (!res.ok) throw new Error(`PostHog query failed: ${res.status}`);
-  return res.json();
-}
-
-function fullUrl(l: {
-  base_url: string;
-  utm_source: string;
-  utm_medium: string;
-  utm_campaign: string;
-  utm_content?: string | null;
-  utm_term?: string | null;
-}) {
-  try {
-    const u = new URL(l.base_url);
-    u.searchParams.set("utm_source", l.utm_source);
-    u.searchParams.set("utm_medium", l.utm_medium);
-    u.searchParams.set("utm_campaign", l.utm_campaign);
-    if (l.utm_content) u.searchParams.set("utm_content", l.utm_content);
-    if (l.utm_term) u.searchParams.set("utm_term", l.utm_term);
-    return u.toString();
-  } catch {
-    return "";
-  }
-}
-
-// Keep typed values inside the dictionary's character set as the user types.
-const cleanCampaign = (v: string) => v.toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
-const cleanContent = (v: string) => v.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "");
-const cleanSlug = (v: string) => v.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, "");
-
-function todayMMDD() {
-  const d = new Date();
-  return String(d.getMonth() + 1).padStart(2, "0") + String(d.getDate()).padStart(2, "0");
-}
-
-function money(inr: number, usd: number) {
-  const parts: string[] = [];
-  if (inr) parts.push("₹" + Math.round(inr).toLocaleString("en-IN"));
-  if (usd) parts.push("$" + usd.toLocaleString("en-US", { maximumFractionDigits: 0 }));
-  return parts.join(" + ") || "0";
-}
-
 function copy(text: string, msg = "Copied") {
-  navigator.clipboard.writeText(text).then(() => toast.success(msg));
+  navigator.clipboard.writeText(text).then(
+    () => toast.success(msg),
+    () => toast.error("Could not copy"),
+  );
 }
+
+const inr = (paise: number) => `₹${Math.round(paise / 100).toLocaleString("en-IN")}`;
+const pctText = (n: number, d: number) => {
+  const r = rate(n, d);
+  return r == null ? "n/a" : `${r}%`;
+};
+const CUSTOM = "custom";
 
 // ── Page ───────────────────────────────────────────────────────────────────
 
@@ -158,104 +113,69 @@ export default function UTMLinks() {
   const { isAuthorized } = useAdminGuard();
 
   // Builder
-  const [baseUrl, setBaseUrl] = useState(DESTINATIONS[0].url);
+  const [dest, setDest] = useState<string>(DESTINATIONS[0].key);
+  const [customUrl, setCustomUrl] = useState("");
   const [source, setSource] = useState<UtmSource>("linkedin");
-  const [medium, setMedium] = useState<UtmMedium>("organic");
+  const [medium, setMedium] = useState<UtmMedium>("post");
   const [campaign, setCampaign] = useState("");
   const [content, setContent] = useState("");
-  const [term, setTerm] = useState("");
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [justSaved, setJustSaved] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState<SavedLink | null>(null);
 
   // Data
   const [links, setLinks] = useState<SavedLink[]>([]);
   const [linksLoading, setLinksLoading] = useState(true);
-  const [stats, setStats] = useState<Record<string, LinkStats>>({});
-  const [days, setDays] = useState(30);
-  const [sources, setSources] = useState<SourcesReport | null>(null);
-  const [problems, setProblems] = useState<Problem[] | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [range, setRange] = useState<string>("all");
+  const [touch, setTouch] = useState<"first" | "last">("first");
+  const [internal, setInternal] = useState(false);
+  const [view, setView] = useState<"links" | "campaigns">("links");
+  const [campaignFilter, setCampaignFilter] = useState("");
+  const [qrFor, setQrFor] = useState<string | null>(null);
 
-  const autoSlug = toSlugPart([campaign, content].filter(Boolean).join("-"));
-  const effectiveSlug = slugEdited ? slug : autoSlug;
-
-  const draft = {
-    base_url: baseUrl,
-    utm_source: source,
-    utm_medium: medium,
-    utm_campaign: campaign,
-    utm_content: content || null,
-    utm_term: term || null,
-    slug: effectiveSlug,
-  };
+  const baseUrl = dest === CUSTOM ? customUrl : DESTINATIONS.find((d) => d.key === dest)?.url ?? DESTINATIONS[0].url;
+  const tags = { utm_source: source, utm_medium: medium, utm_campaign: campaign, utm_content: content || null };
+  const effectiveSlug = slugEdited ? slug : autoSlug(tags);
+  const draft = { base_url: baseUrl, ...tags, utm_term: null, slug: effectiveSlug };
   const errors = campaign ? validateLink(draft) : [];
-  const preview = fullUrl(draft);
-  const knownCampaigns = useMemo(
-    () => [...new Set(links.map((l) => l.utm_campaign))].sort(),
-    [links],
-  );
+  const preview = campaign ? fullUrl(draft) : "";
+  const knownCampaigns = useMemo(() => [...new Set(links.map((l) => l.utm_campaign))].sort(), [links]);
+  const suggested = SOURCE_MEDIUMS[source];
+  const otherMediums = (Object.keys(UTM_MEDIUMS) as UtmMedium[]).filter((m) => !suggested.includes(m));
 
   async function loadLinks() {
     setLinksLoading(true);
-    const [lr, sr] = await Promise.all([
-      authed("/api/utm-campaigns"),
-      authed("/api/utm-report?view=links"),
-    ]);
-    if (lr.ok) setLinks((await lr.json()).campaigns ?? []);
+    const r = await authed("/api/utm-campaigns");
+    if (r.ok) setLinks((await r.json()).campaigns ?? []);
     else toast.error("Could not load links");
-    if (sr.ok) setStats((await sr.json()).stats ?? {});
     setLinksLoading(false);
   }
 
-  async function loadSources(d: number) {
-    setSources(null);
-    const r = await authed(`/api/utm-report?view=sources&days=${d}`);
-    if (r.ok) setSources(await r.json());
-    else toast.error("Could not load sources");
-  }
-
-  async function loadProblems() {
-    const found: Problem[] = [];
-    const r = await authed("/api/utm-report?view=hygiene&days=90");
-    if (r.ok) {
-      for (const p of (await r.json()).problems ?? [])
-        found.push({ where: "signups", source: p.source, medium: p.medium, campaign: p.campaign, count: p.signups, reasons: p.reasons });
+  async function loadReport() {
+    setReportError(null);
+    const r = RANGES.find((x) => x.key === range) ?? RANGES[3];
+    const qs = new URLSearchParams({ touch, end: istDayAgo(0) });
+    if (r.days) qs.set("start", istDayAgo(r.days - 1));
+    if (internal) qs.set("internal", "1");
+    const res = await authed(`/api/utm-report?${qs}`);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body?.error) {
+      setReportError(body?.error || `HTTP ${res.status}`);
+      return;
     }
-    // Visit-level tags from PostHog, so a bad link is caught before it
-    // produces (or fails to produce) any signups.
-    try {
-      const res = await phQuery(
-        `SELECT properties.utm_source, properties.utm_medium, properties.utm_campaign, count(DISTINCT person_id)
-         FROM events WHERE event = '$pageview' AND properties.utm_source IS NOT NULL
-         AND timestamp > now() - INTERVAL 30 DAY GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 200`,
-      );
-      for (const [s, m, c, n] of res?.results ?? []) {
-        const norm = normalizeTags(s, m);
-        if (!norm.tagged) continue; // a tag another site added, e.g. chatgpt.com
-        const reasons: string[] = [];
-        if (!norm.known) reasons.push("source or medium not in the dictionary");
-        if (c && /^\d+$/.test(String(c))) reasons.push("campaign is a bare number (Meta id)");
-        if (!c) reasons.push("no campaign");
-        if (norm.known && (s !== norm.source || (m ?? "") !== norm.medium))
-          reasons.push(`old spelling, reported as ${norm.source} / ${norm.medium}`);
-        if (reasons.length) found.push({ where: "visits", source: s, medium: m, campaign: c, count: Number(n), reasons });
-      }
-    } catch {
-      // PostHog is optional here; the signup-level check above still stands.
-    }
-    setProblems(found);
+    setReport(body as Report);
   }
 
   useEffect(() => {
-    if (!isAuthorized) return;
-    loadLinks();
-    loadProblems();
+    if (isAuthorized) loadLinks();
   }, [isAuthorized]);
 
   useEffect(() => {
-    if (isAuthorized) loadSources(days);
-  }, [isAuthorized, days]);
+    if (isAuthorized) loadReport();
+  }, [isAuthorized, range, touch, internal]);
 
   function pickSource(s: UtmSource) {
     setSource(s);
@@ -269,33 +189,34 @@ export default function UTMLinks() {
       return;
     }
     setSaving(true);
-    const res = await authed("/api/utm-campaigns", {
-      method: "POST",
-      body: JSON.stringify({ ...draft, name: effectiveSlug }),
-    });
+    const res = await authed("/api/utm-campaigns", { method: "POST", body: JSON.stringify({ ...draft, name: effectiveSlug }) });
     const data = await res.json().catch(() => ({}));
     setSaving(false);
     if (!res.ok) {
       toast.error(data.error || "Could not save the link");
       return;
     }
-    const short = `https://${SHORT_HOST}${data.slug}`;
-    setJustSaved(short);
-    copy(short, "Saved. Short link copied.");
+    const saved: SavedLink = {
+      id: data.id, name: effectiveSlug, base_url: baseUrl, utm_source: source, utm_medium: medium, utm_campaign: campaign,
+      utm_content: content || null, utm_term: null, slug: data.slug, created_by: null, created_at: new Date().toISOString(),
+    };
+    setJustSaved(saved);
+    copy(shortUrl(data.slug), "Saved. Short link copied.");
     setContent("");
-    setTerm("");
     setSlug("");
     setSlugEdited(false);
     loadLinks();
+    loadReport();
   }
 
-  async function remove(id: string) {
-    const res = await authed("/api/utm-campaigns", { method: "DELETE", body: JSON.stringify({ id }) });
+  async function remove(l: SavedLink) {
+    if (!window.confirm(`Delete ${l.slug ? `/go/${l.slug}` : l.name}? The short link stops working.`)) return;
+    const res = await authed("/api/utm-campaigns", { method: "DELETE", body: JSON.stringify({ id: l.id }) });
     if (!res.ok) {
       toast.error("Could not delete");
       return;
     }
-    setLinks((prev) => prev.filter((l) => l.id !== id));
+    setLinks((prev) => prev.filter((x) => x.id !== l.id));
   }
 
   if (!isAuthorized) {
@@ -306,7 +227,7 @@ export default function UTMLinks() {
     );
   }
 
-  const taggedPct = sources && sources.total ? Math.round((sources.taggedSignups / sources.total) * 100) : 0;
+  const shownLinks = campaignFilter ? links.filter((l) => l.utm_campaign === campaignFilter) : links;
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -315,106 +236,125 @@ export default function UTMLinks() {
         <div>
           <h1 className="font-['Clash_Display'] text-2xl font-semibold text-neutral-900">UTM Links</h1>
           <p className="mt-1 font-['Satoshi'] text-sm text-neutral-500">
-            Every link we share, built from one naming scheme, with the signups and payments it brought in.
+            Every link we share for Stu, built from one naming scheme, with the clicks, sign-ups, onboarding and payments it brought in.
           </p>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
           {/* ── Builder ─────────────────────────────────────────────────── */}
           <Card title="Build a link">
             <div className="space-y-5 p-6">
               <Field label="Where should it land?">
-                <div className="mb-2 flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2">
                   {DESTINATIONS.map((d) => (
-                    <Pill key={d.url} label={d.label} active={baseUrl === d.url} onClick={() => setBaseUrl(d.url)} />
+                    <Pill key={d.key} label={d.label} active={dest === d.key} onClick={() => setDest(d.key)} />
                   ))}
+                  <Pill label="Custom URL" active={dest === CUSTOM} onClick={() => setDest(CUSTOM)} />
                 </div>
-                <input type="url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value.trim())} className={inputCls} />
-              </Field>
-
-              <Field label="Source: where the link is posted">
-                <div className="flex flex-wrap gap-2">
-                  {(Object.keys(UTM_SOURCES) as UtmSource[]).map((s) => (
-                    <Pill key={s} label={s} active={source === s} onClick={() => pickSource(s)} />
-                  ))}
-                </div>
-                <p className={hintCls}>{UTM_SOURCES[source]}</p>
-              </Field>
-
-              <Field label="Medium: how it reaches people">
-                <div className="flex flex-wrap gap-2">
-                  {SOURCE_MEDIUMS[source].map((m) => (
-                    <Pill key={m} label={m} active={medium === m} onClick={() => setMedium(m)} />
-                  ))}
-                </div>
-                <p className={hintCls}>{UTM_MEDIUMS[medium]}</p>
-              </Field>
-
-              {source === "meta" && (
-                <p className="rounded-lg border-2 border-amber-300 bg-amber-50 p-3 font-['Satoshi'] text-xs text-amber-900">
-                  For Meta ads you do not need a link per ad. Paste the URL template on the right into each ad
-                  once and every ad is tagged with its own campaign, ad set and ad names.
-                </p>
-              )}
-
-              <Field label="Campaign: what we are pushing">
-                <input
-                  list="utm-known-campaigns"
-                  value={campaign}
-                  onChange={(e) => setCampaign(cleanCampaign(e.target.value))}
-                  placeholder="jobreel_sep26"
-                  className={inputCls}
-                />
-                <datalist id="utm-known-campaigns">
-                  {knownCampaigns.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-                <p className={hintCls}>Topic plus month, lowercase with underscores. Reuse an existing one where it fits.</p>
+                {dest === CUSTOM ? (
+                  <input
+                    type="url"
+                    value={customUrl}
+                    onChange={(e) => setCustomUrl(e.target.value.trim())}
+                    placeholder="https://studojo.com/reports/... or https://platform.studojo.com/..."
+                    className={`${inputCls} mt-2`}
+                  />
+                ) : (
+                  <p className={hintCls}>
+                    {baseUrl}
+                    {dest === "start" && " (the site has no link that opens Stu by itself yet, so this is the homepage, where Start is the first button)"}
+                  </p>
+                )}
               </Field>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Content: which post, ad or person">
-                  <div className="flex gap-2">
-                    <input
-                      value={content}
-                      onChange={(e) => setContent(cleanContent(e.target.value))}
-                      placeholder="jeremy_post"
-                      className={`${inputCls} flex-1`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setContent((c) => (c ? `${c}_${todayMMDD()}` : todayMMDD()))}
-                      className="shrink-0 rounded-lg border-2 border-neutral-900 bg-white px-2 font-['Satoshi'] text-xs font-semibold"
-                      title="Append today's date"
-                    >
-                      +date
-                    </button>
-                  </div>
+                <Field label="Source: where it is posted">
+                  <select value={source} onChange={(e) => pickSource(e.target.value as UtmSource)} className={inputCls}>
+                    {(Object.keys(UTM_SOURCES) as UtmSource[]).map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <p className={hintCls}>{UTM_SOURCES[source]}</p>
                 </Field>
-                <Field label="Term: audience (optional)">
+                <Field label="Medium: the format">
+                  <select value={medium} onChange={(e) => setMedium(e.target.value as UtmMedium)} className={inputCls}>
+                    <optgroup label={`Usual for ${source}`}>
+                      {suggested.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Other">
+                      {otherMediums.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  <p className={hintCls}>{UTM_MEDIUMS[medium]}</p>
+                </Field>
+              </div>
+
+              {(source === "meta" || source === "google") && (
+                <p className="rounded-lg border-2 border-amber-300 bg-amber-50 p-3 font-['Satoshi'] text-xs text-amber-900">
+                  {source === "meta"
+                    ? "Meta adds fbclid to the link on its own, and the short link passes it on. For one link per ad, paste the URL parameters template (right) into each ad instead."
+                    : "Google adds gclid on its own when auto-tagging is on, and the short link passes it on."}
+                </p>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Campaign: what we are pushing">
                   <input
-                    value={term}
-                    onChange={(e) => setTerm(cleanContent(e.target.value))}
-                    placeholder="finance_students"
+                    list="utm-known-campaigns"
+                    value={campaign}
+                    onChange={(e) => setCampaign(cleanCampaign(e.target.value))}
+                    placeholder="launch-nov26"
                     className={inputCls}
                   />
+                  <datalist id="utm-known-campaigns">
+                    {knownCampaigns.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+                  <p className={hintCls}>Lowercase words joined by hyphens, topic plus month. Reuse one where it fits.</p>
+                </Field>
+                <Field label="Content: post, creative or person (optional)">
+                  <input
+                    value={content}
+                    onChange={(e) => setContent(cleanContent(e.target.value))}
+                    placeholder="jeremy-post-1102"
+                    className={inputCls}
+                  />
+                  <p className={hintCls}>Free: a post id, a creative, a person, a college. No spaces.</p>
                 </Field>
               </div>
 
               <Field label="Short link">
-                <div className="flex items-center rounded-lg border-2 border-neutral-200 bg-white focus-within:border-violet-500">
-                  <span className="pl-3 font-mono text-xs text-neutral-400">{SHORT_HOST}</span>
-                  <input
-                    value={effectiveSlug}
-                    onChange={(e) => {
-                      setSlugEdited(true);
-                      setSlug(cleanSlug(e.target.value));
-                    }}
-                    placeholder="jobreel-sep26-jeremy-post"
-                    className="w-full bg-transparent px-1 py-2 font-mono text-xs outline-none"
-                  />
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-1 items-center rounded-lg border-2 border-neutral-200 bg-white focus-within:border-violet-500">
+                    <span className="pl-3 font-mono text-xs text-neutral-400">{shortHost()}/go/</span>
+                    <input
+                      value={effectiveSlug}
+                      onChange={(e) => {
+                        setSlugEdited(true);
+                        setSlug(cleanSlug(e.target.value));
+                      }}
+                      placeholder="linkedin-post-launch-nov26"
+                      className="w-full bg-transparent px-1 py-2 font-mono text-xs outline-none"
+                    />
+                  </div>
+                  {slugEdited && (
+                    <button type="button" className={smallBtn} onClick={() => setSlugEdited(false)}>
+                      Auto
+                    </button>
+                  )}
                 </div>
+                <p className={hintCls}>Made from source, medium, content and campaign; edit it if you like. It is also the link's utm_id.</p>
               </Field>
 
               {errors.length > 0 && (
@@ -425,12 +365,10 @@ export default function UTMLinks() {
                 </ul>
               )}
 
-              {campaign && preview && (
-                <div className="rounded-lg border-2 border-violet-200 bg-violet-50 p-4">
-                  <p className="mb-1 font-['Satoshi'] text-xs font-semibold uppercase tracking-wide text-violet-600">
-                    Full URL
-                  </p>
-                  <p className="break-all font-mono text-xs text-violet-900">{preview}</p>
+              {preview && errors.length === 0 && (
+                <div className="space-y-2 rounded-lg border-2 border-violet-200 bg-violet-50 p-4">
+                  <UrlLine label="Short link (after saving)" value={shortUrl(effectiveSlug)} />
+                  <UrlLine label="Full URL" value={preview} />
                 </div>
               )}
 
@@ -441,20 +379,20 @@ export default function UTMLinks() {
               >
                 {saving ? "Saving…" : "Save and copy short link"}
               </button>
-
-              {justSaved && (
-                <div className="flex items-center justify-between gap-3 rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3">
-                  <span className="break-all font-mono text-xs text-emerald-900">{justSaved}</span>
-                  <button onClick={() => copy(justSaved)} className={smallBtn}>
-                    Copy
-                  </button>
-                </div>
-              )}
             </div>
           </Card>
 
-          {/* ── Meta template + dictionary ─────────────────────────────── */}
           <div className="space-y-6">
+            {justSaved?.slug && (
+              <Card title="Saved" subtitle={`/go/${justSaved.slug}`}>
+                <div className="space-y-3 p-6">
+                  <UrlLine label="Short link" value={shortUrl(justSaved.slug)} />
+                  <UrlLine label="Full URL" value={fullUrl(justSaved)} />
+                  <Qr text={shortUrl(justSaved.slug)} name={justSaved.slug} />
+                </div>
+              </Card>
+            )}
+
             <Card title="Meta ads: URL parameters" subtitle="Ads Manager > each ad > Tracking > URL parameters">
               <div className="space-y-3 p-6">
                 <p className="break-all rounded-lg bg-neutral-900 p-3 font-mono text-xs text-emerald-300">{META_URL_TEMPLATE}</p>
@@ -462,196 +400,232 @@ export default function UTMLinks() {
                   Copy template
                 </button>
                 <p className={hintCls}>
-                  Name Meta campaigns, ad sets and ads in lowercase with underscores (jobreel_sep26), because Meta
-                  pastes the names in as they are. Without this template Meta tags ads as ig/paid with numeric ids.
+                  Name Meta campaigns in lowercase with hyphens (launch-nov26): Meta pastes the names in as they are. Meta adds fbclid itself.
                 </p>
               </div>
             </Card>
 
-            <Card title="The dictionary" subtitle="The builder only allows these values">
+            <Card title="The naming scheme" subtitle="The builder only allows these sources and mediums">
               <div className="grid gap-6 p-6 sm:grid-cols-2">
                 <DictList title="Sources" items={UTM_SOURCES} />
                 <DictList title="Mediums" items={UTM_MEDIUMS} />
               </div>
               <p className="px-6 pb-6 font-['Satoshi'] text-xs text-neutral-500">
-                People go in <b>content</b>, never in source or medium: ambassador / referral / amb_vanshika.
-                Emails are tagged automatically as email / lifecycle / &lt;template&gt;.
+                Campaign: lowercase-hyphen (launch-nov26). People, posts and colleges go in <b>content</b>, never in source or medium.
               </p>
             </Card>
           </div>
         </div>
 
-        {/* ── Saved links ────────────────────────────────────────────────── */}
-        <Card title="Saved links" subtitle="Clicks count visits through the short link, bots excluded. Signups and payers are first touch.">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left font-['Satoshi'] text-sm">
-              <thead className="border-b-2 border-neutral-100 text-xs uppercase tracking-wide text-neutral-400">
-                <tr>
-                  <th className="px-6 py-3">Link</th>
-                  <th className="px-3 py-3">Tags</th>
-                  <th className="px-3 py-3 text-right">Clicks</th>
-                  <th className="px-3 py-3 text-right">Signups</th>
-                  <th className="px-3 py-3 text-right">Payers</th>
-                  <th className="px-3 py-3 text-right">Revenue</th>
-                  <th className="px-6 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-100">
-                {linksLoading && (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-neutral-400">Loading…</td>
-                  </tr>
-                )}
-                {!linksLoading && links.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-neutral-400">No links yet. Build one above.</td>
-                  </tr>
-                )}
-                {links.map((l) => {
-                  const s = stats[l.id];
-                  const short = l.slug ? `https://${SHORT_HOST}${l.slug}` : null;
-                  return (
-                    <tr key={l.id} className="align-top">
-                      <td className="px-6 py-3">
-                        <p className="font-semibold text-neutral-900">{l.slug ? `/go/${l.slug}` : l.name}</p>
-                        <p className="max-w-[260px] truncate text-xs text-neutral-400" title={l.base_url}>
-                          {l.base_url.replace(/^https:\/\//, "")}
-                        </p>
-                        <p className="text-xs text-neutral-400">
-                          {new Date(l.created_at).toLocaleDateString()}
-                          {l.created_by ? ` · ${l.created_by}` : ""}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs text-neutral-600">
-                        {l.utm_source} / {l.utm_medium}
-                        <br />
-                        {l.utm_campaign}
-                        {l.utm_content ? ` · ${l.utm_content}` : ""}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums">
-                        {short ? (s?.clicks ?? 0) : <span className="text-neutral-300">n/a</span>}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums">{s?.signups ?? 0}</td>
-                      <td className="px-3 py-3 text-right tabular-nums">{s?.payers ?? 0}</td>
-                      <td className="px-3 py-3 text-right tabular-nums">{s ? money(s.inr, s.usd) : "0"}</td>
-                      <td className="whitespace-nowrap px-6 py-3 text-right">
-                        {short && (
-                          <button onClick={() => copy(short)} className={`${smallBtn} mr-2`}>
-                            Copy short
-                          </button>
-                        )}
-                        <button onClick={() => copy(fullUrl(l))} className={`${smallBtn} mr-2`}>
-                          Copy full
-                        </button>
-                        <button onClick={() => remove(l.id)} className="text-neutral-300 hover:text-red-500" title="Delete">
-                          ✕
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        {/* ── Where signups came from ────────────────────────────────────── */}
+        {/* ── Report ────────────────────────────────────────────────────── */}
         <Card
-          title="Where signups came from"
-          subtitle="Every signup in the window, grouped by channel. Old spellings are folded in (ig/paid counts as meta/paid). Untagged visits are grouped by the site that sent them."
+          title={view === "links" ? "Links" : "Campaigns"}
+          subtitle={`Clicks through the short link (bots apart), website visitors who arrived with the link, and people who joined Stu in the range, credited by their ${touch} touch (utm_id = the short link, else matching tags). Onboarded, paid and revenue follow the Stu dashboards: real payments only, internal accounts ${internal ? "included" : "left out"}. Days are IST.`}
           right={
-            <div className="flex gap-2">
-              {[7, 30, 90].map((d) => (
-                <Pill key={d} label={`${d}d`} active={days === d} onClick={() => setDays(d)} />
+            <div className="flex flex-wrap items-center gap-2">
+              <Pill label="Links" active={view === "links"} onClick={() => setView("links")} />
+              <Pill label="Campaigns" active={view === "campaigns"} onClick={() => setView("campaigns")} />
+              <span className="mx-1 h-5 w-px bg-neutral-200" />
+              {RANGES.map((r) => (
+                <Pill key={r.key} label={r.label} active={range === r.key} onClick={() => setRange(r.key)} />
               ))}
+              <span className="mx-1 h-5 w-px bg-neutral-200" />
+              <Pill label="First touch" active={touch === "first"} onClick={() => setTouch("first")} />
+              <Pill label="Last touch" active={touch === "last"} onClick={() => setTouch("last")} />
+              <label className="ml-1 flex items-center gap-1 font-['Satoshi'] text-xs text-neutral-600">
+                <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> include internal
+              </label>
             </div>
           }
         >
-          {!sources ? (
-            <p className="px-6 py-8 text-center font-['Satoshi'] text-sm text-neutral-400">Loading…</p>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-3 px-6 pt-6 sm:grid-cols-4">
-                <MiniStat label="Signups" value={sources.total} />
-                <MiniStat label="Arrived tagged" value={`${taggedPct}%`} />
-                <MiniStat label="Tagged signups" value={sources.taggedSignups} />
-                <MiniStat label="Before capture existed" value={sources.notCaptured} />
-              </div>
-              <div className="overflow-x-auto p-6">
-                <table className="w-full min-w-[640px] text-left font-['Satoshi'] text-sm">
-                  <thead className="border-b-2 border-neutral-100 text-xs uppercase tracking-wide text-neutral-400">
-                    <tr>
-                      <th className="py-2">Source</th>
-                      <th className="py-2">Medium</th>
-                      <th className="py-2">Campaign</th>
-                      <th className="py-2 text-right">Signups</th>
-                      <th className="py-2 text-right">Payers</th>
-                      <th className="py-2 text-right">Revenue</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-100">
-                    {sources.rows.map((r) => (
-                      <tr key={`${r.source}|${r.medium}|${r.campaign}|${r.tagged}`}>
-                        <td className="py-2 font-medium text-neutral-900">
-                          {r.source}
-                          {!r.tagged && r.source !== "(not captured)" && (
-                            <span className="ml-2 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-500">
-                              untagged
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 text-neutral-600">{r.medium}</td>
-                        <td className="py-2 font-mono text-xs text-neutral-600">{r.campaign || "–"}</td>
-                        <td className="py-2 text-right tabular-nums">{r.signups}</td>
-                        <td className="py-2 text-right tabular-nums">{r.payers}</td>
-                        <td className="py-2 text-right tabular-nums">{money(r.inr, r.usd)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
+          {reportError && <p className="px-6 pt-4 font-['Satoshi'] text-sm text-red-600">Report failed: {reportError}</p>}
+          {report && (
+            <div className="grid grid-cols-2 gap-3 px-6 pt-6 sm:grid-cols-4">
+              <MiniStat label="Joined Stu in range" value={report.totals.signups} />
+              <MiniStat label="Came through a link" value={report.totals.viaLink} />
+              <MiniStat label="Arrived tagged" value={pctText(report.totals.tagged, report.totals.signups)} />
+              <MiniStat label="Tagged visitors" value={report.totals.visitors} />
+            </div>
           )}
-        </Card>
+          {report && !report.live.clicks && (
+            <p className="px-6 pt-3 font-['Satoshi'] text-xs text-neutral-400">No short link has been clicked here yet (utm_link_clicks is created on the first click).</p>
+          )}
 
-        {/* ── Tags breaking the rules ────────────────────────────────────── */}
-        <Card
-          title="Tags breaking the rules"
-          subtitle="Tags seen on visits (last 30 days) or stored on signups (last 90 days) that do not match the dictionary. Fix the link that produced them."
-        >
-          {!problems ? (
-            <p className="px-6 py-8 text-center font-['Satoshi'] text-sm text-neutral-400">Checking…</p>
-          ) : problems.length === 0 ? (
-            <p className="px-6 py-8 text-center font-['Satoshi'] text-sm text-emerald-700">Every tag matches the dictionary.</p>
-          ) : (
+          {view === "links" ? (
             <div className="overflow-x-auto p-6">
-              <table className="w-full min-w-[640px] text-left font-['Satoshi'] text-sm">
+              <div className="mb-3 flex items-center gap-2 font-['Satoshi'] text-xs text-neutral-500">
+                Campaign
+                <select value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)} className="rounded border border-neutral-300 px-2 py-1">
+                  <option value="">all</option>
+                  {knownCampaigns.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <table className="w-full min-w-[1100px] text-left font-['Satoshi'] text-sm">
                 <thead className="border-b-2 border-neutral-100 text-xs uppercase tracking-wide text-neutral-400">
                   <tr>
-                    <th className="py-2">Seen on</th>
-                    <th className="py-2">source / medium / campaign</th>
-                    <th className="py-2 text-right">Count</th>
-                    <th className="py-2 pl-4">Problem</th>
+                    <th className="py-3 pr-3">Link</th>
+                    <th className="px-2 py-3">Tags</th>
+                    <StatHeads />
+                    <th className="py-3 pl-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
-                  {problems.map((p, i) => (
-                    <tr key={i} className="align-top">
-                      <td className="py-2 text-xs text-neutral-500">{p.where}</td>
-                      <td className="py-2 font-mono text-xs text-neutral-800">
-                        {p.source ?? "–"} / {p.medium ?? "–"} / {p.campaign ?? "–"}
-                      </td>
-                      <td className="py-2 text-right tabular-nums">{p.count}</td>
-                      <td className="py-2 pl-4 text-xs text-red-700">{p.reasons.join("; ")}</td>
+                  {linksLoading && (
+                    <tr>
+                      <td colSpan={14} className="py-8 text-center text-neutral-400">Loading…</td>
+                    </tr>
+                  )}
+                  {!linksLoading && shownLinks.length === 0 && (
+                    <tr>
+                      <td colSpan={14} className="py-8 text-center text-neutral-400">No links yet. Build one above.</td>
+                    </tr>
+                  )}
+                  {shownLinks.map((l) => {
+                    const s = report?.links[l.id];
+                    const short = l.slug ? shortUrl(l.slug) : null;
+                    return (
+                      <Fragment key={l.id}>
+                        <tr className="align-top">
+                          <td className="py-3 pr-3">
+                            <p className="font-semibold text-neutral-900">{l.slug ? `/go/${l.slug}` : l.name}</p>
+                            <p className="max-w-[240px] truncate text-xs text-neutral-400" title={l.base_url}>
+                              {l.base_url.replace(/^https:\/\//, "")}
+                            </p>
+                            <p className="text-xs text-neutral-400">
+                              {new Date(l.created_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}
+                              {l.created_by ? `, ${l.created_by}` : ""}
+                            </p>
+                          </td>
+                          <td className="px-2 py-3 font-mono text-xs text-neutral-600">
+                            {l.utm_source} / {l.utm_medium}
+                            <br />
+                            {l.utm_campaign}
+                            {l.utm_content ? ` / ${l.utm_content}` : ""}
+                          </td>
+                          <StatCells s={s} hasShort={!!short} />
+                          <td className="whitespace-nowrap py-3 pl-3 text-right">
+                            {short && (
+                              <button onClick={() => copy(short)} className={`${smallBtn} mr-1`}>
+                                Short
+                              </button>
+                            )}
+                            <button onClick={() => copy(fullUrl(l))} className={`${smallBtn} mr-1`}>
+                              Full
+                            </button>
+                            {short && (
+                              <button onClick={() => setQrFor(qrFor === l.id ? null : l.id)} className={`${smallBtn} mr-1`}>
+                                QR
+                              </button>
+                            )}
+                            <button onClick={() => remove(l)} className="px-1 text-neutral-300 hover:text-red-500" title="Delete">
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                        {qrFor === l.id && short && (
+                          <tr>
+                            <td colSpan={14} className="bg-neutral-50 py-4">
+                              <Qr text={short} name={l.slug!} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="overflow-x-auto p-6">
+              <table className="w-full min-w-[960px] text-left font-['Satoshi'] text-sm">
+                <thead className="border-b-2 border-neutral-100 text-xs uppercase tracking-wide text-neutral-400">
+                  <tr>
+                    <th className="py-3 pr-3">Campaign</th>
+                    <th className="px-2 py-3 text-right">Links</th>
+                    <StatHeads />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {!report && (
+                    <tr>
+                      <td colSpan={13} className="py-8 text-center text-neutral-400">Loading…</td>
+                    </tr>
+                  )}
+                  {report?.campaigns.length === 0 && (
+                    <tr>
+                      <td colSpan={13} className="py-8 text-center text-neutral-400">No campaigns yet.</td>
+                    </tr>
+                  )}
+                  {report?.campaigns.map((c) => (
+                    <tr key={c.campaign}>
+                      <td className="py-3 pr-3 font-mono text-xs text-neutral-900">{c.campaign}</td>
+                      <td className="px-2 py-3 text-right tabular-nums">{c.links}</td>
+                      <StatCells s={c} hasShort={c.links > 0} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <p className="mt-3 font-['Satoshi'] text-xs text-neutral-400">
+                A campaign counts everyone who arrived with its utm_campaign, through a short link or not (Meta ads tagged by the template too).
+              </p>
             </div>
           )}
         </Card>
       </main>
     </div>
+  );
+}
+
+// ── Report cells ───────────────────────────────────────────────────────────
+
+function StatHeads() {
+  const th = "px-2 py-3 text-right";
+  return (
+    <>
+      <th className={th}>Clicks</th>
+      <th className={th}>Visitors</th>
+      <th className={th}>Sign-ups</th>
+      <th className={th}>Onboarded</th>
+      <th className={th}>Paid</th>
+      <th className={th}>Revenue</th>
+      <th className={th} title="Sign-ups per click">Click to sign-up</th>
+      <th className={th}>Sign-up to onboarded</th>
+      <th className={th}>Sign-up to paid</th>
+    </>
+  );
+}
+
+function StatCells({ s, hasShort }: { s?: Stats; hasShort: boolean }) {
+  const td = "px-2 py-3 text-right tabular-nums";
+  if (!s) {
+    return (
+      <>
+        {Array.from({ length: 9 }, (_, i) => (
+          <td key={i} className={`${td} text-neutral-300`}>
+            {i === 0 && !hasShort ? "n/a" : "0"}
+          </td>
+        ))}
+      </>
+    );
+  }
+  return (
+    <>
+      <td className={td} title={s.botClicks ? `${s.botClicks} bot or link-preview hits not counted` : undefined}>
+        {hasShort ? s.clicks : <span className="text-neutral-300">n/a</span>}
+      </td>
+      <td className={td}>{s.visitors}</td>
+      <td className={`${td} font-semibold`}>{s.signups}</td>
+      <td className={td}>{s.onboarded}</td>
+      <td className={td}>{s.paid}</td>
+      <td className={td}>{inr(s.revenue)}</td>
+      <td className={`${td} text-neutral-500`}>{hasShort ? pctText(s.signups, s.clicks) : "n/a"}</td>
+      <td className={`${td} text-neutral-500`}>{pctText(s.onboarded, s.signups)}</td>
+      <td className={`${td} text-neutral-500`}>{pctText(s.paid, s.signups)}</td>
+    </>
   );
 }
 
@@ -663,17 +637,48 @@ const hintCls = "mt-1.5 font-['Satoshi'] text-xs text-neutral-400";
 const smallBtn =
   "rounded border border-neutral-300 px-2 py-1 font-['Satoshi'] text-xs text-neutral-600 hover:border-violet-400 hover:text-violet-600";
 
-function Card({
-  title,
-  subtitle,
-  right,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function UrlLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <p className="font-['Satoshi'] text-xs font-semibold uppercase tracking-wide text-violet-600">{label}</p>
+        <p className="break-all font-mono text-xs text-violet-900">{value}</p>
+      </div>
+      <button type="button" onClick={() => copy(value)} className={`${smallBtn} shrink-0 bg-white`}>
+        Copy
+      </button>
+    </div>
+  );
+}
+
+/** A QR code of a short link, drawn in the browser, with a PNG download. */
+function Qr({ text, name }: { text: string; name: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    QRCode.toDataURL(text, { margin: 2, width: 480, errorCorrectionLevel: "M" }).then(
+      (url) => live && setSrc(url),
+      () => live && setSrc(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [text]);
+  if (!src) return <p className={hintCls}>Drawing QR code…</p>;
+  return (
+    <div className="flex items-center gap-4">
+      <img src={src} alt={`QR code for ${text}`} width={140} height={140} className="rounded border border-neutral-200 bg-white" />
+      <div className="space-y-2">
+        <p className="break-all font-mono text-xs text-neutral-600">{text}</p>
+        <a href={src} download={`qr-${name}.png`} className={`${smallBtn} inline-block`}>
+          Download PNG
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function Card({ title, subtitle, right, children }: { title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b-2 border-neutral-900 px-6 py-4">
@@ -730,9 +735,7 @@ function DictList({ title, items }: { title: string; items: Record<string, strin
 function MiniStat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-3 text-center">
-      <p className="font-['Clash_Display'] text-2xl font-bold text-violet-700">
-        {typeof value === "number" ? value.toLocaleString() : value}
-      </p>
+      <p className="font-['Clash_Display'] text-2xl font-bold text-violet-700">{typeof value === "number" ? value.toLocaleString("en-IN") : value}</p>
       <p className="font-['Satoshi'] text-xs text-neutral-400">{label}</p>
     </div>
   );

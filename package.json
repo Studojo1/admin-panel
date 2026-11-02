@@ -8,7 +8,7 @@
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
     "check:api-auth": "node scripts/check-api-auth.mjs",
-    "test": "node --test scripts/check-api-auth.test.mjs scripts/health-watch.test.mjs scripts/email-pause.test.mjs scripts/stu-model.test.mjs"
+    "test": "node --test scripts/check-api-auth.test.mjs scripts/health-watch.test.mjs scripts/email-pause.test.mjs scripts/stu-model.test.mjs scripts/utm-attribution.test.mjs"
   },
   "dependencies": {
     "@react-router/node": "7.12.0",
@@ -22,6 +22,7 @@
     "jose": "^6.1.3",
     "nodemailer": "^8.0.11",
     "pg": "^8.18.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.3",
     "react-chartjs-2": "^5.2.0",
     "react-dom": "^19.2.3",
@@ -36,6 +37,7 @@
     "@types/node": "^22",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.16.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "tailwindcss": "^4.1.13",

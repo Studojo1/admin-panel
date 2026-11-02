@@ -1,7 +1,7 @@
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 import { requireAdmin } from "~/lib/auth-helper.server";
-import { validateLink, toSlugPart } from "~/lib/utm-dictionary";
+import { autoSlug, validateLink } from "~/lib/utm-dictionary";
 import type { Route } from "./+types/api.utm-campaigns";
 
 // Links built here are served publicly as studojo.com/go/<slug> by the
@@ -69,17 +69,16 @@ export async function action({ request }: Route.ActionArgs) {
 
   const body = await request.json().catch(() => ({}) as Record<string, unknown>);
   const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-  const link = {
+  const tags = {
     base_url: str(body.base_url),
     utm_source: str(body.utm_source).toLowerCase(),
     utm_medium: str(body.utm_medium).toLowerCase(),
     utm_campaign: str(body.utm_campaign).toLowerCase(),
     utm_content: str(body.utm_content).toLowerCase() || null,
     utm_term: str(body.utm_term).toLowerCase() || null,
-    slug:
-      str(body.slug).toLowerCase() ||
-      toSlugPart([str(body.utm_campaign), str(body.utm_content)].filter(Boolean).join("-")),
   };
+  // The short link is also the link's utm_id (studojo.com/go/<slug> adds utm_id=<slug>).
+  const link = { ...tags, slug: str(body.slug).toLowerCase() || autoSlug(tags) };
 
   // The browser checks the same rules, but this is the one that counts.
   const errors = validateLink(link);

@@ -1,65 +1,88 @@
-/** The one UTM naming scheme for every Studojo link.
+/** The one UTM naming scheme for every Studojo link (relaunch, 2 Nov 2026).
  *
  * Used by the builder (to offer only these values), by the API (to refuse
  * anything else), and by the reports (to fold old spellings into one channel).
  *
- * Tags were being typed freehand, so the same Meta ads arrived as both
- * "meta" and "ig/paid", a person's name ended up in utm_medium, and campaign
- * names were sometimes bare numeric ids. Keeping the vocabulary in one file is
- * what stops that recurring.
+ * The convention:
+ *   source    where the link is posted, from UTM_SOURCES
+ *   medium    the format or placement, from UTM_MEDIUMS (paid for anything we pay for)
+ *   campaign  lowercase words joined by hyphens, topic plus month: launch-nov26
+ *   content   free: a post id, a creative, a person, a college (lowercase, no spaces)
+ *
+ * Every short link (studojo.com/go/<slug>) also carries utm_id=<slug>, so a
+ * sign-up is tied to the exact link it came through.
  */
 
 export const UTM_SOURCES = {
-  meta: "Meta ads (Facebook + Instagram paid)",
-  instagram: "Instagram organic: bio, stories, posts, DMs",
-  linkedin: "LinkedIn posts, comments, DMs, ads",
+  linkedin: "LinkedIn posts, comments, DMs",
+  instagram: "Instagram bio, stories, reels, DMs",
   whatsapp: "WhatsApp groups and chats",
-  email: "Our own emails (tagged automatically)",
-  ambassador: "Campus ambassadors",
-  college: "College partnerships, placement cells",
-  youtube: "YouTube",
-  x: "X / Twitter",
+  youtube: "YouTube videos and descriptions",
+  x: "X (Twitter)",
+  reddit: "Reddit posts and comments",
+  email: "Emails we send, signatures, newsletters",
   google: "Google ads",
+  meta: "Meta ads (Facebook and Instagram paid)",
+  college: "Colleges, placement cells, campus ambassadors",
+  referral: "A person sharing our link",
   partner: "Partner or affiliate sites",
+  offline: "Posters, flyers, events (QR codes)",
 } as const;
 
 export const UTM_MEDIUMS = {
+  organic: "Unpaid, no better fit below",
   paid: "Anything we pay for",
-  organic: "Our own unpaid posts",
+  post: "A feed post",
   dm: "One-to-one messages",
-  community: "Groups and communities",
-  lifecycle: "Lifecycle and nurture email",
-  referral: "Someone else sharing our link",
-  event: "Webinars, talks, campus events",
+  bio: "Profile bio link",
+  story: "A story",
+  reel: "A reel or short video",
+  group: "Groups and communities",
+  ambassador: "Shared by a campus ambassador",
+  poster: "A printed poster or flyer (QR)",
+  newsletter: "A newsletter issue",
 } as const;
 
 export type UtmSource = keyof typeof UTM_SOURCES;
 export type UtmMedium = keyof typeof UTM_MEDIUMS;
 
-/** Which mediums make sense for each source, first one is the default. */
+/** The usual mediums for each source, first one is the default. Any medium is allowed. */
 export const SOURCE_MEDIUMS: Record<UtmSource, UtmMedium[]> = {
-  meta: ["paid"],
-  instagram: ["organic", "dm"],
-  linkedin: ["organic", "dm", "paid"],
-  whatsapp: ["community", "dm"],
-  email: ["lifecycle"],
-  ambassador: ["referral"],
-  college: ["event", "referral"],
+  linkedin: ["post", "dm", "organic", "paid"],
+  instagram: ["bio", "story", "reel", "post", "dm", "paid"],
+  whatsapp: ["group", "dm"],
   youtube: ["organic", "paid"],
-  x: ["organic"],
+  x: ["post", "dm"],
+  reddit: ["post", "organic"],
+  email: ["organic", "newsletter", "dm"],
   google: ["paid"],
-  partner: ["referral"],
+  meta: ["paid"],
+  college: ["ambassador", "poster", "organic"],
+  referral: ["dm", "organic"],
+  partner: ["organic", "paid"],
+  offline: ["poster"],
 };
 
-/** Paste into Meta Ads Manager > ad > Tracking > URL parameters. */
+/** Paste into Meta Ads Manager > ad > Tracking > URL parameters. Meta adds fbclid on its own. */
 export const META_URL_TEMPLATE =
   "utm_source=meta&utm_medium=paid&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}";
 
-// lowercase words joined by underscores, e.g. jobreel_sep26
-export const CAMPAIGN_RE = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
-// who/what + when, e.g. jeremy_post_0927, amb_vanshika
-export const CONTENT_RE = /^[a-z0-9]+(?:[_-][a-z0-9]+)*$/;
+// lowercase words joined by hyphens, e.g. launch-nov26
+export const CAMPAIGN_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// free but tidy: a post id, a creative, a person, e.g. jeremy-post-1102, reel-3, iit-bombay
+export const CONTENT_RE = /^[a-z0-9]+(?:[_.-][a-z0-9]+)*$/;
 export const SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,79}$/;
+
+/** Where a link may land: the site and the product (and their staging twins on studojo.pro, for testing). */
+export const DESTINATION_HOSTS = ["studojo.com", "platform.studojo.com", "studojo.pro", "platform.studojo.pro"] as const;
+
+/** The builder's ready-made destinations. The site has no "open Stu" intent on a link, so Start with Stu is the homepage, whose first button starts Stu. */
+export const DESTINATIONS = [
+  { key: "home", label: "Homepage", url: "https://studojo.com/" },
+  { key: "start", label: "Start with Stu", url: "https://studojo.com/" },
+  { key: "blog", label: "Blog index", url: "https://studojo.com/blog" },
+  { key: "reports", label: "Reports index", url: "https://studojo.com/reports" },
+] as const;
 
 export function isSource(v: string): v is UtmSource {
   return Object.prototype.hasOwnProperty.call(UTM_SOURCES, v);
@@ -68,25 +91,56 @@ export function isMedium(v: string): v is UtmMedium {
   return Object.prototype.hasOwnProperty.call(UTM_MEDIUMS, v);
 }
 
-export function toSlugPart(v: string): string {
+export function toSlugPart(v: string, max = 40): string {
   return v
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
+    .slice(0, max)
+    .replace(/-+$/g, "");
 }
+
+/** The default short link: source-medium[-content]-campaign, e.g. linkedin-post-launch-nov26. */
+export function autoSlug(l: { utm_source?: string; utm_medium?: string; utm_campaign?: string; utm_content?: string | null }): string {
+  return toSlugPart([l.utm_source, l.utm_medium, l.utm_content, l.utm_campaign].filter(Boolean).join("-"), 80);
+}
+
+/** Typed text kept inside the convention as it is typed. */
+export const cleanCampaign = (v: string) => v.toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-{2,}/g, "-");
+export const cleanContent = (v: string) => v.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_.-]/g, "");
+export const cleanSlug = (v: string) => v.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, "");
 
 export function isStudojoUrl(v: string): boolean {
   try {
     const u = new URL(v);
-    const h = u.hostname;
-    return (
-      u.protocol === "https:" &&
-      (h === "studojo.com" || h.endsWith(".studojo.com") || h === "studojo.pro" || h.endsWith(".studojo.pro"))
-    );
+    return u.protocol === "https:" && (DESTINATION_HOSTS as readonly string[]).includes(u.hostname);
   } catch {
     return false;
+  }
+}
+
+/** The full tagged URL a link stands for. With a slug it carries utm_id=<slug>, as the short link's redirect does. */
+export function fullUrl(l: {
+  base_url: string;
+  utm_source: string;
+  utm_medium: string;
+  utm_campaign: string;
+  utm_content?: string | null;
+  utm_term?: string | null;
+  slug?: string | null;
+}): string {
+  try {
+    const u = new URL(l.base_url);
+    u.searchParams.set("utm_source", l.utm_source);
+    u.searchParams.set("utm_medium", l.utm_medium);
+    u.searchParams.set("utm_campaign", l.utm_campaign);
+    if (l.utm_content) u.searchParams.set("utm_content", l.utm_content);
+    if (l.utm_term) u.searchParams.set("utm_term", l.utm_term);
+    if (l.slug) u.searchParams.set("utm_id", l.slug);
+    return u.toString();
+  } catch {
+    return "";
   }
 }
 
@@ -101,17 +155,17 @@ export function validateLink(l: {
   slug?: string | null;
 }): string[] {
   const errs: string[] = [];
-  if (!l.base_url || !isStudojoUrl(l.base_url)) errs.push("Destination must be an https studojo.com page.");
-  if (!l.utm_source || !isSource(l.utm_source)) errs.push("Source must be one from the dictionary.");
-  if (!l.utm_medium || !isMedium(l.utm_medium)) errs.push("Medium must be one from the dictionary.");
+  if (!l.base_url || !isStudojoUrl(l.base_url)) errs.push("Destination must be an https page on studojo.com or platform.studojo.com.");
+  if (!l.utm_source || !isSource(l.utm_source)) errs.push("Source must be one from the list.");
+  if (!l.utm_medium || !isMedium(l.utm_medium)) errs.push("Medium must be one from the list.");
   if (!l.utm_campaign || !CAMPAIGN_RE.test(l.utm_campaign) || l.utm_campaign.length > 60)
-    errs.push("Campaign must be lowercase words joined by underscores, e.g. jobreel_sep26.");
-  else if (/^\d+$/.test(l.utm_campaign)) errs.push("Campaign cannot be a bare number. Name it, e.g. jobreel_sep26.");
-  if (l.utm_content && (!CONTENT_RE.test(l.utm_content) || l.utm_content.length > 60))
-    errs.push("Content must be lowercase, e.g. jeremy_post_0927.");
-  if (l.utm_term && (!CONTENT_RE.test(l.utm_term) || l.utm_term.length > 60))
-    errs.push("Term must be lowercase, e.g. finance_students.");
-  if (l.slug && !SLUG_RE.test(l.slug)) errs.push("Short link may only use a-z, 0-9, - and _.");
+    errs.push("Campaign must be lowercase words joined by hyphens, e.g. launch-nov26.");
+  else if (/^\d+$/.test(l.utm_campaign)) errs.push("Campaign cannot be a bare number. Name it, e.g. launch-nov26.");
+  if (l.utm_content && (!CONTENT_RE.test(l.utm_content) || l.utm_content.length > 80))
+    errs.push("Content must be lowercase with no spaces, e.g. jeremy-post-1102.");
+  if (l.utm_term && (!CONTENT_RE.test(l.utm_term) || l.utm_term.length > 80))
+    errs.push("Term must be lowercase with no spaces, e.g. final-year.");
+  if (!l.slug || !SLUG_RE.test(l.slug)) errs.push("Short link may only use a-z, 0-9, - and _ (80 at most).");
   return errs;
 }
 
@@ -127,6 +181,7 @@ const SOURCE_ALIASES: Record<string, string> = {
   twitter: "x", x: "x", "t.co": "x",
   mail: "email", email: "email", newsletter: "email",
   google: "google", ambassador: "ambassador", college: "college", partner: "partner",
+  reddit: "reddit", referral: "referral", offline: "offline",
 };
 
 const MEDIUM_ALIASES: Record<string, string> = {
