@@ -6,7 +6,7 @@ import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
 import type { Route } from "./+types/tickets";
 
-export function meta({}: Route.MetaArgs) {
+export function meta(_args: Route.MetaArgs) {
   return [{ title: "Tickets – Admin Panel" }];
 }
 
@@ -58,12 +58,37 @@ const STATUS_BADGE: Record<string, string> = {
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
+  account: "Account",
+  billing: "Billing and credits",
+  bug: "Bug",
+  sign_in: "Sign-in",
+  whatsapp: "WhatsApp linking",
+  data_deletion: "Delete my data",
+  human: "Talk to a person",
+  feature_request: "Feature request",
   campaign_broken: "Campaign broken",
   campaign_changes: "Campaign changes",
   website_broken: "Site broken",
   info_request: "Info request",
   other: "Other",
 };
+
+const SOURCE_FILTERS = [
+  { label: "All", value: "all" },
+  { label: "Stu", value: "stu" },
+  { label: "Contact form", value: "contact_form" },
+  { label: "Other", value: "other" },
+];
+
+const SOURCE_LABELS: Record<string, string> = {
+  stu: "Stu",
+  contact_form: "Contact form",
+};
+
+function previewOf(t: TicketRow): string {
+  const s = t.source === "stu" ? t.context?.summary : null;
+  return typeof s === "string" && s.trim() ? s : t.first_message;
+}
 
 function relativeTime(iso: string): string {
   const t = new Date(iso).getTime();
@@ -83,6 +108,7 @@ export default function TicketsList() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("open");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
@@ -126,6 +152,14 @@ export default function TicketsList() {
     );
   }
   if (!isAuthorized) return null;
+
+  const visible = tickets.filter((t) =>
+    sourceFilter === "all"
+      ? true
+      : sourceFilter === "other"
+        ? t.source !== "stu" && t.source !== "contact_form"
+        : t.source === sourceFilter,
+  );
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -174,6 +208,22 @@ export default function TicketsList() {
                 </button>
               ))}
             </div>
+            <div className="flex gap-1.5">
+              {SOURCE_FILTERS.map((f) => (
+                <button
+                  key={f.value}
+                  type="button"
+                  onClick={() => setSourceFilter(f.value)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                    sourceFilter === f.value
+                      ? "bg-violet-600 text-white"
+                      : "bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-100"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
             <select
               value={priorityFilter}
               onChange={(e) => setPriorityFilter(e.target.value)}
@@ -193,9 +243,9 @@ export default function TicketsList() {
           )}
 
           <div className="rounded-xl border border-neutral-200 bg-white overflow-hidden">
-            {loading && tickets.length === 0 ? (
+            {loading && visible.length === 0 ? (
               <div className="p-8 text-center text-neutral-500">Loading…</div>
-            ) : tickets.length === 0 ? (
+            ) : visible.length === 0 ? (
               <div className="p-8 text-center text-neutral-500">
                 No tickets in this filter.
               </div>
@@ -212,7 +262,7 @@ export default function TicketsList() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
-                  {tickets.map((t) => (
+                  {visible.map((t) => (
                     <tr
                       key={t.id}
                       className={`hover:bg-violet-50/40 transition-colors ${
@@ -244,8 +294,10 @@ export default function TicketsList() {
                           <div className="font-semibold text-neutral-900">
                             {CATEGORY_LABELS[t.category] || t.category}
                           </div>
-                          <div className="text-xs text-neutral-500">
-                            via {t.source.replace("_", " ")}
+                          <div className="mt-0.5">
+                            <span className="inline-flex items-center rounded-md border border-violet-300 bg-violet-50 px-1.5 py-0.5 text-[11px] font-bold text-violet-800">
+                              {SOURCE_LABELS[t.source] || t.source.replace("_", " ")}
+                            </span>
                           </div>
                         </Link>
                       </td>
@@ -264,7 +316,7 @@ export default function TicketsList() {
                           to={`/tickets/${t.id}`}
                           className="block text-neutral-700 line-clamp-2"
                         >
-                          {t.first_message}
+                          {previewOf(t)}
                         </Link>
                         <div className="text-xs text-neutral-400 mt-0.5">
                           {t.message_count} message{t.message_count === 1 ? "" : "s"}
