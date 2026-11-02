@@ -80,6 +80,9 @@ jobs:
             --overwrite-existing
 
       - name: Secrets as secretKeyRef (audit ST-N07)
+        env:
+          # Stored in app-secrets by secret_put below (an empty value changes nothing).
+          FELLOWSHIP_AGENT_KEY: ${{ secrets.FELLOWSHIP_AGENT_KEY }}
         run: |
           # Secrets reach the pod only as secretKeyRef, never as literal values
           # in the Deployment spec. BOB_SUPERADMIN_SECRET was set by hand; it is
@@ -97,6 +100,9 @@ jobs:
           # Optional refs: the page says "key not set" until app-secrets has them.
           secret_ref_optional LEADSFORGE_API_KEY leadsforge-api-key
           secret_ref_optional APOLLO_API_KEY apollo-api-key
+          # Vanshika's Claude Code reaches /api/agent with this key (Growth Fellowship drafts).
+          secret_put fellowship-agent-key "$FELLOWSHIP_AGENT_KEY"
+          secret_ref FELLOWSHIP_AGENT_KEY fellowship-agent-key
           secret_audit
 
       - name: Two replicas across nodes, with a PDB
