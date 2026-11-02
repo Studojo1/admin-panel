@@ -22,6 +22,16 @@ const GATE_MODULE = "~/lib/auth-helper.server";
 // file -> export -> { reason, mustContain }. mustContain proves the route still
 // does the alternative check the reason describes.
 export const ALLOWLIST = {
+  "api.agent.$.tsx": {
+    loader: {
+      reason: "Vanshika's Claude Code reading fellows' context; authenticated by the FELLOWSHIP_AGENT_KEY shared secret, not a user login",
+      mustContain: "process.env.FELLOWSHIP_AGENT_KEY",
+    },
+    action: {
+      reason: "Claude Code saving drafts for review (never approving them); authenticated by the FELLOWSHIP_AGENT_KEY shared secret",
+      mustContain: "process.env.FELLOWSHIP_AGENT_KEY",
+    },
+  },
   "api.ops-alerts.tsx": {
     action: {
       reason: "in-cluster CronJob ingest; authenticated by the ALERT_INGEST_TOKEN shared secret, not a user login",
