@@ -103,6 +103,9 @@ jobs:
           # Vanshika's Claude Code reaches /api/agent with this key (Growth Fellowship drafts).
           secret_put fellowship-agent-key "$FELLOWSHIP_AGENT_KEY"
           secret_ref FELLOWSHIP_AGENT_KEY fellowship-agent-key
+          # Fellows' analytics screenshots, read from the shared storage account (fellow-proof container).
+          secret_ref AZURE_STORAGE_ACCOUNT_NAME azure-storage-account-name
+          secret_ref AZURE_STORAGE_ACCOUNT_KEY azure-storage-account-key
           secret_audit
 
       - name: Two replicas across nodes, with a PDB

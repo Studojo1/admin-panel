@@ -36,7 +36,7 @@ interface Dash {
   postsWeek: { target: number; scheduled: number; posted: number; dueByToday: number; missed: number; postedToday: number; total: number };
   daily: { day: string; due: number; postedOfDue: number; posted: number }[];
   funnel: { applied: number; fellows: number; postedOnce: number; postingThisWeek: number };
-  pipeline: { drafting: number; sentBack: number; scheduled: number; overdue: number; blocked: number; posted: number; awaitingNumbers: number; measured: number };
+  pipeline: { drafting: number; sentBack: number; scheduled: number; overdue: number; blocked: number; posted: number; awaitingNumbers: number; withScreenshots: number; measured: number };
   weekly: Week[]; kinds: { kind: "personal" | "studojo"; posted: number; impressions: number; avg: number }[]; fellows: Row[];
 }
 
@@ -268,6 +268,7 @@ function Pipeline({ p }: { p: Dash["pipeline"] }) {
     ["Approved, past due", p.overdue, "Due before today and not marked posted", p.overdue > 0],
     ["Blocked", p.blocked, "Taken back by the team; the fellow sees a warning", p.blocked > 0],
     ["Posted", p.posted, "Marked posted by the fellow or the team", false],
+    ["Posted, screenshots in", p.withScreenshots, "The fellow uploaded the post's analytics screenshots", false],
     ["Posted, numbers missing", p.awaitingNumbers, "No impressions yet", p.awaitingNumbers > 0],
     ["Posted with numbers", p.measured, "Counted in impressions and verdicts", false],
   ];
