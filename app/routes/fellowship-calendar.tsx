@@ -677,7 +677,7 @@ function Results({ D, act }: { D: Desk; act: (b: Record<string, unknown>, done?:
       </div>
       <div>
         <h2 className="card-title">Lessons Claude follows</h2>
-        <p className="card-sub">Claude reads these before writing for anyone and adds what it learns from results and your edits. Change anything that's wrong.</p>
+        <p className="card-sub"><b>What this is:</b> the writing rules Claude follows for every fellow's posts. Claude reads this list before it writes anything. Once posts have their numbers, Claude adds what worked and what didn't, and what your edits taught it (for example, "posts that open with a real moment get more impressions"). It stays empty until posts have results. You can edit or delete any line, and Claude follows whatever is here.</p>
         <div style={{ marginTop: 10 }}>
           <NotesBox saved={D.playbook.text} label="Lessons for every fellow" placeholder="Nothing yet. Claude adds lessons as results come in." meta={D.playbook.updatedAt ? `Last changed ${fmt(istDay(D.playbook.updatedAt))} by ${D.playbook.by === "claude" ? "Claude" : D.playbook.by || "the team"}` : ""}
             onSave={(text) => act({ intent: "playbook", text }, "Lessons saved")} />
