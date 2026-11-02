@@ -34,7 +34,7 @@ export const STEPS = [
   { key: "apply_click", n: "15", label: "Apply click", phase: "Use", journey: ["apply_clicked", "apply_click"], truth: null },
   { key: "chatted", n: "16", label: "Chatted with Stu", phase: "Use", journey: ["chatted"], truth: "career_messages, career_channel_messages, desk and interview calls (after onboarding)" },
   { key: "whatsapp_linked", n: "17", label: "WhatsApp linked", phase: "Use", journey: ["whatsapp_linked"], truth: "career_channel_links (whatsapp, imessage)" },
-  { key: "outreach_started", n: "18", label: "Outreach started", phase: "Outreach", journey: ["outreach_started"], truth: "career_outreach, career_campaigns" },
+  { key: "outreach_started", n: "18", label: "Outreach started", phase: "Outreach", journey: ["outreach_started"], truth: "career_outreach find run (find_at), career_campaigns not draft" },
   { key: "mailbox_connected", n: "19", label: "Mailbox connected", phase: "Outreach", journey: ["mailbox_connected"], truth: "career_mail_accounts.verified_at (not test inboxes)" },
   { key: "first_email_sent", n: "20", label: "First email sent", phase: "Outreach", journey: ["first_email_sent", "email_sent"], truth: "career_emails sent, not dry run" },
   { key: "first_reply", n: "21", label: "First reply", phase: "Outreach", journey: ["first_reply"], truth: "career_sequences.replied_at (not bounce, not dry run)" },
@@ -151,6 +151,8 @@ export interface StuData {
   sourceLive: boolean;
   /** earliest journey event, epoch ms */
   journeyStart: number | null;
+  /** earliest journey event written live (not props.backfill), epoch ms; null while the log holds only the backfill */
+  journeyLiveStart?: number | null;
   /** per step: the truth table exists here */
   truthOn: Record<string, boolean>;
   users: WireUser[];
@@ -853,22 +855,36 @@ export const CHECK_THRESHOLD_PCT = 2;
 
 /**
  * The journey log against the product's own tables, per step, for people in
- * scope, over the time the log has existed. A gap over 2% is flagged.
+ * scope. A gap over 2% is flagged.
+ *
+ * Window (2 Nov 2026): "live" (the default) compares from the log's first live
+ * event, so it checks the logging the product does now; "all" compares from the
+ * log's first event, the backfill included (25 Oct on staging). The backfill
+ * rebuilt history from the tables with its own rules (older accounts got no
+ * signed_up, for one), so it is not a test of the live logging.
  */
-export function selfCheck(d: StuData, f: Filters): { rows: CheckRow[]; from: number | null; flagged: number } {
-  const from = d.journeyStart;
-  if (!d.journeyLive || from == null) return { rows: [], from, flagged: 0 };
+export type CheckWindow = "live" | "all";
+
+export function checkFrom(d: StuData, window: CheckWindow): number | null {
+  if (window === "all" || d.journeyLiveStart === undefined) return d.journeyStart;
+  return d.journeyLiveStart;
+}
+
+export function selfCheck(d: StuData, f: Filters, window: CheckWindow = "live"): { rows: CheckRow[]; from: number | null; flagged: number; window: CheckWindow } {
+  const from = checkFrom(d, window);
+  if (!d.journeyLive || from == null) return { rows: [], from, flagged: 0, window };
   const scope = scopeUsers(d, f);
   const rows: CheckRow[] = [];
   for (const s of USER_STEPS) {
     if (!s.truth || !d.truthOn[s.key] || s.key === "signed_up") continue;
-    // Table side: people whose first time in the table falls after the log began.
+    // Table side: people whose first time in the table falls in the window.
     const truth = scope.filter((i) => (d.users[i].t[s.key] ?? -1) >= from);
-    const journey = scope.filter((i) => d.users[i].j[s.key] != null);
     const tSet = new Set(truth);
+    // Log side: people the log has in the window, or with a log row for a table row in it.
+    const journey = scope.filter((i) => d.users[i].j[s.key] != null && (d.users[i].j[s.key]! >= from || tSet.has(i)));
     const jSet = new Set(journey);
     const onlyT = truth.filter((i) => !jSet.has(i));
-    // Log side: a log entry for someone whose table row is older than the log is a
+    // A log entry for someone whose table row is older than the window is a
     // repeat, not a gap; a log entry with no table row at all is a gap.
     const onlyJ = journey.filter((i) => !tSet.has(i) && d.users[i].t[s.key] == null);
     const big = Math.max(truth.length, journey.length);
@@ -880,17 +896,18 @@ export function selfCheck(d: StuData, f: Filters): { rows: CheckRow[]; from: num
       gap, flagged: gap > CHECK_THRESHOLD_PCT,
     });
   }
-  // Signed up: the log against the accounts table.
+  // Signed up: the log against the accounts table. The log's signed_up carries
+  // the account's created_at, so an older account's row can predate the window.
   const su = scope.filter((i) => d.users[i].joined >= from);
-  const suJ = scope.filter((i) => d.users[i].j.signed_up != null);
-  const suSetJ = new Set(suJ);
   const suSet = new Set(su);
+  const suJ = scope.filter((i) => d.users[i].j.signed_up != null && (d.users[i].j.signed_up! >= from || suSet.has(i)));
+  const suSetJ = new Set(suJ);
   const onlyT = su.filter((i) => !suSetJ.has(i));
   const onlyJ = suJ.filter((i) => !suSet.has(i) && d.users[i].joined >= from);
   const big = Math.max(su.length, suJ.length);
   const gap = big > 0 ? Math.round(((onlyT.length + onlyJ.length) / big) * 1000) / 10 : 0;
   rows.unshift({ key: "signed_up", label: "4. Signed up", truth: cellOf(su), journey: cellOf(suJ), onlyTruth: cellOf(onlyT), onlyJourney: cellOf(onlyJ), gap, flagged: gap > CHECK_THRESHOLD_PCT });
-  return { rows, from, flagged: rows.filter((r) => r.flagged).length };
+  return { rows, from, flagged: rows.filter((r) => r.flagged).length, window };
 }
 
 // ------------------------------------------------------------------ formatting

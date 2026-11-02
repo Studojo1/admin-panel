@@ -151,3 +151,20 @@ test("retention by sign-up day: one row per IST join day, any day offsets", () =
   assert.equal(rows[0].d.d2.back.v, 1);
   assert.equal(rows[0].d.d1.back.v, 0);
 });
+
+test("self-check window: live (default) compares from the first live event; all includes the backfill", () => {
+  const t = (iso) => ms(iso);
+  // Backfill era (journeyStart 25 Oct): a table row with no log row. Live from 2 Nov: matched.
+  const users = [
+    user({ id: "old", t: { onboarded: t("2026-10-27T06:00:00Z") }, j: {} }),
+    user({ id: "new", t: { onboarded: t("2026-11-02T06:00:00Z") }, j: { onboarded: t("2026-11-02T06:00:00Z") } }),
+  ];
+  const d = data(users, { journeyStart: t("2026-10-25T00:00:00Z"), journeyLiveStart: t("2026-11-02T01:00:00Z") });
+  const live = selfCheck(d, F).rows.find((r) => r.key === "onboarded");
+  assert.equal(live.truth.v, 1);
+  assert.equal(live.flagged, false);
+  const all = selfCheck(d, F, "all").rows.find((r) => r.key === "onboarded");
+  assert.equal(all.onlyTruth.v, 1);
+  assert.equal(all.flagged, true);
+  assert.equal(selfCheck(data(users, { journeyLiveStart: null }), F).rows.length, 0, "no live events yet: nothing to compare live");
+});

@@ -200,9 +200,18 @@ async function load(q: Q): Promise<StuData> {
   }
   if (has("career_channel_links")) truth.whatsapp_linked = `SELECT user_id, ${ms("min(created_at)")} AS at FROM ${T("career_channel_links")} WHERE channel IN ('whatsapp', 'imessage') GROUP BY 1`;
   {
+    // Step 18 as career-agent defines it (docs/tracking-steps.md, 2 Nov 2026): a
+    // find-the-hiring-manager run, or a campaign past draft. A job only added to
+    // the outreach list is not outreach started (it counts in "Jobs added to outreach").
     const parts: string[] = [];
-    if (has("career_outreach")) parts.push(`SELECT user_id, created_at AS at FROM ${T("career_outreach")}`);
-    if (has("career_campaigns")) parts.push(`SELECT user_id, created_at FROM ${T("career_campaigns")}`);
+    if (has("career_outreach"))
+      parts.push(hasCol("career_outreach", "find_at")
+        ? `SELECT user_id, find_at AS at FROM ${T("career_outreach")} WHERE find_at IS NOT NULL`
+        : `SELECT user_id, created_at AS at FROM ${T("career_outreach")}`);
+    if (has("career_campaigns")) {
+      const at = hasCol("career_campaigns", "started_at") ? "coalesce(started_at, created_at)" : "created_at";
+      parts.push(`SELECT user_id, ${at} FROM ${T("career_campaigns")}${hasCol("career_campaigns", "status") ? " WHERE status <> 'draft'" : ""}`);
+    }
     if (parts.length) truth.outreach_started = `SELECT user_id, ${ms("min(at)")} AS at FROM (${parts.join(" UNION ALL ")}) x GROUP BY 1`;
   }
   const testBox = hasCol("career_mail_accounts", "test");
@@ -261,6 +270,7 @@ async function load(q: Q): Promise<StuData> {
   const journeySteps: JourneyStepRow[] = [];
   const envs: { env: string; n: number }[] = [];
   let journeyStart: number | null = null;
+  let journeyLiveStart: number | null = null;
   const userNames = USER_STEPS.flatMap((s) => s.journey);
   const actKinds: Record<string, string> = {};
   for (const n of STEPS.find((s) => s.key === "opened_desk")!.journey) actKinds[n] = "desk";
@@ -343,7 +353,8 @@ async function load(q: Q): Promise<StuData> {
 
     for (const r of await q(`
       SELECT coalesce(env, '(none)') AS env, step, count(*)::int AS events, count(DISTINCT user_id)::int AS users,
-             count(DISTINCT visitor_id)::int AS visitors, ${ms("min(at)")} AS first, ${ms("max(at)")} AS last
+             count(DISTINCT visitor_id)::int AS visitors, ${ms("min(at)")} AS first, ${ms("max(at)")} AS last,
+             ${ms("min(at) FILTER (WHERE coalesce(props->>'backfill', '') NOT IN ('true', '1'))")} AS first_live
         FROM ${J} GROUP BY 1, 2`)) {
       const row = journeySteps.find((x) => x.step === r.step);
       if (row) {
@@ -362,6 +373,8 @@ async function load(q: Q): Promise<StuData> {
       // signed_up rows carry the account's created_at, so they do not say when the log began.
       const f = Number(r.first);
       if (r.step !== "signed_up" && (journeyStart == null || f < journeyStart)) journeyStart = f;
+      const fl = r.first_live == null ? null : Number(r.first_live);
+      if (fl != null && r.step !== "signed_up" && (journeyLiveStart == null || fl < journeyLiveStart)) journeyLiveStart = fl;
     }
   }
 
@@ -464,6 +477,7 @@ async function load(q: Q): Promise<StuData> {
     journeyLive: journey,
     sourceLive: src,
     journeyStart,
+    journeyLiveStart,
     truthOn,
     users,
     visitors,
