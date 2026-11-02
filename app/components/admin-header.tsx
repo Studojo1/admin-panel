@@ -15,6 +15,7 @@ const NAV_LINKS: readonly { to: string; label: string; archive?: true; stu?: tru
   { to: "/sources", label: "Stu: Sources", stu: true },
   { to: "/journeys", label: "Stu: Journeys", stu: true },
   { to: "/retention", label: "Stu: Retention", stu: true },
+  { to: "/usage", label: "Stu: Usage", stu: true },
   { to: "/self-check", label: "Stu: Self-check", stu: true },
   { to: "/vendors", label: "Vendors and credits" },
   { to: "/users", label: "Users" },
@@ -82,7 +83,7 @@ export function AdminHeader() {
       transition={{ duration: 0.5, ease: "easeOut" }}
       className="sticky top-0 z-50 w-full border-b-2 border-neutral-900 bg-white shadow-[0_4px_0px_0px_rgba(25,26,35,1)]"
     >
-      <div className="mx-auto flex h-16 max-w-[var(--section-max-width)] items-center justify-between px-4 md:h-20 md:px-8">
+      <div className="mx-auto flex min-h-16 max-w-[var(--section-max-width)] flex-wrap items-center justify-between gap-2 px-4 py-2 md:h-20 md:flex-nowrap md:px-8 md:py-0">
         {/* Logo */}
         <motion.div
           whileHover={{ scale: 1.05 }}
@@ -90,20 +91,20 @@ export function AdminHeader() {
         >
           <Link
             to="/"
-            className="font-['Satoshi'] text-2xl font-black leading-9 text-neutral-900 md:text-4xl md:leading-7"
+            className="whitespace-nowrap font-['Satoshi'] text-xl font-black leading-9 text-neutral-900 sm:text-2xl md:text-4xl md:leading-7"
           >
             Studojo Admin
           </Link>
         </motion.div>
 
-        <div className="flex items-center gap-3">
+        <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
           {/* Page dropdown */}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((prev) => !prev)}
-              className="flex items-center gap-2 rounded-xl border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-semibold text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:bg-neutral-50 hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]"
+              className="flex items-center gap-2 whitespace-nowrap rounded-xl border-2 border-neutral-900 bg-white px-2.5 py-2 font-['Satoshi'] text-sm font-semibold sm:px-4 text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:bg-neutral-50 hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]"
             >
-              <span>{currentLink.label}</span>
+              <span className="max-w-[7.5rem] truncate sm:max-w-none">{currentLink.label}</span>
               <motion.svg
                 animate={{ rotate: menuOpen ? 180 : 0 }}
                 transition={{ duration: 0.2 }}
@@ -180,9 +181,10 @@ export function AdminHeader() {
           >
             <Link
               to="/sensei"
-              className="rounded-lg border-2 border-neutral-900 bg-neutral-900 px-4 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+              title="Sensei"
+              className="whitespace-nowrap rounded-lg border-2 border-neutral-900 bg-neutral-900 px-2.5 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-white sm:px-4 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
             >
-              ◈ Sensei
+              ◈<span className="hidden sm:inline"> Sensei</span>
             </Link>
           </motion.div>
 
@@ -194,9 +196,10 @@ export function AdminHeader() {
             transition={{ duration: 0.3 }}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            className="rounded-lg border-2 border-violet-600 bg-violet-600 px-4 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-white shadow-[2px_2px_0px_0px_rgba(109,40,217,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(109,40,217,1)]"
+            title="Email"
+            className="whitespace-nowrap rounded-lg border-2 border-violet-600 bg-violet-600 px-2.5 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-white sm:px-4 shadow-[2px_2px_0px_0px_rgba(109,40,217,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(109,40,217,1)]"
           >
-            ✉ Email
+            ✉<span className="hidden sm:inline"> Email</span>
           </motion.a>
 
           {/* Sign out */}
@@ -208,7 +211,7 @@ export function AdminHeader() {
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={handleSignOut}
-              className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-neutral-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
+              className="whitespace-nowrap rounded-lg border-2 border-neutral-900 bg-white px-2.5 py-2 font-['Satoshi'] text-sm font-medium leading-5 text-neutral-900 sm:px-4 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-shadow hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]"
             >
               Sign Out
             </motion.button>
