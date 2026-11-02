@@ -3,10 +3,22 @@ import { type RouteConfig, index, layout, prefix, route } from "@react-router/de
 // Relaunch, 2 Nov 2026. The retired student product's dashboards live under
 // /old as a read-only archive, with the same data. Live tools (support, users,
 // ops alerts, marketing) and the B2B product (Sensei, B2B GTM, GTM dashboards)
-// stay at their original paths. New product dashboards come at the root after
-// launch. On main, api.journeys.tsx stays unrouted, as it was before.
+// stay at their original paths. The new product's dashboards (Stu, studojo.pro)
+// are at the root: Daily, Funnel, Ratios, Drop-offs, Sources, Journeys,
+// Retention and the self-check, under one layout (app/routes/stu-layout.tsx).
+// On main, api.journeys.tsx stays unrouted, as it was before.
 export default [
-  index("routes/home.tsx"),
+  layout("routes/stu-layout.tsx", [
+    index("routes/stu-daily.tsx"),
+    route("funnel", "routes/stu-funnel.tsx"),
+    route("ratios", "routes/stu-ratios.tsx"),
+    route("drop-offs", "routes/stu-dropoffs.tsx"),
+    route("sources", "routes/stu-sources.tsx"),
+    route("journeys", "routes/stu-journeys.tsx"),
+    route("retention", "routes/stu-retention.tsx"),
+    route("self-check", "routes/stu-check.tsx"),
+  ]),
+  route("api/stu", "routes/api.stu.tsx"),
   route("login", "routes/login.tsx"),
   route("users", "routes/users.tsx"),
   route("chat-logs", "routes/chat-logs.tsx"),
