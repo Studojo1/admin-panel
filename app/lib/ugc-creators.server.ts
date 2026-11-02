@@ -164,6 +164,21 @@ async function createTables() {
     )
   `);
   await db.execute(sql`INSERT INTO ugc_programme (id, rules) VALUES (1, ${JSON.stringify(PROGRAMME_RULES)}::jsonb) ON CONFLICT (id) DO NOTHING`);
+  // 2 Nov 2026: the founder moved the programme from 3 posts a week (Tue, Thu,
+  // Sat) to 5 (Mon to Fri, 2 of them about Studojo). Applied once, only to the
+  // row still holding the original rules, so a later edit is never overwritten.
+  const weekly = {
+    postsPerWeek: PROGRAMME_RULES.postsPerWeek,
+    studojoPerWeek: PROGRAMME_RULES.studojoPerWeek,
+    postingDays: PROGRAMME_RULES.postingDays,
+    weeks: PROGRAMME_RULES.weeks,
+  };
+  await db.execute(sql`
+    UPDATE ugc_programme
+    SET rules = rules || ${JSON.stringify(weekly)}::jsonb, updated_at = NOW(), updated_by = 'founder, 2 Nov 2026'
+    WHERE id = 1 AND rules->'postsPerWeek' = '3'::jsonb AND rules->'postingDays' = '["Tue", "Thu", "Sat"]'::jsonb
+      AND NOT rules ? 'studojoPerWeek'
+  `);
 }
 
 /** 32 url-safe characters, kept for API use. */
@@ -225,6 +240,7 @@ export interface PostRow {
   body: string;
   kind: string;
   due_date: string;
+  /** 'ready' (approved, on their page), 'posted', or 'blocked' (taken back by the team). */
   status: string;
   copied_at: string | null;
   own_line: string | null;
@@ -269,10 +285,13 @@ export const PROGRAMME_RULES = {
     { by: "2026-11-15", creators: 95, posting: 57, impressions: 600_000 },
     { by: "2026-11-25", creators: 125, posting: 75, impressions: 1_000_000 },
   ],
-  postingDays: ["Tue", "Thu", "Sat"],
-  postsPerWeek: 3,
+  // The founder's decision (2 Nov 2026): 5 posts a week, 3 personal and 2 about Studojo.
+  postingDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+  postsPerWeek: 5,
+  studojoPerWeek: 2,
   partnershipLabel: "In partnership with Studojo",
-  weeks: "Weeks run Monday to Sunday, India time. A week is complete when it has posts and every one is posted.",
+  weeks:
+    "Weeks run Monday to Sunday, India time. A week is complete when it has posts and every one is posted. Posts the team has blocked don't count.",
   milestones: MILESTONES.map((m) => ({ id: m.id, weeks: m.weeks, name: m.name, detail: m.detail })),
   hiringPipeline: HIRING_PIPELINE,
 };
@@ -297,9 +316,14 @@ export interface CreatorStats {
 const dayOf = (v: unknown): string => (v instanceof Date ? istDate(v) : String(v).slice(0, 10));
 const msOf = (v: unknown): number => (v instanceof Date ? v.getTime() : v ? new Date(String(v)).getTime() : NaN);
 
-export function creatorStats(posts: PostRow[], now: Date = new Date()): CreatorStats {
+export function creatorStats(allPosts: PostRow[], now: Date = new Date()): CreatorStats {
   const today = istDate(now);
   const thisWeek = weekOf(today);
+  // A 'blocked' post was taken back by the team after approval. It is not
+  // posted, and it is never the fellow's miss: it doesn't count as due, and a
+  // week whose posts are all blocked neither counts nor breaks the run.
+  const posts = allPosts.filter((p) => p.status !== "blocked");
+  const blockedWeeks = new Set(allPosts.filter((p) => p.status === "blocked").map((p) => weekOf(dayOf(p.due_date))));
   const byWeek = new Map<string, PostRow[]>();
   for (const p of posts) {
     const w = weekOf(dayOf(p.due_date));
@@ -310,8 +334,11 @@ export function creatorStats(posts: PostRow[], now: Date = new Date()): CreatorS
     const ps = byWeek.get(w);
     return Boolean(ps && ps.length && ps.every((p) => p.status === "posted"));
   };
+  const onlyBlocked = (w: string) => !byWeek.has(w) && blockedWeeks.has(w);
   let run = complete(thisWeek) ? 1 : 0;
-  for (let w = addDays(thisWeek, -7); byWeek.has(w) && complete(w); w = addDays(w, -7)) run++;
+  for (let w = addDays(thisWeek, -7); (byWeek.has(w) && complete(w)) || onlyBlocked(w); w = addDays(w, -7)) {
+    if (!onlyBlocked(w)) run++;
+  }
   const completedWeeks = [...byWeek.keys()].filter(complete).length;
 
   const due = byWeek.get(thisWeek) ?? [];
