@@ -128,10 +128,11 @@ async function load(q: Q): Promise<StuData> {
   if (has("career_voice_calls")) pu.push(`SELECT user_id, min(created_at) FROM ${T("career_voice_calls")} GROUP BY 1`);
   if (has("career_phones")) pu.push(`SELECT user_id, coalesce(verified_at, updated_at) FROM ${T("career_phones")}`);
   // signed_up is left out: its time is the account's created_at, which for an older account is not its first Stu step.
+  // So is career_user_source.signed_up_at, the same account date (the owner, 2 Nov 2026: an old studojo.com account's
+  // first time on the platform is a new sign-up that day, on every counter). The row still lists the person.
   if (journey) pu.push(`SELECT user_id, min(at) FROM ${J} WHERE user_id IS NOT NULL AND step <> ALL(${lit([...ANON_STEPS.flatMap((s) => s.journey), "signed_up"])}) GROUP BY 1`);
   if (journey) pu.push(`SELECT user_id, NULL::timestamptz FROM ${J} WHERE user_id IS NOT NULL AND step = 'signed_up' GROUP BY 1`);
-  if (src && hasCol("career_user_source", "signed_up_at")) pu.push(`SELECT user_id, signed_up_at FROM ${T("career_user_source")} WHERE user_id IS NOT NULL`);
-  else if (src) pu.push(`SELECT user_id, NULL::timestamptz FROM ${T("career_user_source")} WHERE user_id IS NOT NULL`);
+  if (src) pu.push(`SELECT user_id, NULL::timestamptz FROM ${T("career_user_source")} WHERE user_id IS NOT NULL`);
   const userRows = pu.length
     ? await q(`
       WITH act AS (${pu.join(" UNION ALL ")}),
