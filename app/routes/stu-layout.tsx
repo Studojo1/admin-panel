@@ -92,7 +92,7 @@ export default function StuLayout() {
       <main className="mx-auto max-w-[100rem] px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-5 flex flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
           <div>
-            <div className="text-xs font-bold uppercase tracking-wide text-purple-700">Stu · studojo.pro</div>
+            <div className="text-xs font-bold uppercase tracking-wide text-purple-700">Stu</div>
             <nav className="mt-1.5 inline-flex flex-wrap gap-1 rounded-xl border-2 border-neutral-900 bg-white p-1 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]">
               {TABS.map((t) => (
                 <NavLink
