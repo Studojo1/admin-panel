@@ -16,6 +16,7 @@ const NAV_LINKS: readonly { to: string; label: string; archive?: true; stu?: tru
   { to: "/journeys", label: "Stu: Journeys", stu: true },
   { to: "/retention", label: "Stu: Retention", stu: true },
   { to: "/self-check", label: "Stu: Self-check", stu: true },
+  { to: "/vendors", label: "Vendors and credits" },
   { to: "/users", label: "Users" },
   { to: "/chat-logs", label: "Chat Logs" },
   { to: "/ops-alerts", label: "Ops Alerts" },

@@ -93,6 +93,10 @@ jobs:
           # The /old Career Coach archive reads cc-backend's database (careercoach),
           # read only. Skipped with a warning until app-secrets has the key.
           secret_ref CAREERCOACH_DATABASE_URL careercoach-database-url
+          # /vendors reads the LeadsForge and Apollo balances (free endpoints).
+          # Optional refs: the page says "key not set" until app-secrets has them.
+          secret_ref_optional LEADSFORGE_API_KEY leadsforge-api-key
+          secret_ref_optional APOLLO_API_KEY apollo-api-key
           secret_audit
 
       - name: Two replicas across nodes, with a PDB
