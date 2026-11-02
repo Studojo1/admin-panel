@@ -1,0 +1,113 @@
+// Shared pieces of the Stu pages: the outlet context, a clickable number that
+// opens the people behind it, the source note and the drill-down list.
+import { Link, useOutletContext } from "react-router";
+import { CHANNELS } from "~/lib/utm-dictionary";
+import { type Cell, type Filters, type StuData, fmtIst, fmtN, istDay } from "~/lib/stu/model";
+
+export interface StuCtx {
+  data: StuData;
+  filters: Filters;
+  setFilters: (f: Partial<Filters>) => void;
+  drill: (title: string, cell: Cell) => void;
+}
+
+export const useStu = () => useOutletContext<StuCtx>();
+
+export const CARD = "rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]";
+
+export const channelLabel = (key: string): string => CHANNELS.find((c) => c.key === key)?.label ?? key;
+
+/** A number that lists its people when clicked. */
+export function Num({ cell, title, fmt, className = "" }: { cell: Cell; title: string; fmt?: (n: number) => string; className?: string }) {
+  const { drill } = useStu();
+  if (cell.na) {
+    return <span className={`text-neutral-400 ${className}`} title="Not available here yet: the journey log or its table is not live in this environment">n/a</span>;
+  }
+  const text = fmt ? fmt(cell.v) : fmtN(cell.v);
+  const people = cell.users.length + (cell.visitors?.length ?? 0);
+  if (!people) return <span className={`tabular-nums ${className}`}>{text}</span>;
+  return (
+    <button
+      type="button"
+      onClick={() => drill(title, cell)}
+      className={`tabular-nums underline decoration-dotted decoration-neutral-400 underline-offset-2 hover:decoration-violet-600 ${className}`}
+      title={`${cell.users.length} people${cell.visitors?.length ? `, ${cell.visitors.length} visitors` : ""}: click for the list`}
+    >
+      {text}
+    </button>
+  );
+}
+
+export function SourceNote({ children }: { children: React.ReactNode }) {
+  return <div className="mt-0.5 text-[10px] leading-tight text-neutral-400">source: {children}</div>;
+}
+
+export function PageTitle({ title, sub }: { title: string; sub?: string }) {
+  return (
+    <div className="mb-4">
+      <h1 className="font-['Clash_Display'] text-2xl font-bold text-neutral-900">{title}</h1>
+      {sub && <p className="mt-1 text-sm text-neutral-600">{sub}</p>}
+    </div>
+  );
+}
+
+export function DrillModal({ title, cell, data, onClose }: { title: string; cell: Cell; data: StuData; onClose: () => void }) {
+  const users = cell.users.map((i) => ({ i, u: data.users[i] })).filter((x) => x.u).sort((a, b) => b.u.joined - a.u.joined);
+  const visitors = cell.visitors ?? [];
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 p-4 pt-16" onClick={onClose}>
+      <div className={`max-h-[80vh] w-full max-w-3xl overflow-hidden ${CARD}`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b-2 border-neutral-900 bg-neutral-50 px-5 py-3">
+          <div>
+            <h2 className="font-['Clash_Display'] text-lg font-bold">{title}</h2>
+            <p className="text-xs text-neutral-500">
+              {fmtN(cell.v)} shown; {users.length} people{visitors.length ? `, ${visitors.length} visitors` : ""} behind it
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-lg border-2 border-neutral-900 px-3 py-1 text-sm font-semibold hover:bg-neutral-100">Close</button>
+        </div>
+        <div className="max-h-[65vh] overflow-y-auto">
+          {users.length > 0 && (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-white text-left text-xs uppercase text-neutral-500">
+                <tr><th className="px-4 py-2">Person</th><th className="px-4 py-2">Joined (IST)</th><th className="px-4 py-2">Channel</th><th className="px-4 py-2" /></tr>
+              </thead>
+              <tbody>
+                {users.map(({ i, u }) => (
+                  <tr key={i} className="border-t border-neutral-100">
+                    <td className="px-4 py-2">
+                      <div className="font-medium text-neutral-900">{u.email || u.id}</div>
+                      <div className="text-xs text-neutral-500">{u.name}{u.internal ? ` · internal: ${u.internal}` : ""}{u.existing ? " · older account" : ""}</div>
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-neutral-700">{fmtIst(u.joined)}</td>
+                    <td className="px-4 py-2 text-neutral-700">{channelLabel(u.ch)}</td>
+                    <td className="px-4 py-2 text-right"><Link to={`/journeys?u=${encodeURIComponent(u.id)}`} onClick={onClose} className="text-violet-700 hover:underline">Journey</Link></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {visitors.length > 0 && (
+            <div className="border-t-2 border-neutral-200 px-4 py-3">
+              <div className="mb-2 text-xs font-bold uppercase text-neutral-500">Visitor ids (before sign-in)</div>
+              <div className="flex flex-wrap gap-1.5">
+                {visitors.slice(0, 1000).map((v) => {
+                  const w = data.visitors.find((x) => x.id === v);
+                  const u = w && w.u >= 0 ? data.users[w.u] : null;
+                  return (
+                    <span key={v} className="rounded border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 font-mono text-[11px] text-neutral-700" title={u ? `became ${u.email}` : "no account yet"}>
+                      {v.slice(0, 12)}{u ? ` → ${u.email}` : ""}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {!users.length && !visitors.length && <div className="p-6 text-sm text-neutral-500">Nobody.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const joinedDay = (data: StuData, i: number) => istDay(data.users[i].joined);

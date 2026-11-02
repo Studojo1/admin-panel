@@ -28,6 +28,9 @@ jobs:
       # EMAIL-PAUSE (29 Oct 2026): the app's own email stays held unless
       # EMAILS_PAUSED=0.
       - run: node --test scripts/email-pause.test.mjs
+      # Stu tracking (2 Nov 2026): IST days, the sign-up cohort, truth over the
+      # journey log, nested gates, the 2% self-check, retention.
+      - run: node --test scripts/stu-model.test.mjs
       # Deploy workflows never write a secret into a Deployment as a literal
       # env value (audit ST-N07).
       - run: bash scripts/ci/check_no_literal_secrets.sh

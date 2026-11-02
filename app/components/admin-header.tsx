@@ -3,9 +3,18 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Link, useLocation, useNavigate } from "react-router";
 import { authClient } from "~/lib/auth-client";
 
-// Live tools first, at their original paths. The retired student product's
-// dashboards follow under /old (read-only archive, relaunch 2 Nov 2026).
-const NAV_LINKS: readonly { to: string; label: string; archive?: true }[] = [
+// The new product (Stu) first, at the root; then live tools at their original
+// paths. The retired student product's dashboards follow under /old (read-only
+// archive, relaunch 2 Nov 2026).
+const NAV_LINKS: readonly { to: string; label: string; archive?: true; stu?: true }[] = [
+  { to: "/", label: "Stu: Daily", stu: true },
+  { to: "/funnel", label: "Stu: Funnel", stu: true },
+  { to: "/ratios", label: "Stu: Ratios", stu: true },
+  { to: "/drop-offs", label: "Stu: Drop-offs", stu: true },
+  { to: "/sources", label: "Stu: Sources", stu: true },
+  { to: "/journeys", label: "Stu: Journeys", stu: true },
+  { to: "/retention", label: "Stu: Retention", stu: true },
+  { to: "/self-check", label: "Stu: Self-check", stu: true },
   { to: "/users", label: "Users" },
   { to: "/chat-logs", label: "Chat Logs" },
   { to: "/ops-alerts", label: "Ops Alerts" },
@@ -121,8 +130,20 @@ export function AdminHeader() {
                   {NAV_LINKS.map((link, i) => {
                     const isActive = location.pathname === link.to;
                     const archiveStart = link.archive && !NAV_LINKS[i - 1]?.archive;
+                    const stuStart = link.stu && !NAV_LINKS[i - 1]?.stu;
+                    const toolsStart = !link.stu && !link.archive && NAV_LINKS[i - 1]?.stu;
                     return (
                       <Fragment key={link.to}>
+                      {stuStart && (
+                        <div className="bg-violet-50 px-4 py-2 font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-violet-700">
+                          Stu (new product)
+                        </div>
+                      )}
+                      {toolsStart && (
+                        <div className="border-t-2 border-neutral-900 bg-neutral-50 px-4 py-2 font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-500">
+                          Live tools
+                        </div>
+                      )}
                       {archiveStart && (
                         <div className="border-t-2 border-neutral-900 bg-amber-50 px-4 py-2 font-['Satoshi'] text-xs font-bold uppercase tracking-wide text-neutral-500">
                           Old product (archive)
