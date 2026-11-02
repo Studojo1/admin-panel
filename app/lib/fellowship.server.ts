@@ -651,15 +651,32 @@ export async function programmeDashboard() {
     return { kind: k, posted: up.length, impressions: up.reduce((s, p) => s + imp(p), 0), avg: m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0 };
   });
   const drafts = live.flatMap((f) => f.drafts);
+  // Posts this week against the target (every active fellow's weekly posts), and day by day.
+  const weekPosts = posts.filter((p) => weekOf(p.due) === thisWeek && p.status !== "blocked");
+  const daily = Array.from({ length: 7 }, (_, i) => addDays(thisWeek, i)).map((d) => ({
+    day: d,
+    due: posts.filter((p) => p.due === d && p.status !== "blocked").length,
+    postedOfDue: posts.filter((p) => p.due === d && isPosted(p)).length,
+    posted: posts.filter((p) => isPosted(p) && postedOn(p) === d).length,
+  }));
 
   return {
     today, thisWeek, programmeStart: cal.programmeStart, rules: { goal: rules.goal, plan: rules.plan, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules) },
     now: { creators: live.length, posting: postingBy(today), impressions: cal.totals.impressions, avgPerPost: cal.totals.avgPerPost },
     checkpoints,
+    postsWeek: {
+      target: live.filter((f) => f.status === "active").length * rules.postsPerWeek,
+      scheduled: weekPosts.length,
+      posted: weekPosts.filter(isPosted).length,
+      dueByToday: weekPosts.filter((p) => p.due <= today).length,
+      missed: weekPosts.filter((p) => !isPosted(p) && p.due < today).length,
+      postedToday: posts.filter((p) => isPosted(p) && postedOn(p) === today).length,
+      total: posts.filter(isPosted).length,
+    },
+    daily,
     funnel: {
       applied: Object.values(apps).reduce((s, n) => s + n, 0),
-      shortlisted: (apps.shortlisted ?? 0) + (apps.meeting ?? 0) + (apps.selected ?? 0),
-      selected: apps.selected ?? 0,
+      // Selected and shortlisted mean the same thing here: everyone selected is made a fellow.
       fellows: live.length,
       postedOnce: new Set(posts.filter(isPosted).map((p) => p.creatorId)).size,
       postingThisWeek: new Set(posts.filter((p) => isPosted(p) && postedOn(p) && weekOf(postedOn(p)!) === thisWeek).map((p) => p.creatorId)).size,
@@ -683,6 +700,7 @@ export async function programmeDashboard() {
         connectionsAtJoin: f.connectionsAtJoin, connections: f.connections, standing: f.standing,
         posted: up.length, measured: m.length, avg: m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0,
         best: best ? { title: best.title, impressions: imp(best), url: best.url } : null,
+        lastPosted: up.map(postedOn).filter((d): d is string => !!d).sort().pop() ?? null,
         scheduled: f.posts.filter((p) => p.status === "ready" && p.due >= today).length,
         drafts: f.drafts.length, stories: f.stories, earlierPosts: f.earlierPosts,
       };

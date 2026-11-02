@@ -25,7 +25,7 @@ interface Standing {
 interface Row {
   id: number; name: string; college: string | null; field: string | null; cohort: string | null; status: string; joined: string;
   connectionsAtJoin: number | null; connections: number | null; standing: Standing; posted: number; measured: number; avg: number;
-  best: { title: string; impressions: number; url: string | null } | null; scheduled: number; drafts: number; stories: number; earlierPosts: number;
+  best: { title: string; impressions: number; url: string | null } | null; lastPosted: string | null; scheduled: number; drafts: number; stories: number; earlierPosts: number;
 }
 interface Week { week: string; partial: boolean; due: number; postedOfDue: number; posted: number; studojo: number; impressions: number; posting: number; joined: number }
 interface Dash {
@@ -33,7 +33,9 @@ interface Dash {
   rules: { goal: { impressions: number; creators: number; by: string }; plan: Point[]; postsPerWeek: number; studojoPerWeek: number | null };
   now: { creators: number; posting: number; impressions: number; avgPerPost: number };
   checkpoints: (Point & { actual: { creators: number; posting: number; impressions: number } | null })[];
-  funnel: { applied: number; shortlisted: number; selected: number; fellows: number; postedOnce: number; postingThisWeek: number };
+  postsWeek: { target: number; scheduled: number; posted: number; dueByToday: number; missed: number; postedToday: number; total: number };
+  daily: { day: string; due: number; postedOfDue: number; posted: number }[];
+  funnel: { applied: number; fellows: number; postedOnce: number; postingThisWeek: number };
   pipeline: { drafting: number; sentBack: number; scheduled: number; overdue: number; blocked: number; posted: number; awaitingNumbers: number; measured: number };
   weekly: Week[]; kinds: { kind: "personal" | "studojo"; posted: number; impressions: number; avg: number }[]; fellows: Row[];
 }
@@ -41,6 +43,7 @@ interface Dash {
 // ---------------------------------------------------------------- helpers (same as the calendar)
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DOWL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DOWS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const day = (s: string) => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
 const fmt = (s: string) => { const x = day(s); return `${x.getUTCDate()} ${MON[x.getUTCMonth()]}`; };
 const addDays = (s: string, n: number) => { const x = day(s); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -170,6 +173,7 @@ function Dashboard({ D, at }: { D: Dash; at: string | null }) {
                 </div>
               );
             })}
+            <PostsTile w={D.postsWeek} postsPerWeek={rules.postsPerWeek} />
           </div>
           <div className="pd-scroll" tabIndex={0} aria-label="Checkpoints, scrolls sideways">
             <table className="pd-table">
@@ -209,11 +213,30 @@ function Dashboard({ D, at }: { D: Dash; at: string | null }) {
   );
 }
 
+// Posts this week: what's posted, against what's scheduled and the target (every active fellow's weekly posts).
+function PostsTile({ w, postsPerWeek }: { w: Dash["postsWeek"]; postsPerWeek: number }) {
+  const goal = Math.max(1, w.target);
+  const [label, cls] = w.missed ? [`${num(w.missed)} missed`, "pill-risk"] : w.scheduled < w.target ? [`${num(w.target - w.scheduled)} not scheduled yet`, "pill-risk"] : ["On track", "pill-active"];
+  return (
+    <div className="pd-tile">
+      <p className="eyebrow">Posts this week</p>
+      <div className="pd-big"><b className="tnum">{num(w.posted)}</b><span>posted · {num(w.postedToday)} today</span></div>
+      <div className="pd-meter" role="img" aria-label={`${num(w.posted)} posted of a target of ${num(w.target)}. ${num(w.dueByToday)} were due by today.`}>
+        <div className="pd-fill" style={{ width: `${Math.min(100, (w.posted / goal) * 100).toFixed(2)}%` }} />
+        <div className="pd-pace" style={{ left: `${Math.min(100, (w.dueByToday / goal) * 100).toFixed(2)}%` }} title={`Due by today: ${num(w.dueByToday)}`} />
+      </div>
+      <p className="pd-line">
+        <span className={`pill ${cls}`}>{label}</span>
+        <span>{num(w.dueByToday)} due by today · {num(w.scheduled)} scheduled · target {num(w.target)} ({postsPerWeek} a fellow) · {num(w.total)} posted in all</span>
+      </p>
+    </div>
+  );
+}
+
 function Funnel({ f }: { f: Dash["funnel"] }) {
   const steps = [
     ["Applied", f.applied, "Every application on the form"],
-    ["Shortlisted or selected", f.shortlisted, "Status on the Growth Fellowship page"],
-    ["Fellows", f.fellows, "Have a fellow page"],
+    ["Selected (fellows)", f.fellows, "Selected and given a fellow page"],
     ["Posted at least once", f.postedOnce, "Marked a post as posted"],
     ["Posted this week", f.postingThisWeek, "Since Monday, India time"],
   ] as const;
@@ -278,6 +301,18 @@ function Weekly({ D, weekNo }: { D: Dash; weekNo: (w: string) => number }) {
           <div><dt>Personal posts</dt><dd className="tnum">{num(personal.posted)} <small>· {kfmt(personal.impressions)} impressions{personal.avg ? ` · ${num(personal.avg)} avg` : ""}</small></dd></div>
           <div><dt>Studojo posts</dt><dd className="tnum">{num(studojo.posted)} <small>· {kfmt(studojo.impressions)} impressions{studojo.avg ? ` · ${num(studojo.avg)} avg` : ""}</small></dd></div>
         </dl>
+      </div>
+      <div>
+        <p className="eyebrow">This week, day by day</p>
+        <ol className="pd-days">
+          {D.daily.map((d) => (
+            <li key={d.day} className={d.day === D.today ? "today" : d.day > D.today ? "ahead" : undefined} title={`${fmt(d.day)}: ${num(d.posted)} posted that day; ${num(d.postedOfDue)} of ${num(d.due)} posts due that day are posted`}>
+              <span>{DOWS[day(d.day).getUTCDay()]} {day(d.day).getUTCDate()}{d.day === D.today ? " · today" : ""}</span>
+              <b className="tnum">{num(d.posted)}</b>
+              <small>posted{d.due ? ` · ${num(d.postedOfDue)} of ${num(d.due)} due` : " · none due"}</small>
+            </li>
+          ))}
+        </ol>
       </div>
       <div className="pd-scroll" tabIndex={0} aria-label="Weeks, scrolls sideways">
         <table className="pd-table">
@@ -346,7 +381,7 @@ function Fellows({ D }: { D: Dash }) {
           <thead>
             <tr>
               <th>Fellow</th><th>Status</th><th className="num">This week</th><th className="num">Run</th><th className="num">Weeks done</th>
-              <th className="num">Posts up</th><th className="num">Impressions</th><th className="num">Avg a post</th><th>Best post</th>
+              <th className="num">Posts up</th><th>Last posted</th><th className="num">Impressions</th><th className="num">Avg a post</th><th>Best post</th>
               <th className="num">Connections</th><th className="num">Coming up</th><th className="num">Drafts</th><th>Next milestone</th><th>Last active</th>
             </tr>
           </thead>
@@ -364,6 +399,7 @@ function Fellows({ D }: { D: Dash }) {
                   <td className="num">{s.run ? plural(s.run, "week") : <small>0</small>}</td>
                   <td className="num">{num(s.completedWeeks)}</td>
                   <td className="num">{num(f.posted)}</td>
+                  <td>{f.lastPosted ? fmt(f.lastPosted) : <small>Not yet</small>}</td>
                   <td className="num"><b>{kfmt(s.impressions)}</b></td>
                   <td className="num">{f.avg ? num(f.avg) : <small>–</small>}</td>
                   <td className="pd-best">{f.best ? (f.best.url ? <a href={f.best.url} target="_blank" rel="noreferrer">{f.best.title}</a> : f.best.title) : <small>–</small>}{f.best ? <small> · {kfmt(f.best.impressions)}</small> : null}</td>
@@ -374,7 +410,7 @@ function Fellows({ D }: { D: Dash }) {
                   <td><small>{ago(s.lastActivity)}</small></td>
                 </tr>
               );
-            }) : <tr><td colSpan={14}><div className="empty"><b>{live.length ? "No fellows match" : "No fellows yet"}</b>{live.length ? "Try a different search." : "Make someone a fellow from the Growth Fellowship page."}</div></td></tr>}
+            }) : <tr><td colSpan={15}><div className="empty"><b>{live.length ? "No fellows match" : "No fellows yet"}</b>{live.length ? "Try a different search." : "Make someone a fellow from the Growth Fellowship page."}</div></td></tr>}
           </tbody>
         </table>
       </div>
