@@ -13,6 +13,7 @@ import { AdminHeader } from "~/components";
 import { DrillModal, type DrillPeople, channelLabel } from "~/components/stu/ui";
 import { getToken } from "~/lib/api";
 import { useAdminGuard } from "~/lib/auth-guard";
+import { VendorsTile } from "~/components/vendors/overview-tile";
 import { type Cell, addDays, fmtDur, fmtInr, fmtN, fmtPct, todayIst } from "~/lib/stu/model";
 import type { Alert, FeedRow, FunnelBar, Insight, KpiTile, OvEnvelope, OvSection, PowerRow, SourceRow } from "~/lib/stu/overview";
 import { HEAT_DAYS } from "~/lib/stu/overview";
@@ -283,6 +284,8 @@ export default function StuOverview() {
           <Insights s={S("insights")} drill={openDrill} />
 
           <Alerts s={S("alerts")} drill={openDrill} />
+
+          <VendorsTile />
 
           <div id="kpis"><Kpis s={S("kpis")} t={t} drill={openDrill} range={range} /></div>
 
