@@ -1,172 +1,111 @@
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 import { requireAdmin } from "~/lib/auth-helper.server";
-import { channelFromReferrer, normalizeTags } from "~/lib/utm-dictionary";
+import { stuData } from "~/lib/stu/data.server";
+import { istDay, stepAt, todayIst } from "~/lib/stu/model";
+import {
+  buildReport,
+  touchKey,
+  withUtmId,
+  type LinkKey,
+  type ReportClick,
+  type ReportUser,
+  type ReportVisitor,
+} from "~/lib/utm-attribution";
 import type { Route } from "./+types/api.utm-report";
 
-/** GET /api/utm-report?view=links | sources | hygiene&days=30
+/** GET /api/utm-report?start=YYYY-MM-DD&end=YYYY-MM-DD&touch=first|last&internal=1
  *
- * Numbers come from our own tables, not PostHog, so a link is judged by the
- * signups and payments it produced rather than by page views:
- *   clicks   utm_link_clicks, written by studojo.com/go/<slug> (bots excluded)
- *   signups  user_attribution, the first-touch tags stored at signup
- *   payers   payment_orders with status 'paid', for those same users
- *
- * First touch only: a user who clicked two links is credited to the first.
+ * Every UTM link, and every campaign, judged by what the new product (Stu)
+ * got from it, read only from this environment's own database:
+ *   clicks     utm_link_clicks, written by studojo.com/go/<slug> (bots apart)
+ *   visitors   distinct website visitors whose journey events carried the link
+ *              (career_agent.career_journey_events.source)
+ *   sign-ups   people who joined Stu in the range (the dashboards' cohort: IST
+ *              day of joining), credited by their first touch (or last touch)
+ *              from career_agent.career_user_source, else the journey log
+ *   onboarded, paid, revenue  the same rules as the Stu dashboards (ground-truth
+ *              tables over the journey log, test payments left out)
+ * A touch is credited on utm_id = the link's slug, else by matching utm_*
+ * (app/lib/utm-attribution.ts). Internal accounts (staff, studojo.com, test,
+ * guest) are left out unless internal=1, as on the dashboards. Days are IST.
  */
 
-// Test accounts would otherwise count as signups from whatever link a probe used.
-const REAL_USER = sql`u.email NOT ILIKE '%@example.com' AND u.email NOT ILIKE '%studojo.test%'`;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const J = "career_agent.career_journey_events";
+const SRC = "career_agent.career_user_source";
+const ist = (x: string) => `to_char((${x}) AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')`;
+const NONEMPTY = (c: string) => `${c} IS NOT NULL AND ${c} <> '{}'::jsonb`;
 
-async function tableExists(name: string): Promise<boolean> {
-  const r = await db.execute(sql`SELECT to_regclass(${name}) IS NOT NULL AS ok`);
-  return Boolean((r.rows[0] as any)?.ok);
+type Q = (text: string) => Promise<any[]>;
+
+async function readOnly<T>(fn: (q: Q) => Promise<T>): Promise<T> {
+  return db.transaction(
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL statement_timeout = '20s'`);
+      const q: Q = async (text) => (await tx.execute(sql.raw(text))).rows as any[];
+      return fn(q);
+    },
+    { accessMode: "read only" },
+  );
 }
 
-const num = (v: unknown) => Number(v ?? 0);
+async function loadRaw(touch: "first" | "last") {
+  return readOnly(async (q) => {
+    const reg = (
+      await q(`SELECT to_regclass('public.utm_campaigns') IS NOT NULL AS links,
+                      to_regclass('public.utm_link_clicks') IS NOT NULL AS clicks,
+                      to_regclass('${J}') IS NOT NULL AS journey,
+                      to_regclass('${SRC}') IS NOT NULL AS source`)
+    )[0] as { links: boolean; clicks: boolean; journey: boolean; source: boolean };
+    const srcCols = reg.source
+      ? new Set(
+          (await q(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'career_agent' AND table_name = 'career_user_source'`)).map(
+            (r) => r.column_name as string,
+          ),
+        )
+      : new Set<string>();
+    const touchCol = touch === "first" ? "first_touch" : "last_touch";
 
-async function linksView() {
-  const hasClicks = await tableExists("public.utm_link_clicks");
-  const clicks = hasClicks
-    ? sql`(SELECT count(*) FROM utm_link_clicks k WHERE k.link_id = c.id AND NOT k.is_bot)`
-    : sql`0`;
-  const botClicks = hasClicks
-    ? sql`(SELECT count(*) FROM utm_link_clicks k WHERE k.link_id = c.id AND k.is_bot)`
-    : sql`0`;
+    const links = reg.links
+      ? await q(`SELECT id, slug, utm_source, utm_medium, utm_campaign, utm_content, utm_term
+                   FROM public.utm_campaigns ORDER BY created_at, id`)
+      : [];
+    const clicks = reg.clicks
+      ? await q(`SELECT link_id, ${ist("clicked_at")} AS day, is_bot, count(*)::int AS n
+                   FROM public.utm_link_clicks GROUP BY 1, 2, 3`)
+      : [];
+    const sourceRows =
+      reg.source && srcCols.has(touchCol)
+        ? await q(`SELECT user_id, ${touchCol} AS touch FROM ${SRC} WHERE user_id IS NOT NULL AND ${NONEMPTY(touchCol)}`)
+        : [];
 
-  const r = await db.execute(sql`
-    SELECT c.id,
-           ${clicks} AS clicks,
-           ${botClicks} AS bot_clicks,
-           s.signups, s.payers, s.inr, s.usd
-    FROM utm_campaigns c
-    LEFT JOIN LATERAL (
-      SELECT count(DISTINCT a.user_id) AS signups,
-             count(DISTINCT p.user_id) AS payers,
-             coalesce(sum(p.amount_cents) FILTER (WHERE upper(p.currency) = 'INR'), 0) / 100.0 AS inr,
-             coalesce(sum(p.amount_cents) FILTER (WHERE upper(p.currency) = 'USD'), 0) / 100.0 AS usd
-      FROM user_attribution a
-      JOIN "user" u ON u.id = a.user_id AND ${REAL_USER}
-      LEFT JOIN payment_orders p ON p.user_id = a.user_id AND p.status = 'paid'
-      WHERE lower(a.utm_source) = lower(c.utm_source)
-        AND lower(coalesce(a.utm_medium, '')) = lower(c.utm_medium)
-        AND lower(coalesce(a.utm_campaign, '')) = lower(c.utm_campaign)
-        AND (c.utm_content IS NULL OR lower(coalesce(a.utm_content, '')) = lower(c.utm_content))
-        AND (c.utm_term IS NULL OR lower(coalesce(a.utm_term, '')) = lower(c.utm_term))
-    ) s ON TRUE
-  `);
-  const stats: Record<string, unknown> = {};
-  for (const row of r.rows as any[]) {
-    stats[row.id] = {
-      clicks: num(row.clicks),
-      botClicks: num(row.bot_clicks),
-      signups: num(row.signups),
-      payers: num(row.payers),
-      inr: num(row.inr),
-      usd: num(row.usd),
-    };
-  }
-  return { stats };
-}
-
-type SourceRow = {
-  source: string;
-  medium: string;
-  campaign: string;
-  tagged: boolean;
-  signups: number;
-  payers: number;
-  inr: number;
-  usd: number;
-};
-
-async function sourcesView(days: number) {
-  // Grouped in SQL by the raw values, then folded into dictionary channels here
-  // so every old spelling (ig/paid, social, nurture) lands in one row.
-  const r = await db.execute(sql`
-    SELECT a.utm_source, a.utm_medium, a.utm_campaign,
-           nullif(split_part(split_part(a.referrer, '://', 2), '/', 1), '') AS ref_host,
-           (a.user_id IS NOT NULL) AS captured,
-           count(DISTINCT u.id) AS signups,
-           count(DISTINCT p.user_id) AS payers,
-           coalesce(sum(p.amount_cents) FILTER (WHERE upper(p.currency) = 'INR'), 0) / 100.0 AS inr,
-           coalesce(sum(p.amount_cents) FILTER (WHERE upper(p.currency) = 'USD'), 0) / 100.0 AS usd
-    FROM "user" u
-    LEFT JOIN user_attribution a ON a.user_id = u.id
-    LEFT JOIN payment_orders p ON p.user_id = u.id AND p.status = 'paid'
-    WHERE u.created_at > now() - make_interval(days => ${days}) AND ${REAL_USER}
-    GROUP BY 1, 2, 3, 4, 5
-  `);
-
-  const merged = new Map<string, SourceRow>();
-  let total = 0;
-  let notCaptured = 0;
-  let taggedSignups = 0;
-  for (const row of r.rows as any[]) {
-    const signups = num(row.signups);
-    total += signups;
-    let source: string;
-    let medium: string;
-    let tagged = false;
-    if (!row.captured) {
-      notCaptured += signups;
-      source = "(not captured)";
-      medium = "";
-    } else if (row.utm_source) {
-      const n = normalizeTags(row.utm_source, row.utm_medium);
-      source = n.source;
-      medium = n.medium;
-      tagged = n.tagged;
-      if (tagged) taggedSignups += signups;
-    } else {
-      const c = channelFromReferrer(row.ref_host ? `https://${row.ref_host}` : null);
-      source = c.source;
-      medium = c.medium;
+    let pairs: any[] = [];
+    let eventTouch: any[] = [];
+    let visitorTouches: any[] = [];
+    if (reg.journey) {
+      const uvParts = [`SELECT DISTINCT user_id, visitor_id FROM ${J} WHERE user_id IS NOT NULL AND visitor_id IS NOT NULL`];
+      if (srcCols.has("visitor_id")) uvParts.push(`SELECT user_id, visitor_id FROM ${SRC} WHERE user_id IS NOT NULL AND visitor_id IS NOT NULL`);
+      const uv = uvParts.join(" UNION ");
+      pairs = await q(`${uv} LIMIT 300000`);
+      // The person's first (or last) journey event with a source, their own or their visitor id's before sign-in.
+      eventTouch = await q(`
+        WITH uv AS (${uv}),
+             ev AS (
+               SELECT e.user_id, e.at, e.source FROM ${J} e WHERE e.user_id IS NOT NULL AND ${NONEMPTY("e.source")}
+               UNION ALL
+               SELECT uv.user_id, e.at, e.source FROM ${J} e JOIN uv ON uv.visitor_id = e.visitor_id
+                WHERE e.user_id IS NULL AND ${NONEMPTY("e.source")})
+        SELECT DISTINCT ON (user_id) user_id, source FROM ev
+         ORDER BY user_id, at ${touch === "first" ? "ASC" : "DESC"} LIMIT 200000`);
+      visitorTouches = await q(`
+        SELECT visitor_id, ${ist("at")} AS day, source FROM ${J}
+         WHERE visitor_id IS NOT NULL AND source IS NOT NULL
+           AND (source ? 'utm_id' OR source ? 'utm_source' OR source ? 'utm_campaign')
+         GROUP BY 1, 2, 3 LIMIT 300000`);
     }
-    const campaign = tagged ? String(row.utm_campaign || "").toLowerCase() : "";
-    const key = `${source}|${medium}|${campaign}|${tagged}`;
-    const cur = merged.get(key) ?? { source, medium, campaign, tagged, signups: 0, payers: 0, inr: 0, usd: 0 };
-    cur.signups += signups;
-    cur.payers += num(row.payers);
-    cur.inr += num(row.inr);
-    cur.usd += num(row.usd);
-    merged.set(key, cur);
-  }
-  const rows = [...merged.values()].sort((a, b) => b.signups - a.signups || b.payers - a.payers);
-  return { days, total, taggedSignups, notCaptured, rows };
-}
-
-async function hygieneView(days: number) {
-  // Tag combinations stored against real signups that fall outside the
-  // dictionary. PostHog visit-level combinations are checked by the page.
-  const r = await db.execute(sql`
-    SELECT a.utm_source, a.utm_medium, a.utm_campaign, count(*) AS signups
-    FROM user_attribution a
-    JOIN "user" u ON u.id = a.user_id AND ${REAL_USER}
-    WHERE a.utm_source IS NOT NULL AND u.created_at > now() - make_interval(days => ${days})
-    GROUP BY 1, 2, 3
-    ORDER BY 4 DESC
-  `);
-  const problems = [];
-  for (const row of r.rows as any[]) {
-    const n = normalizeTags(row.utm_source, row.utm_medium);
-    if (!n.tagged) continue; // a tag another site added, e.g. chatgpt.com
-    const reasons: string[] = [];
-    if (!n.known) reasons.push("source or medium not in the dictionary");
-    if (row.utm_campaign && /^\d+$/.test(row.utm_campaign)) reasons.push("campaign is a bare number (Meta id)");
-    if (!row.utm_campaign) reasons.push("no campaign");
-    if (row.utm_source !== n.source || (row.utm_medium ?? "") !== n.medium)
-      reasons.push(`old spelling, reported as ${n.source} / ${n.medium}`);
-    if (reasons.length)
-      problems.push({
-        source: row.utm_source,
-        medium: row.utm_medium,
-        campaign: row.utm_campaign,
-        signups: num(row.signups),
-        reasons,
-      });
-  }
-  return { days, problems };
+    return { reg, links, clicks, sourceRows, pairs, eventTouch, visitorTouches };
+  });
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -174,17 +113,72 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!user) return Response.json({ error: "Forbidden" }, { status: 403 });
 
   const url = new URL(request.url);
-  const view = url.searchParams.get("view") || "links";
-  const days = Math.min(365, Math.max(1, Number(url.searchParams.get("days")) || 30));
-
-  if (!(await tableExists("public.user_attribution"))) {
-    return Response.json({ error: "user_attribution does not exist yet" }, { status: 503 });
-  }
+  const p = (k: string) => url.searchParams.get(k) ?? "";
+  const end = DAY_RE.test(p("end")) ? p("end") : todayIst();
+  const start = DAY_RE.test(p("start")) ? p("start") : "2000-01-01";
+  const touch = p("touch") === "last" ? "last" : "first";
+  const internal = p("internal") === "1";
+  const headers = { "Cache-Control": "no-store" };
 
   try {
-    if (view === "sources") return Response.json(await sourcesView(days));
-    if (view === "hygiene") return Response.json(await hygieneView(days));
-    return Response.json(await linksView());
+    const [d, raw] = await Promise.all([stuData(p("fresh") === "1"), loadRaw(touch)]);
+
+    const links: LinkKey[] = raw.links.map((r) => ({
+      id: String(r.id),
+      slug: r.slug,
+      source: r.utm_source,
+      medium: r.utm_medium,
+      campaign: r.utm_campaign,
+      content: r.utm_content,
+      term: r.utm_term,
+    }));
+    const clicks: ReportClick[] = raw.clicks.map((r) => ({ linkId: String(r.link_id), day: String(r.day), bot: !!r.is_bot, n: Number(r.n) || 0 }));
+
+    // Revenue as on the dashboards: real payments (paise), refunds taken off, test payments left out.
+    const idx = new Map<string, number>();
+    d.users.forEach((u, i) => idx.set(u.id, i));
+    const revenue = new Map<number, number>();
+    for (const [kind, i, , , amt] of d.act) if (kind === "pay") revenue.set(i, (revenue.get(i) ?? 0) + amt);
+
+    const rowTouch = new Map<string, unknown>();
+    for (const r of raw.sourceRows) rowTouch.set(r.user_id, r.touch);
+    const evTouch = new Map<string, unknown>();
+    for (const r of raw.eventTouch) evTouch.set(r.user_id, r.source);
+
+    const users: ReportUser[] = d.users.map((u, i) => ({
+      day: istDay(u.joined),
+      internal: !!u.internal,
+      touch: withUtmId(touchKey(rowTouch.get(u.id)), touchKey(evTouch.get(u.id))),
+      onboarded: stepAt(d, u, "onboarded") != null,
+      paid: stepAt(d, u, "paid") != null,
+      revenue: revenue.get(i) ?? 0,
+    }));
+
+    // A visitor who became an internal account is internal too.
+    const visitorUser = new Map<string, number>();
+    for (const v of d.visitors) if (v.u >= 0) visitorUser.set(v.id, v.u);
+    for (const r of raw.pairs) {
+      const i = idx.get(r.user_id);
+      if (i != null && !visitorUser.has(r.visitor_id)) visitorUser.set(r.visitor_id, i);
+    }
+    const visitors: ReportVisitor[] = raw.visitorTouches.map((r) => {
+      const i = visitorUser.get(r.visitor_id);
+      return { id: r.visitor_id, day: String(r.day), internal: i != null && !!d.users[i]?.internal, touch: touchKey(r.source) };
+    });
+
+    const report = buildReport({ links, clicks, users, visitors, start, end, internal });
+    return Response.json(
+      {
+        generatedAt: new Date().toISOString(),
+        start,
+        end,
+        touch,
+        internal,
+        live: { links: raw.reg.links, clicks: raw.reg.clicks, journey: raw.reg.journey, source: raw.reg.source },
+        ...report,
+      },
+      { headers },
+    );
   } catch (e: any) {
     console.error("[utm-report]", e);
     return Response.json({ error: "Report query failed" }, { status: 500 });
