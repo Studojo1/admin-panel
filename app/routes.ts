@@ -73,6 +73,7 @@ export default [
   route("api/ugc-creators/:id", "routes/api.ugc-creators.$id.tsx"),
   route("api/fellowship-calendar", "routes/api.fellowship-calendar.tsx"),
   route("api/fellowship-dashboard", "routes/api.fellowship-dashboard.tsx"),
+  route("api/fellowship-proof", "routes/api.fellowship-proof.tsx"),
   // Vanshika's Claude Code (shared key, not an admin login): drafts in, never approval.
   route("api/agent/*", "routes/api.agent.$.tsx"),
   route("api/b2b-gtm", "routes/api.b2b-gtm.tsx"),

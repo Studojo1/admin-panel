@@ -79,6 +79,12 @@ const ago = (iso: string | null) => {
   return days === 1 ? "Yesterday" : `${days} days ago`;
 };
 const safeUrl = (u: string | null) => (u && /^https?:\/\//i.test(u) ? u : null);
+// Analytics screenshots the fellow uploaded: a JSON array of "fellow-proof/…" refs (an old plain link may come first).
+const proofRefs = (v: string | null): string[] => {
+  if (!v) return [];
+  if (/^https?:\/\//i.test(v)) return [v];
+  try { const a = JSON.parse(v); return Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : []; } catch { return []; }
+};
 const waDigits = (w: string | null) => { const d = (w || "").replace(/\D/g, ""); return d.length >= 10 ? d : null; };
 // The team sends from WhatsApp Web, not the app. One named tab, reused: WhatsApp Web only works in one tab at a time.
 const WA_TAB = "studojo_whatsapp_web";
@@ -592,6 +598,44 @@ function WeekChart({ weekly, perWeek, weekNo }: { weekly: Desk["weekly"]; perWee
   );
 }
 
+// The fellow's analytics screenshots for one post. Images come through /api/fellowship-proof with the admin token,
+// so they're fetched here and shown from object URLs (an <img> can't send the token).
+function ProofShots({ value }: { value: string | null }) {
+  const refs = useMemo(() => proofRefs(value), [value]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [failed, setFailed] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let on = true; const made: string[] = [];
+    (async () => {
+      const token = await getToken();
+      for (const r of refs) {
+        if (safeUrl(r)) continue;
+        try {
+          const res = await fetch(`/api/fellowship-proof?ref=${encodeURIComponent(r)}`, { headers: { Authorization: `Bearer ${token}` } });
+          if (!res.ok) { const j = await res.json().catch(() => null); if (on) setFailed((m) => ({ ...m, [r]: (j && j.error) || "Couldn't load it" })); continue; }
+          const u = URL.createObjectURL(await res.blob()); made.push(u);
+          if (on) setUrls((m) => ({ ...m, [r]: u }));
+        } catch { if (on) setFailed((m) => ({ ...m, [r]: "Couldn't load it" })); }
+      }
+    })();
+    return () => { on = false; made.forEach((u) => URL.revokeObjectURL(u)); };
+  }, [refs]);
+  return (
+    <div className="proofs">
+      <h3 className="label" style={{ margin: 0 }}>Analytics screenshots{refs.length ? ` (${refs.length})` : ""}</h3>
+      {refs.length ? (
+        <div className="proof-grid">
+          {refs.map((r, i) => safeUrl(r)
+            ? <a key={r} className="proof-link" href={safeUrl(r)!} target="_blank" rel="noopener noreferrer">Screenshot link</a>
+            : urls[r]
+              ? <a key={r} href={urls[r]} target="_blank" rel="noopener noreferrer"><img src={urls[r]} alt={`Analytics screenshot ${i + 1}`} /></a>
+              : <span key={r} className="proof-wait">{failed[r] ?? "Loading…"}</span>)}
+        </div>
+      ) : <p className="hint">None yet. Fellows upload their analytics screenshots at the end of each week.</p>}
+    </div>
+  );
+}
+
 function Attention(p: {
   kind: AttKind; all: boolean; setAll: (v: boolean) => void; today: string;
   reviewList: Fellow[]; nudgeList: Fellow[]; nudgeReason: (f: Fellow) => string[]; nudgedToday: (f: Fellow) => boolean;
@@ -913,9 +957,9 @@ function PostEditor({ D, state, byId, act, creatorApi, setDrawer, postDays }: {
       <>{head}<div className="sheet-body">
         <div><h2 id="sheet-title" style={{ margin: 0, font: "600 23px/1.2 var(--serif)" }}>{existing.title}</h2><p className="card-sub">{f!.name} · {existing.kind === "studojo" ? "Studojo" : "Their story"} · due {dow(existing.due)} {fmt(existing.due)}{existing.postedAt ? ` · posted ${fmt(istDay(existing.postedAt))}` : ""}</p></div>
         <div className="actions">{safeUrl(existing.url) ? <a className="btn btn-line btn-sm" href={safeUrl(existing.url)!} target="_blank" rel="noopener noreferrer"><Icon id="link" />LinkedIn post</a> : null}
-          {safeUrl(existing.screenshot) ? <a className="btn btn-line btn-sm" href={safeUrl(existing.screenshot)!} target="_blank" rel="noopener noreferrer">Numbers screenshot</a> : null}
           <VerdictPill v={existing.verdict} /></div>
         {existing.insight ? <p className="note note-ok"><Icon id="chart" /><span><b>Claude: </b>{existing.insight}</span></p> : existing.impressions != null ? <p className="hint">Claude hasn't written its note on this one yet.</p> : null}
+        <ProofShots value={existing.screenshot} />
         <p className="post-text">{existing.body}</p>
         {r && r.editedByTeam ? <details className="more"><summary>What Claude wrote before the team's edits</summary><p className="post-text" style={{ marginTop: 8 }}>{r.claudeBody}</p></details> : null}
         <form className="compose" onSubmit={async (e) => { e.preventDefault(); setBusy(true); await act({ intent: "record", id: existing.id, url, ...nums }, "Numbers saved"); setBusy(false); }}>

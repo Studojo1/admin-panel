@@ -1,4 +1,5 @@
 import db from "~/lib/db.server";
+import { proofRefs } from "~/lib/fellow-proof.server";
 import { sql } from "drizzle-orm";
 import {
   HIRING_PIPELINE,
@@ -689,6 +690,7 @@ export async function programmeDashboard() {
       blocked: posts.filter((p) => p.status === "blocked").length,
       posted: posts.filter(isPosted).length,
       awaitingNumbers: posts.filter((p) => isPosted(p) && p.impressions == null).length,
+      withScreenshots: posts.filter((p) => isPosted(p) && proofRefs(p.screenshot).length > 0).length,
       measured: posts.filter(measured).length,
     },
     weekly, kinds,
