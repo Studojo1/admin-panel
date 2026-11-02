@@ -24,6 +24,8 @@ const NAV_LINKS: readonly { to: string; label: string; archive?: true; stu?: tru
   { to: "/webinar-registrations", label: "Webinar Signups" },
   { to: "/campus-ambassadors", label: "Studojo Insiders" },
   { to: "/fellowship", label: "Growth Fellowship" },
+  { to: "/fellowship-program", label: "Program dashboard" },
+  { to: "/fellowship-program/calendar", label: "Editorial calendar" },
   { to: "/sensei", label: "Sensei" },
   { to: "/utm-builder", label: "UTM Links" },
   { to: "/b2b-gtm", label: "B2B GTM" },

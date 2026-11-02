@@ -17,7 +17,7 @@ import {
   setPlaybook,
 } from "~/lib/fellowship.server";
 
-// The editorial calendar's data (/fellowship/calendar). GET is the whole desk,
+// The editorial calendar's data (/fellowship-program/calendar). GET is the whole desk,
 // or one fellow's stories and earlier posts with ?fellow=<id>. POST is the
 // review flow: approve, save, send back or remove Claude's drafts, approve all
 // of a fellow's drafts, block an approved post (and release it), record a post the fellow

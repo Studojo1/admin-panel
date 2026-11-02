@@ -12,7 +12,7 @@ import {
 } from "~/lib/ugc-creators.server";
 
 // The Growth Fellowship's editorial desk: the calendar the team works from
-// (/fellowship/calendar) and the connection Vanshika's Claude Code uses to
+// (/fellowship-program/calendar) and the connection Vanshika's Claude Code uses to
 // write posts (/api/agent). Claude only ever writes drafts. A draft lives in
 // ugc_creator_drafts, which no student query reads, and reaches a fellow's page
 // only when someone on the team approves it.
@@ -606,6 +606,85 @@ export async function calendarView() {
         standing: standing(ps, today, rules.postsPerWeek),
         posts: ps.map((p) => ({ ...p, verdict: verdictOf(p, ps, all) })),
         drafts: draftsBy.get(f.id) ?? [],
+      };
+    }),
+  };
+}
+
+/**
+ * The programme dashboard (/fellowship-program): the founder's plan against what
+ * happened, applicants to posting fellows, the post pipeline, week by week, and
+ * one row per fellow. Built on calendarView so both pages count the same way.
+ */
+export async function programmeDashboard() {
+  const cal = await calendarView();
+  const { today, thisWeek, rules } = cal;
+  let apps: Record<string, number> = {};
+  try {
+    apps = Object.fromEntries(((await db.execute(sql`SELECT status, COUNT(*)::int AS n FROM ugc_applications GROUP BY status`)).rows as { status: string; n: number }[]).map((r) => [r.status, Number(r.n)]));
+  } catch { /* no applications table yet */ }
+  const live = cal.fellows.filter((f) => f.status !== "removed");
+  const posts = live.flatMap((f) => f.posts);
+  const postedOn = (p: Post) => (p.postedAt ? istDate(p.postedAt) : null);
+  const postingBy = (end: string) => new Set(posts.filter((p) => isPosted(p) && postedOn(p) && postedOn(p)! > addDays(end, -7) && postedOn(p)! <= end).map((p) => p.creatorId)).size;
+  const impressionsBy = (end: string) => posts.filter((p) => isPosted(p) && postedOn(p) && postedOn(p)! <= end).reduce((s, p) => s + imp(p), 0);
+
+  // Each checkpoint of the plan, with what had happened by that date (nothing yet for dates ahead).
+  const checkpoints = rules.plan.map((c) => ({
+    ...c,
+    actual: c.by <= today ? { creators: live.filter((f) => f.joined && f.joined <= c.by).length, posting: postingBy(c.by), impressions: impressionsBy(c.by) } : null,
+  }));
+  const weeks: string[] = [];
+  for (let w = cal.programmeStart; w <= thisWeek; w = addDays(w, 7)) weeks.push(w);
+  const weekly = weeks.slice(-8).map((w) => {
+    const due = posts.filter((p) => weekOf(p.due) === w && p.status !== "blocked");
+    const up = posts.filter((p) => isPosted(p) && postedOn(p) && weekOf(postedOn(p)!) === w);
+    return {
+      week: w, partial: w === thisWeek, due: due.length, postedOfDue: due.filter(isPosted).length,
+      posted: up.length, studojo: up.filter((p) => p.kind === "studojo").length,
+      impressions: up.reduce((s, p) => s + imp(p), 0), posting: new Set(up.map((p) => p.creatorId)).size,
+      joined: live.filter((f) => f.joined && weekOf(f.joined) === w).length,
+    };
+  });
+  const kinds = (["personal", "studojo"] as const).map((k) => {
+    const up = posts.filter((p) => isPosted(p) && p.kind === k), m = up.filter(measured);
+    return { kind: k, posted: up.length, impressions: up.reduce((s, p) => s + imp(p), 0), avg: m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0 };
+  });
+  const drafts = live.flatMap((f) => f.drafts);
+
+  return {
+    today, thisWeek, programmeStart: cal.programmeStart, rules: { goal: rules.goal, plan: rules.plan, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules) },
+    now: { creators: live.length, posting: postingBy(today), impressions: cal.totals.impressions, avgPerPost: cal.totals.avgPerPost },
+    checkpoints,
+    funnel: {
+      applied: Object.values(apps).reduce((s, n) => s + n, 0),
+      shortlisted: (apps.shortlisted ?? 0) + (apps.meeting ?? 0) + (apps.selected ?? 0),
+      selected: apps.selected ?? 0,
+      fellows: live.length,
+      postedOnce: new Set(posts.filter(isPosted).map((p) => p.creatorId)).size,
+      postingThisWeek: new Set(posts.filter((p) => isPosted(p) && postedOn(p) && weekOf(postedOn(p)!) === thisWeek).map((p) => p.creatorId)).size,
+    },
+    pipeline: {
+      drafting: drafts.filter((d) => d.status === "review").length,
+      sentBack: drafts.filter((d) => d.status === "changes").length,
+      scheduled: posts.filter((p) => p.status === "ready" && p.due >= today).length,
+      overdue: posts.filter((p) => p.status === "ready" && p.due < today).length,
+      blocked: posts.filter((p) => p.status === "blocked").length,
+      posted: posts.filter(isPosted).length,
+      awaitingNumbers: posts.filter((p) => isPosted(p) && p.impressions == null).length,
+      measured: posts.filter(measured).length,
+    },
+    weekly, kinds,
+    fellows: cal.fellows.map((f) => {
+      const up = f.posts.filter(isPosted), m = up.filter(measured);
+      const best = m.length ? m.reduce((a, b) => (imp(b) > imp(a) ? b : a)) : null;
+      return {
+        id: f.id, name: f.name, college: f.college, field: f.field, cohort: f.cohort, status: f.status, joined: f.joined,
+        connectionsAtJoin: f.connectionsAtJoin, connections: f.connections, standing: f.standing,
+        posted: up.length, measured: m.length, avg: m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0,
+        best: best ? { title: best.title, impressions: imp(best), url: best.url } : null,
+        scheduled: f.posts.filter((p) => p.status === "ready" && p.due >= today).length,
+        drafts: f.drafts.length, stories: f.stories, earlierPosts: f.earlierPosts,
       };
     }),
   };

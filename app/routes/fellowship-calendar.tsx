@@ -14,7 +14,8 @@ export function meta({}: Route.MetaArgs) {
 // The Growth Fellowship's editorial calendar: every fellow by day, with each
 // post's status, and the review flow for the posts Vanshika's Claude Code
 // writes. Claude's drafts wait here ("To review"); a fellow sees a post only
-// after someone approves it. Applicants live on /fellowship.
+// after someone approves it. Listed under Live tools in Navigate
+// (/fellowship-program/calendar), next to the dashboard; applicants stay on /fellowship.
 
 // ---------------------------------------------------------------- types (mirror app/lib/fellowship.server.ts)
 type Kind = "personal" | "studojo";
@@ -228,21 +229,24 @@ export default function FellowshipCalendar() {
   if (!isAuthorized) return null;
 
   return (
-    <div className="fx">
+    <>
       <AdminHeader />
-      {!D ? (
-        <div className="loading">{loadError ? <div className="empty"><b>The calendar didn't load</b>{loadError}<div style={{ marginTop: 12 }}><button className="btn btn-primary" type="button" onClick={load}>Try again</button></div></div> : "Loading the calendar…"}</div>
-      ) : (
-        <Desk
-          D={D} setD={setD} reload={load} toast={toast}
-          week={week ?? D.thisWeek} setWeek={setWeek}
-          filters={{ q, setQ, fStatus, setFStatus, fField, setFField, fCohort, setFCohort, sort, setSort, dir, setDir }}
-          att={att} setAtt={setAtt} attAll={attAll} setAttAll={setAttAll}
-          drawer={drawer} setDrawer={setDrawer} nudge={nudge} setNudge={setNudge}
-        />
-      )}
-      <div className={`toast${toastMsg ? " on" : ""}`} role="status" aria-live="polite">{toastMsg ? <><Icon id="check" /><span>{toastMsg}</span></> : null}</div>
-    </div>
+      {/* The header stays outside .fx so this page's styles never reach it. */}
+      <div className="fx">
+        {!D ? (
+          <div className="loading">{loadError ? <div className="empty"><b>The calendar didn't load</b>{loadError}<div style={{ marginTop: 12 }}><button className="btn btn-primary" type="button" onClick={load}>Try again</button></div></div> : "Loading the calendar…"}</div>
+        ) : (
+          <Desk
+            D={D} setD={setD} reload={load} toast={toast}
+            week={week ?? D.thisWeek} setWeek={setWeek}
+            filters={{ q, setQ, fStatus, setFStatus, fField, setFField, fCohort, setFCohort, sort, setSort, dir, setDir }}
+            att={att} setAtt={setAtt} attAll={attAll} setAttAll={setAttAll}
+            drawer={drawer} setDrawer={setDrawer} nudge={nudge} setNudge={setNudge}
+          />
+        )}
+        <div className={`toast${toastMsg ? " on" : ""}`} role="status" aria-live="polite">{toastMsg ? <><Icon id="check" /><span>{toastMsg}</span></> : null}</div>
+      </div>
+    </>
   );
 }
 
@@ -378,10 +382,6 @@ function Desk(P: DeskProps) {
             <p>{cohorts.length ? `${cohorts.length === 1 ? `Cohort ${cohorts[0]}` : `${cohorts.length} cohorts`} · ` : ""}{plural(live.length, "fellow")} · Week {weekNo(THIS)} of the fellowship · {DOWL[day(today).getUTCDay()]} {fmt(today)}</p>
           </div>
           <div className="head-actions">
-            <nav className="switch" aria-label="Growth Fellowship">
-              <a href="/fellowship/calendar" aria-current="page"><Icon id="cal" />Calendar</a>
-              <a href="/fellowship"><Icon id="people" />Applicants</a>
-            </nav>
             <button className="btn btn-line" type="button" onClick={() => setDrawer({ mode: "add-fellow" })}><Icon id="plus" />Add a fellow</button>
             <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "post", id: null })}><Icon id="plus" />Add a post</button>
           </div>

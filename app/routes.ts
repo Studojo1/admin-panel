@@ -42,8 +42,11 @@ export default [
   route("ugc-applicants", "routes/ugc-applicants.tsx"),
   // The Growth Fellowship name for the same page.
   route("fellowship", "routes/ugc-applicants.tsx", { id: "fellowship" }),
-  // The Growth Fellowship editorial calendar: fellows by day and the review flow for Claude's drafts.
-  route("fellowship/calendar", "routes/fellowship-calendar.tsx"),
+  // The Growth Fellowship program (Navigate, Live tools): the tracking dashboard and the editorial
+  // calendar, where Claude's drafts are reviewed. The old calendar address redirects.
+  route("fellowship-program", "routes/fellowship-program.tsx"),
+  route("fellowship-program/calendar", "routes/fellowship-calendar.tsx"),
+  route("fellowship/calendar", "routes/fellowship-calendar-redirect.tsx"),
   route("sensei", "routes/sensei.tsx"),
   route("b2b-gtm", "routes/b2b-gtm.tsx"),
   route("b2b-gtm/team/:who", "routes/b2b-gtm.team.$who.tsx"),
@@ -69,6 +72,7 @@ export default [
   route("api/ugc-creators", "routes/api.ugc-creators.tsx"),
   route("api/ugc-creators/:id", "routes/api.ugc-creators.$id.tsx"),
   route("api/fellowship-calendar", "routes/api.fellowship-calendar.tsx"),
+  route("api/fellowship-dashboard", "routes/api.fellowship-dashboard.tsx"),
   // Vanshika's Claude Code (shared key, not an admin login): drafts in, never approval.
   route("api/agent/*", "routes/api.agent.$.tsx"),
   route("api/b2b-gtm", "routes/api.b2b-gtm.tsx"),

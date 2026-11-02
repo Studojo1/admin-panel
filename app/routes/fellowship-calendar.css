@@ -1,4 +1,4 @@
-/* The Growth Fellowship editorial calendar (/fellowship/calendar): the chosen design
+/* The Growth Fellowship editorial calendar (/fellowship-program/calendar): the chosen design
    (~/Studojo/dashboard-design-ideas/edition/admin.html), scoped under .fx so nothing leaks into the admin panel. */
 .fx {
   /* Layout: LinkedIn-style top nav. Calendar tab: goal and needs-attention band on top, then a resource
@@ -386,7 +386,7 @@
 }
 
 /* ---------- admin panel additions: the review flow, the page switch, results ---------- */
-.fx { --fx-top: 66px; min-height: 100vh; }
+.fx { --fx-top: 66px; min-height: calc(100vh - var(--fx-top)); }
 @media (min-width: 768px) { .fx { --fx-top: 82px; } }
 /* room for the plan marker's label under the big number */
 .fx .overview .gm { margin-top: 30px; }
