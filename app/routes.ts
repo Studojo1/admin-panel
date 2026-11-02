@@ -8,7 +8,8 @@ import { type RouteConfig, index, layout, prefix, route } from "@react-router/de
 // Retention and the self-check, under one layout (app/routes/stu-layout.tsx).
 // On main, api.journeys.tsx stays unrouted, as it was before.
 // The Overview (2 Nov 2026) is the root and the landing page after login: one
-// graphic screen with its own range control, so it sits outside that layout.
+// short screen with its own range control, so it sits outside that layout. Its
+// detail panels are on /usage, inside the layout.
 export default [
   index("routes/stu-overview.tsx"),
   layout("routes/stu-layout.tsx", [
@@ -19,6 +20,8 @@ export default [
     route("sources", "routes/stu-sources.tsx"),
     route("journeys", "routes/stu-journeys.tsx"),
     route("retention", "routes/stu-retention.tsx"),
+    // Engagement, power users, calls, retention and the live feed, moved off the Overview (2 Nov 2026).
+    route("usage", "routes/stu-usage.tsx"),
     route("self-check", "routes/stu-check.tsx"),
   ]),
   route("api/stu", "routes/api.stu.tsx"),

@@ -22,6 +22,7 @@ const TABS = [
   { to: "/sources", label: "Sources" },
   { to: "/journeys", label: "Journeys" },
   { to: "/retention", label: "Retention" },
+  { to: "/usage", label: "Usage" },
   { to: "/self-check", label: "Self-check" },
 ];
 
@@ -89,17 +90,17 @@ export default function StuLayout() {
     <div className="min-h-screen bg-neutral-50">
       <AdminHeader />
       <main className="mx-auto max-w-[100rem] px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="mb-5 flex flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
           <div>
-            <div className="text-xs font-bold uppercase tracking-wide text-violet-700">Stu · studojo.pro</div>
-            <nav className="mt-1 flex flex-wrap gap-1">
+            <div className="text-xs font-bold uppercase tracking-wide text-purple-700">Stu · studojo.pro</div>
+            <nav className="mt-1.5 inline-flex flex-wrap gap-1 rounded-xl border-2 border-neutral-900 bg-white p-1 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]">
               {TABS.map((t) => (
                 <NavLink
                   key={t.to}
                   to={`${t.to}${qs}`}
                   end={t.end}
                   className={({ isActive }) =>
-                    `rounded-lg border-2 px-3 py-1.5 text-sm font-semibold ${isActive ? "border-neutral-900 bg-neutral-900 text-white" : "border-transparent text-neutral-700 hover:border-neutral-300 hover:bg-white"}`
+                    `rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${isActive ? "bg-purple-500 text-white" : "text-neutral-600 hover:bg-neutral-100"}`
                   }
                 >
                   {t.label}
@@ -109,13 +110,15 @@ export default function StuLayout() {
             </nav>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            {[7, 14, 30, 90].map((n) => (
-              <button key={n} onClick={() => preset(n)} className="rounded-lg border-2 border-neutral-900 bg-white px-2.5 py-1 font-semibold hover:bg-neutral-100">{n}d</button>
-            ))}
-            <button onClick={() => setFilters({ start: HISTORY_START, end: today })} className="rounded-lg border-2 border-neutral-900 bg-white px-2.5 py-1 font-semibold hover:bg-neutral-100">Since 25 Oct</button>
-            <input type="date" value={filters.start} max={filters.end} onChange={(e) => e.target.value && setFilters({ start: e.target.value })} className="rounded-lg border-2 border-neutral-900 px-2 py-1" />
+            <div className="inline-flex flex-wrap gap-0.5 rounded-xl border-2 border-neutral-900 bg-white p-0.5 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)]">
+              {[7, 14, 30, 90].map((n) => (
+                <button key={n} onClick={() => preset(n)} className="rounded-lg px-2.5 py-1 font-semibold text-neutral-600 hover:bg-neutral-100">{n}d</button>
+              ))}
+              <button onClick={() => setFilters({ start: HISTORY_START, end: today })} className="rounded-lg px-2.5 py-1 font-semibold text-neutral-600 hover:bg-neutral-100">Since 25 Oct</button>
+            </div>
+            <input type="date" value={filters.start} max={filters.end} onChange={(e) => e.target.value && setFilters({ start: e.target.value })} className="rounded-lg border-2 border-neutral-900 bg-white px-2 py-1" />
             <span className="text-neutral-500">to</span>
-            <input type="date" value={filters.end} min={filters.start} onChange={(e) => e.target.value && setFilters({ end: e.target.value })} className="rounded-lg border-2 border-neutral-900 px-2 py-1" />
+            <input type="date" value={filters.end} min={filters.start} onChange={(e) => e.target.value && setFilters({ end: e.target.value })} className="rounded-lg border-2 border-neutral-900 bg-white px-2 py-1" />
             <select value={filters.channel} onChange={(e) => setFilters({ channel: e.target.value })} className="rounded-lg border-2 border-neutral-900 bg-white px-2 py-1">
               <option value="all">All channels</option>
               {channels.map((c) => <option key={c} value={c}>{channelLabel(c)}</option>)}
@@ -124,7 +127,7 @@ export default function StuLayout() {
               <input type="checkbox" checked={filters.internal} onChange={(e) => setFilters({ internal: e.target.checked })} />
               Include internal
             </label>
-            <button onClick={() => load(true)} disabled={loading} className="rounded-lg border-2 border-neutral-900 bg-violet-500 px-2.5 py-1 font-semibold text-white disabled:opacity-50">{loading ? "Loading" : "Refresh"}</button>
+            <button onClick={() => load(true)} disabled={loading} className="rounded-lg border-2 border-neutral-900 bg-purple-500 px-2.5 py-1 font-semibold text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50">{loading ? "Loading" : "Refresh"}</button>
           </div>
         </div>
 
@@ -146,7 +149,7 @@ export default function StuLayout() {
         )}
         {error && <div className="mb-3 rounded-xl border-2 border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
         {!data && !error && (
-          <div className="flex justify-center py-24"><div className="h-8 w-8 animate-spin rounded-full border-[3px] border-violet-500 border-t-transparent" /></div>
+          <div className="flex justify-center py-24"><div className="h-8 w-8 animate-spin rounded-full border-[3px] border-purple-500 border-t-transparent" /></div>
         )}
         {ctx && <Outlet context={ctx} />}
         {drill && data && <DrillModal title={drill.title} cell={drill.cell} data={data} onClose={() => setDrill(null)} />}

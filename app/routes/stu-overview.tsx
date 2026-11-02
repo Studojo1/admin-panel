@@ -1,170 +1,85 @@
-// Stu Overview: the admin root and the landing page after login (owner, 2 Nov
-// 2026: "in one view I can understand what is going on"). One scrollable screen:
-// KPI tiles, the funnel, 30-day trends, sources, call health, drop-offs,
-// engagement and retention, a live feed and an alerts strip. Each section is one
-// call to /api/stu/overview, all in parallel, refreshed every 60 s. The numbers
-// come from the same model functions as the Stu pages (app/lib/stu/overview.ts),
-// and every number opens the people behind it.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, useSearchParams } from "react-router";
-import { BarElement, CategoryScale, Chart as ChartJS, Filler, LinearScale, LineElement, PointElement, Tooltip } from "chart.js";
-import { Bar, Line } from "react-chartjs-2";
-import { AdminHeader } from "~/components";
-import { DrillModal, type DrillPeople, channelLabel } from "~/components/stu/ui";
+// Stu Overview: the admin root and the landing page after login. Rebuilt on
+// 2 Nov 2026 in the old admin's look (owner: "streamline it better for me to
+// view"): what needs action, five headline cards, what is going on, one 30-day
+// chart, a short funnel and the top sources, then links to the deep pages.
+// Calls, engagement, power users, retention, the drop-off detail and the live
+// feed moved to /usage (app/routes/stu-usage.tsx). Same API (/api/stu/overview,
+// one section per call, re-read every 60 s), same numbers, and every number
+// opens the people behind it.
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router";
+import {
+  BarController, BarElement, CategoryScale, Chart as ChartJS, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip,
+} from "chart.js";
+import { Chart } from "react-chartjs-2";
+import { AdminHeader, StatCard } from "~/components";
+import { CARD, DrillModal } from "~/components/stu/ui";
+import {
+  type Drill, type Env, type SectionState, Card, KIT_CSS, N, PALETTE, Seg, crosshair, dayLabel, drillPeople, istTime, useSections,
+} from "~/components/stu/overview-kit";
 import { getToken } from "~/lib/api";
 import { useAdminGuard } from "~/lib/auth-guard";
-import { VendorsTile } from "~/components/vendors/overview-tile";
-import { type Cell, addDays, fmtDur, fmtInr, fmtN, fmtPct, todayIst } from "~/lib/stu/model";
-import type { Alert, FeedRow, FunnelBar, Insight, KpiTile, OvEnvelope, OvSection, PowerRow, SourceRow } from "~/lib/stu/overview";
-import { HEAT_DAYS } from "~/lib/stu/overview";
+import { type Cell, addDays, fmtInr, fmtN, pct, todayIst } from "~/lib/stu/model";
+import type { Alert, FunnelBar, Insight, KpiTile, OvSection, SourceRow } from "~/lib/stu/overview";
+import type { VendorsReport } from "~/lib/vendors/model";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Filler);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, LineController, Tooltip, Filler);
 
 export function meta() {
   return [{ title: "Overview · Stu · Studojo Admin" }];
 }
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const REFRESH_MS = 60_000;
-const SECTIONS: OvSection[] = ["insights", "alerts", "kpis", "usage", "power", "funnel", "trends", "sources", "calls", "dropoffs", "engagement", "feed"];
-const TABS = [
-  { to: "/", label: "Overview" }, { to: "/daily", label: "Daily" }, { to: "/funnel", label: "Funnel" }, { to: "/ratios", label: "Ratios" },
-  { to: "/drop-offs", label: "Drop-offs" }, { to: "/sources", label: "Sources" }, { to: "/journeys", label: "Journeys" },
-  { to: "/retention", label: "Retention" }, { to: "/self-check", label: "Self-check" },
-];
-type RangeKey = "today" | "yesterday" | "7d" | "30d" | "custom";
+/** Stu went live on studojo.com on this IST day. */
+const LAUNCH_DAY = "2026-11-02";
+const SECTIONS: readonly OvSection[] = ["kpis", "alerts", "insights", "trends", "usage", "funnel", "sources"];
+
+type RangeKey = "today" | "yesterday" | "7d" | "30d" | "launch" | "custom";
 const RANGES: { key: RangeKey; label: string }[] = [
-  { key: "today", label: "Today" }, { key: "yesterday", label: "Yesterday" }, { key: "7d", label: "7 days" }, { key: "30d", label: "30 days" }, { key: "custom", label: "Custom" },
+  { key: "today", label: "Today" }, { key: "yesterday", label: "Yesterday" }, { key: "7d", label: "7 days" },
+  { key: "30d", label: "30 days" }, { key: "launch", label: "Since launch" }, { key: "custom", label: "Custom" },
 ];
 
-// ------------------------------------------------------------------ theme
+/** The five headline cards, in the old Overview's colours. */
+const HEADLINE: { key: string; color: "purple" | "green" | "orange" | "pink" | "yellow" }[] = [
+  { key: "revenue", color: "purple" }, { key: "signups", color: "green" }, { key: "onboarded", color: "orange" },
+  { key: "active", color: "pink" }, { key: "paid", color: "yellow" },
+];
+/** The other KPI tiles, kept as one line under the cards. */
+const ALSO = ["visitors", "job_opens", "apply_clicks", "outreach"];
 
-/** Chart colours per theme (dataviz reference palette; validated light and dark). */
-const THEME = {
-  light: {
-    page: "#f9f9f7", surface: "#fcfcfb", ink: "#0b0b0b", ink2: "#52514e", muted: "#898781", grid: "#e1e0d9", axis: "#c3c2b7",
-    border: "rgba(11,11,11,0.10)", track: "#f0efec", up: "#006300", down: "#d03b3b",
-    series: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"],
-    ordinal: ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"],
-    seq: ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"],
-    neutral: "#c3c2b7",
-  },
-  dark: {
-    page: "#0d0d0d", surface: "#1a1a19", ink: "#f0efec", ink2: "#c3c2b7", muted: "#898781", grid: "#2c2c2a", axis: "#383835",
-    border: "rgba(255,255,255,0.10)", track: "#262624", up: "#0ca30c", down: "#e66767",
-    series: ["#3987e5", "#d95926", "#199e70", "#c98500"],
-    ordinal: ["#184f95", "#256abf", "#3987e5", "#6da7ec", "#9ec5f4"],
-    seq: ["#0d366b", "#104281", "#184f95", "#1c5cab", "#256abf", "#2a78d6", "#3987e5", "#5598e7", "#6da7ec", "#86b6ef", "#9ec5f4", "#b7d3f6", "#cde2fb"],
-    neutral: "#52514e",
-  },
-};
-type Theme = (typeof THEME)["light"];
-const STATUS = { good: "#0ca30c", warning: "#fab219", serious: "#ec835a", critical: "#d03b3b" };
+/** The short funnel: one step per stage, visitor to paid. */
+const FUNNEL_STEPS = ["visited_home", "signed_up", "call_started", "onboarded", "saw_jobs", "outreach_started", "paid"];
 
-const CSS = `
-.ov { --page:${THEME.light.page}; --surface:${THEME.light.surface}; --ink:${THEME.light.ink}; --ink2:${THEME.light.ink2}; --muted:${THEME.light.muted};
-  --grid:${THEME.light.grid}; --axis:${THEME.light.axis}; --border:${THEME.light.border}; --track:${THEME.light.track}; --up:${THEME.light.up}; --down:${THEME.light.down};
-  --s1:${THEME.light.series[0]}; --s2:${THEME.light.series[1]}; --hover:rgba(11,11,11,0.04);
-  color-scheme: light; background: var(--page); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-.ov[data-theme="dark"] { --page:${THEME.dark.page}; --surface:${THEME.dark.surface}; --ink:${THEME.dark.ink}; --ink2:${THEME.dark.ink2}; --muted:${THEME.dark.muted};
-  --grid:${THEME.dark.grid}; --axis:${THEME.dark.axis}; --border:${THEME.dark.border}; --track:${THEME.dark.track}; --up:${THEME.dark.up}; --down:${THEME.dark.down};
-  --s1:${THEME.dark.series[0]}; --s2:${THEME.dark.series[1]}; --hover:rgba(255,255,255,0.05); color-scheme: dark; }
-.ov .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
-.ov .num { text-decoration: underline dotted; text-decoration-color: var(--axis); text-underline-offset: 3px; cursor: pointer; }
-.ov .num:hover, .ov .num:focus-visible { text-decoration-color: var(--s1); outline: none; }
-.ov .seg { display:inline-flex; flex-wrap: wrap; border:1px solid var(--border); border-radius:10px; padding:2px; gap:2px; background: var(--surface); }
-.ov .seg button { padding: 3px 10px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--ink2); }
-.ov .seg button:hover { background: var(--hover); }
-.ov .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
-.ov .ctl { border:1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--ink); padding: 3px 8px; font-size: 13px; }
-.ov .row-hover:hover { background: var(--hover); }
-.ov .fade { transition: opacity .2s; }
-.ov .tnum { font-variant-numeric: tabular-nums; }
-`;
+/** Insight links point at Overview anchors; the panels that moved now live on /usage. */
+const OVERVIEW_ANCHORS = new Set(["#kpis", "#funnel", "#sources", "#trends"]);
 
-function useTheme(): { mode: "auto" | "light" | "dark"; setMode: (m: "auto" | "light" | "dark") => void; dark: boolean } {
-  const [mode, setModeState] = useState<"auto" | "light" | "dark">("auto");
-  const [osDark, setOsDark] = useState(false);
-  useEffect(() => {
-    const saved = localStorage.getItem("ov-theme");
-    if (saved === "light" || saved === "dark") setModeState(saved);
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setOsDark(mq.matches);
-    const on = (e: MediaQueryListEvent) => setOsDark(e.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  const setMode = (m: "auto" | "light" | "dark") => {
-    setModeState(m);
-    if (m === "auto") localStorage.removeItem("ov-theme");
-    else localStorage.setItem("ov-theme", m);
-  };
-  return { mode, setMode, dark: mode === "dark" || (mode === "auto" && osDark) };
-}
+const PAGES = [
+  { to: "/daily", label: "Daily", note: "Every number, day by day" },
+  { to: "/funnel", label: "Funnel", note: "All steps and the time between them" },
+  { to: "/drop-offs", label: "Drop-offs", note: "Where people stop, and why" },
+  { to: "/sources", label: "Sources", note: "Funnel and revenue per channel" },
+  { to: "/journeys", label: "Journeys", note: "Each person, step by step" },
+  { to: "/retention", label: "Retention", note: "Who comes back, by week joined" },
+  { to: "/ratios", label: "Ratios", note: "The headline conversions" },
+  { to: "/usage", label: "Usage", note: "Engagement, power users, calls, live feed", fresh: true },
+];
 
-// ------------------------------------------------------------------- data
-
-type Env = OvEnvelope<any>;
-interface SectionState { env: Env | null; error: string; loading: boolean }
-
-async function fetchSection(section: OvSection, start: string, end: string, internal: boolean, fresh: boolean): Promise<Env> {
-  const token = await getToken();
-  const qs = new URLSearchParams({ section, start, end });
-  if (internal) qs.set("internal", "1");
-  if (fresh) qs.set("fresh", "1");
-  const res = await fetch(`/api/stu/overview?${qs}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok || body?.error) throw new Error(body?.error || `HTTP ${res.status}`);
-  return body as Env;
-}
-
-const istTime = (ms: number) => new Date(ms + 330 * 60_000).toISOString().slice(11, 19);
-const istShort = (ms: number) => {
-  const iso = new Date(ms + 330 * 60_000).toISOString();
-  return `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
-};
-const dayLabel = (day: string) => {
-  const d = new Date(day + "T00:00:00Z");
-  return `${d.getUTCDate()} ${d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })}`;
-};
-
-// -------------------------------------------------------------- drill-down
-
-type Drill = (title: string, cell: Cell, env: Env) => void;
-
-function drillPeople(env: Env): DrillPeople {
-  const users: DrillPeople["users"] = [];
-  for (const [k, v] of Object.entries(env.people)) users[Number(k)] = v;
-  return { users, visitors: Object.entries(env.vlinks).map(([id, u]) => ({ id, u })) };
-}
-
-/** A number that opens its people. */
-function N({ cell, title, env, drill, fmt, className = "" }: { cell: Cell; title: string; env: Env; drill: Drill; fmt?: (n: number) => string; className?: string }) {
-  if (cell.na) return <span className={className} style={{ color: "var(--muted)" }} title="Not available here yet">n/a</span>;
-  const text = fmt ? fmt(cell.v) : fmtN(cell.v);
-  const people = cell.users.length + (cell.visitors?.length ?? 0);
-  if (!people) return <span className={className}>{text}</span>;
-  return (
-    <button type="button" className={`num ${className}`} onClick={() => drill(title, cell, env)} title={`${cell.users.length} people${cell.visitors?.length ? `, ${cell.visitors.length} visitors` : ""}: click for the list`}>
-      {text}
-    </button>
-  );
-}
+const SERIES = { signups: "#10b981", onboarded: "#f59e0b", active: "#ec4899", paid: "#a855f7" };
 
 // ------------------------------------------------------------------- page
 
 export default function StuOverview() {
   const { isAuthorized, isPending } = useAdminGuard();
   const [params, setParams] = useSearchParams();
-  const { mode, setMode, dark } = useTheme();
-  const t = dark ? THEME.dark : THEME.light;
   const today = todayIst();
 
-  const range = (params.get("range") as RangeKey) || "today";
+  const range = (RANGES.some((r) => r.key === params.get("range")) ? params.get("range") : "today") as RangeKey;
   const { start, end } = useMemo(() => {
     if (range === "yesterday") return { start: addDays(today, -1), end: addDays(today, -1) };
     if (range === "7d") return { start: addDays(today, -6), end: today };
     if (range === "30d") return { start: addDays(today, -29), end: today };
+    if (range === "launch") return { start: LAUNCH_DAY <= today ? LAUNCH_DAY : today, end: today };
     if (range === "custom") {
       const e = DAY_RE.test(params.get("end") || "") ? params.get("end")! : today;
       const s = DAY_RE.test(params.get("start") || "") ? params.get("start")! : addDays(e, -6);
@@ -176,324 +91,488 @@ export default function StuOverview() {
 
   const setParam = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
-    for (const [k, v] of Object.entries(patch)) (v == null ? next.delete(k) : next.set(k, v));
+    for (const [k, v] of Object.entries(patch)) {
+      if (v == null) next.delete(k);
+      else next.set(k, v);
+    }
     setParams(next, { replace: true });
   };
   const setRange = (key: RangeKey) => setParam(key === "custom" ? { range: key, start, end } : { range: key === "today" ? null : key, start: null, end: null });
 
-  const [state, setState] = useState<Record<string, SectionState>>({});
-  const [lastLoad, setLastLoad] = useState<number | null>(null);
+  const { S, load, loading, generated, anyEnv } = useSections(SECTIONS, start, end, internal, Boolean(isAuthorized));
   const [drill, setDrill] = useState<{ title: string; cell: Cell; env: Env } | null>(null);
-  const openDrill: Drill = useCallback((title, cell, env) => setDrill({ title, cell, env }), []);
-  const gen = useRef(0);
+  const openDrill: Drill = (title, cell, env) => setDrill({ title, cell, env });
 
-  const load = useCallback(
-    (fresh: boolean) => {
-      const g = ++gen.current;
-      setState((s) => Object.fromEntries(SECTIONS.map((k) => [k, { env: s[k]?.env ?? null, error: "", loading: true }])));
-      // The first call reads the dataset (fresh when asked); the rest share it.
-      const first = fetchSection("kpis", start, end, internal, fresh);
-      const all = SECTIONS.map((sec) => {
-        const p = sec === "kpis" ? first : first.catch(() => null).then(() => fetchSection(sec, start, end, internal, false));
-        return p.then(
-          (env) => g === gen.current && setState((s) => ({ ...s, [sec]: { env, error: "", loading: false } })),
-          (e: any) => g === gen.current && setState((s) => ({ ...s, [sec]: { env: s[sec]?.env ?? null, error: e?.message || "Failed", loading: false } })),
-        );
-      });
-      Promise.allSettled(all).then(() => g === gen.current && setLastLoad(Date.now()));
-    },
-    [start, end, internal],
-  );
-
+  // Open support tickets and vendor credits: read as the old Overview and the Vendors page do.
+  const [tickets, setTickets] = useState<{ open: number; high: number } | null>(null);
+  const [vendors, setVendors] = useState<VendorsReport | null>(null);
   useEffect(() => {
     if (!isAuthorized) return;
-    load(false);
-    const id = window.setInterval(() => load(false), REFRESH_MS);
-    return () => window.clearInterval(id);
-  }, [isAuthorized, load]);
+    let live = true;
+    (async () => {
+      const token = await getToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      fetch("/api/tickets?status=open", { credentials: "include", headers })
+        .then((r) => r.json())
+        .then((d) => live && setTickets({ open: Number(d?.stats?.open) || 0, high: Number(d?.stats?.high_open) || 0 }))
+        .catch(() => live && setTickets(null));
+      fetch("/api/vendors", { credentials: "include", headers })
+        .then((r) => r.json())
+        .then((d) => live && setVendors(d?.error ? null : (d as VendorsReport)))
+        .catch(() => live && setVendors(null));
+    })();
+    return () => {
+      live = false;
+    };
+  }, [isAuthorized]);
 
   if (isPending || isAuthorized === null) {
     return <div className="flex min-h-screen items-center justify-center bg-neutral-50 text-neutral-500">Loading...</div>;
   }
   if (!isAuthorized) return null;
 
-  const anyEnv = SECTIONS.map((k) => state[k]?.env).find(Boolean) ?? null;
-  const generated = anyEnv ? Date.parse(anyEnv.generatedAt) : null;
-  const loading = SECTIONS.some((k) => state[k]?.loading);
   const host = typeof window !== "undefined" ? window.location.hostname : "";
   const local = host === "localhost" || host === "127.0.0.1";
-  const envLabel = anyEnv ? `${local ? "Local, " : ""}${anyEnv.env === "staging" ? "Staging" : anyEnv.env === "production" ? "Production" : "Unknown"}${local ? " data" : ""}` : "";
+  const envName = anyEnv ? (anyEnv.env === "staging" ? "Staging" : anyEnv.env === "production" ? "Production" : "Unknown") : "";
   const qs = new URLSearchParams({ start, end, ...(internal ? { internal: "1" } : {}) }).toString();
-  const S = (k: OvSection) => state[k] ?? { env: null, error: "", loading: true };
   const rangeText = start === end ? dayLabel(start) : `${dayLabel(start)} to ${dayLabel(end)}`;
 
   return (
     <div className="min-h-screen bg-neutral-50">
       <AdminHeader />
-      <style>{CSS}</style>
-      <div className="ov min-h-screen" data-theme={dark ? "dark" : "light"}>
-        <main className="mx-auto max-w-[100rem] px-3 py-4 sm:px-6 lg:px-8">
-          {/* Header: range, environment, last read, refresh */}
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>Stu · studojo.pro</span>
-                {envLabel && (
-                  <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ border: "1px solid var(--border)", color: "var(--ink)" }}>
-                    <span className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: anyEnv?.env === "production" ? STATUS.good : STATUS.warning }} />
-                    {envLabel}
-                  </span>
-                )}
-              </div>
-              <h1 className="mt-0.5 text-2xl font-semibold">Overview <span className="text-base font-normal" style={{ color: "var(--ink2)" }}>{rangeText}, IST</span></h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <div className="seg" role="group" aria-label="Date range">
-                {RANGES.map((r) => <button key={r.key} type="button" aria-pressed={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>)}
-              </div>
-              {range === "custom" && (
-                <span className="flex items-center gap-1">
-                  <input type="date" className="ctl" value={start} max={end} onChange={(e) => e.target.value && setParam({ start: e.target.value })} aria-label="Start day" />
-                  <span style={{ color: "var(--muted)" }}>to</span>
-                  <input type="date" className="ctl" value={end} min={start} max={today} onChange={(e) => e.target.value && setParam({ end: e.target.value })} aria-label="End day" />
+      <style>{KIT_CSS}</style>
+      <div className="ov mx-auto max-w-7xl px-4 py-6 md:px-8 md:py-8">
+        <Attention tickets={tickets} alerts={S("alerts")} vendors={vendors} drill={openDrill} />
+
+        {/* Title and range */}
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h1 className="font-['Clash_Display'] text-3xl font-medium tracking-tight text-neutral-950 md:text-4xl">Overview</h1>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-neutral-500">
+              <span>Stu, studojo.pro · {rangeText}, IST</span>
+              {envName && (
+                <span className={`rounded-full border-2 px-2 py-0.5 text-[11px] font-bold ${anyEnv?.env === "production" ? "border-emerald-600 text-emerald-700" : "border-amber-500 text-amber-700"}`}>
+                  {local ? `Local, ${envName.toLowerCase()} data` : envName}
                 </span>
               )}
-              <label className="ctl flex items-center gap-1.5">
-                <input type="checkbox" checked={internal} onChange={(e) => setParam({ internal: e.target.checked ? "1" : null })} /> Include internal
+            </p>
+          </div>
+          <div className="flex flex-col items-start gap-2 lg:items-end">
+            <div className="inline-flex flex-wrap gap-1 rounded-xl border-2 border-neutral-900 bg-white p-1 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]" role="group" aria-label="Date range">
+              {RANGES.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  aria-pressed={range === r.key}
+                  onClick={() => setRange(r.key)}
+                  title={r.key === "launch" ? "From 2 Nov 2026, the day Stu went live" : undefined}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${range === r.key ? "bg-purple-500 text-white" : "text-neutral-600 hover:bg-neutral-100"}`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
+              <label className="flex cursor-pointer items-center gap-1.5">
+                <input type="checkbox" className="accent-purple-500" checked={internal} onChange={(e) => setParam({ internal: e.target.checked ? "1" : null })} />
+                Include internal
               </label>
-              <div className="seg" role="group" aria-label="Theme">
-                {(["auto", "light", "dark"] as const).map((m) => <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}>{m[0].toUpperCase() + m.slice(1)}</button>)}
-              </div>
-              <button type="button" className="ctl font-semibold" onClick={() => load(true)} disabled={loading}>{loading ? "Reading" : "Refresh"}</button>
-              <span className="text-xs" style={{ color: "var(--ink2)" }} title="Data read time; the page re-reads every 60 s">
-                {generated ? `Updated ${istTime(generated)} IST` : "Reading"}{lastLoad ? " · auto 60 s" : ""}
-              </span>
+              <button type="button" onClick={() => load(true)} disabled={loading} className="font-semibold text-neutral-700 underline decoration-neutral-300 underline-offset-2 hover:decoration-purple-500 disabled:opacity-50">
+                {loading ? "Reading" : "Refresh"}
+              </button>
+              <span title="The page re-reads every 60 s">{generated ? `Updated ${istTime(generated)} IST` : "Reading"}</span>
             </div>
           </div>
-          <nav className="mt-2 flex flex-wrap gap-1" aria-label="Stu pages">
-            {TABS.map((x) => (
-              <NavLink key={x.to} to={x.to === "/" ? `/?${params.toString()}` : `${x.to}?${qs}`} end className="rounded-lg px-2.5 py-1 text-[13px] font-semibold" style={({ isActive }) => (isActive ? { background: "var(--ink)", color: "var(--surface)" } : { color: "var(--ink2)" })}>
-                {x.label}
-              </NavLink>
-            ))}
-          </nav>
-          <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>
-            {internal ? "Internal accounts included." : "Excluded: staff (admin, ops), @studojo.com, the test accounts, guests."} People counts are the people who joined Stu in the range unless a card says otherwise. Every number opens the people behind it.
-          </p>
+        </div>
 
-          <Insights s={S("insights")} drill={openDrill} />
-
-          <Alerts s={S("alerts")} drill={openDrill} />
-
-          <VendorsTile />
-
-          <div id="kpis"><Kpis s={S("kpis")} t={t} drill={openDrill} range={range} /></div>
-
-          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12 [&>*]:min-w-0">
-            <div id="engagement" className="lg:col-span-7"><Usage s={S("usage")} drill={openDrill} t={t} /></div>
-            <div id="power" className="lg:col-span-5"><Power s={S("power")} drill={openDrill} t={t} qs={qs} /></div>
-            <div id="funnel" className="lg:col-span-7"><Funnel s={S("funnel")} drill={openDrill} t={t} /></div>
-            <div id="trends" className="lg:col-span-5"><Trends s={S("trends")} drill={openDrill} t={t} /></div>
-            <div id="sources" className="lg:col-span-6"><Sources s={S("sources")} drill={openDrill} t={t} /></div>
-            <div id="calls" className="lg:col-span-6"><Calls s={S("calls")} drill={openDrill} t={t} /></div>
-            <div id="dropoffs" className="lg:col-span-6"><Dropoffs s={S("dropoffs")} drill={openDrill} t={t} qs={qs} /></div>
-            <div id="retention" className="lg:col-span-6"><Engagement s={S("engagement")} drill={openDrill} t={t} /></div>
-            <div id="feed" className="lg:col-span-12"><Feed s={S("feed")} qs={qs} /></div>
+        {range === "custom" && (
+          <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border-2 border-neutral-900 bg-white p-4 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]">
+            <div>
+              <label htmlFor="ov-from" className="block text-xs font-semibold text-neutral-500">From</label>
+              <input id="ov-from" type="date" value={start} max={end} onChange={(e) => e.target.value && setParam({ start: e.target.value })} className="mt-1 rounded-lg border-2 border-neutral-300 px-3 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label htmlFor="ov-to" className="block text-xs font-semibold text-neutral-500">To</label>
+              <input id="ov-to" type="date" value={end} min={start} max={today} onChange={(e) => e.target.value && setParam({ end: e.target.value })} className="mt-1 rounded-lg border-2 border-neutral-300 px-3 py-1.5 text-sm" />
+            </div>
           </div>
-        </main>
+        )}
+
+        <div id="kpis" className="scroll-mt-28"><Headline s={S("kpis")} drill={openDrill} range={range} today={today} end={end} /></div>
+
+        <div className="mt-6"><Insights s={S("insights")} drill={openDrill} qs={qs} /></div>
+
+        <div id="trends" className="mt-6 scroll-mt-28">
+          <TrendChart trends={S("trends")} usage={S("usage")} kpis={S("kpis")} start={start} end={end} drill={openDrill} />
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+          <div id="funnel" className="scroll-mt-28"><ShortFunnel s={S("funnel")} drill={openDrill} qs={qs} /></div>
+          <div id="sources" className="scroll-mt-28"><TopSources s={S("sources")} drill={openDrill} qs={qs} /></div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {PAGES.map((l) => (
+            <Link
+              key={l.to}
+              to={`${l.to}?${qs}`}
+              className={`rounded-xl border-2 border-neutral-900 px-4 py-3 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] transition-all hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] ${l.fresh ? "bg-purple-50" : "bg-white"}`}
+            >
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-neutral-900">
+                {l.label} <span aria-hidden>→</span>
+                {l.fresh && <span className="rounded-full bg-purple-500 px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">New</span>}
+              </div>
+              <div className="mt-0.5 text-xs text-neutral-500">{l.note}</div>
+            </Link>
+          ))}
+        </div>
+
+        <p className="mt-6 text-xs text-neutral-500">
+          {internal ? "Internal accounts included." : "Excluded: staff (admin, ops), @studojo.com, the test accounts, guests."} People counts are the people who joined Stu in the range unless a card says otherwise. Every number opens the people behind it.
+        </p>
       </div>
       {drill && <DrillModal title={drill.title} cell={drill.cell} data={drillPeople(drill.env)} onClose={() => setDrill(null)} />}
     </div>
   );
 }
 
-// ------------------------------------------------------------- card frame
+// ------------------------------------------------------------ needs action
 
-function Card({ title, sub, s, right, children, minH = 160 }: { title: string; sub?: string; s: SectionState; right?: React.ReactNode; children: (env: Env) => React.ReactNode; minH?: number }) {
+function Attention({ tickets, alerts, vendors, drill }: { tickets: { open: number; high: number } | null; alerts: SectionState; vendors: VendorsReport | null; drill: Drill }) {
+  const list = (alerts.env?.body as Alert[] | undefined) ?? [];
+  // Vendors: out of credits, a rejected key, or under 7 days left at the current pace.
+  const vend = (vendors?.next ?? []).filter((x) => x.level === "critical" || (x.level === "warning" && x.inDays < 7));
+  const hasTickets = Boolean(tickets && tickets.open > 0);
+  if (!hasTickets && !list.length && !vend.length) return null;
+  const row = (level: "critical" | "warning") =>
+    level === "critical"
+      ? "border-red-700 bg-red-600 text-white shadow-[4px_4px_0px_0px_rgba(127,29,29,1)]"
+      : "border-neutral-900 bg-amber-200 text-neutral-950 shadow-[4px_4px_0px_0px_rgba(25,26,35,1)]";
+  const mark = <span aria-hidden className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white/30 text-xs font-bold">!</span>;
   return (
-    <section className="card h-full p-4" aria-busy={s.loading}>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-[15px] font-semibold">{title}</h2>
-          {sub && <p className="text-xs" style={{ color: "var(--muted)" }}>{sub}</p>}
-        </div>
-        {right}
-      </div>
-      {s.error && <div className="mb-2 text-xs" style={{ color: "var(--down)" }}>Could not read: {s.error}</div>}
-      {s.env ? (
-        <div className="fade" style={{ opacity: s.loading ? 0.55 : 1 }}>{children(s.env)}</div>
-      ) : (
-        !s.error && <div className="animate-pulse rounded-lg" style={{ minHeight: minH, background: "var(--track)" }} />
+    <div className="mb-6 flex flex-col gap-2" role="region" aria-label="Needs attention">
+      {hasTickets && tickets && (
+        <Link to="/tickets" className={`flex items-center justify-between gap-3 rounded-2xl border-2 px-4 py-3 transition-transform hover:-translate-y-0.5 ${row("critical")}`}>
+          <span className="flex min-w-0 items-center gap-3">
+            {mark}
+            <span className="font-['Clash_Display'] text-base font-semibold md:text-lg">
+              {tickets.open} open support ticket{tickets.open === 1 ? "" : "s"}
+              {tickets.high > 0 && <span className="ml-2 rounded-full bg-white/25 px-2 py-0.5 align-middle text-xs font-bold">{tickets.high} high priority</span>}
+            </span>
+          </span>
+          <span className="whitespace-nowrap text-sm font-semibold">View tickets →</span>
+        </Link>
       )}
+      {list.map((a) => (
+        <div key={a.key} className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border-2 px-4 py-2.5 text-sm ${row(a.level)}`}>
+          {mark}
+          <span className="min-w-0 flex-1 font-medium">{a.text}</span>
+          {a.cell && a.cell.users.length > 0 && alerts.env && (
+            <button type="button" className="text-xs font-semibold underline underline-offset-2" onClick={() => drill(a.text, a.cell!, alerts.env!)}>People</button>
+          )}
+          {a.href && <Link to={a.href} className="whitespace-nowrap text-xs font-semibold underline underline-offset-2">Open →</Link>}
+        </div>
+      ))}
+      {vend.map((v) => (
+        <Link key={`${v.vendor}-${v.text}`} to="/vendors" className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border-2 px-4 py-2.5 text-sm transition-transform hover:-translate-y-0.5 ${row(v.level === "critical" ? "critical" : "warning")}`}>
+          {mark}
+          <span className="min-w-0 flex-1 font-medium">{v.text}</span>
+          <span className="whitespace-nowrap text-xs font-semibold underline underline-offset-2">Vendors →</span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------- headline cards
+
+function change(cur: number, prev: number | null, inr: boolean | undefined, vs: string): string {
+  if (prev == null) return "no earlier data";
+  const diff = cur - prev;
+  if (diff === 0) return `no change ${vs}`;
+  const p = prev > 0 ? `${Math.abs(Math.round((diff / prev) * 100))}%` : inr ? fmtInr(Math.abs(diff)) : fmtN(Math.abs(diff));
+  return `${diff > 0 ? "▲ +" : "▼ -"}${p} ${vs}`;
+}
+
+function Headline({ s, drill, range, today, end }: { s: SectionState; drill: Drill; range: RangeKey; today: string; end: string }) {
+  const body = s.env?.body as { tiles: KpiTile[]; testPayments: Cell; prevStart: string; prevEnd: string } | undefined;
+  const days = body ? Math.round((Date.parse(body.prevEnd) - Date.parse(body.prevStart)) / 86_400_000) + 1 : 1;
+  const vs = days === 1 ? (range === "yesterday" || end !== today ? "vs the day before" : "vs yesterday") : `vs the ${days} days before`;
+  const tile = (key: string) => body?.tiles.find((x) => x.key === key);
+  return (
+    <div className="mt-6">
+      {s.error && !body && <div className="mb-3 rounded-xl border-2 border-red-500 bg-red-50 p-3 text-sm text-red-700">Could not read the numbers: {s.error}</div>}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-5" aria-busy={s.loading}>
+        {HEADLINE.map((h, k) => {
+          const t = tile(h.key);
+          if (!t || !s.env) {
+            return <div key={h.key} className={`h-[156px] animate-pulse rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] ${k === 0 ? "col-span-2 sm:col-span-1" : ""}`} />;
+          }
+          const env = s.env;
+          const people = t.cell.users.length + (t.cell.visitors?.length ?? 0);
+          const test = h.key === "revenue" && body!.testPayments.v > 0 ? body!.testPayments.v : 0;
+          return (
+            <div key={h.key} className={`fade ${k === 0 ? "col-span-2 sm:col-span-1" : ""}`} style={{ opacity: s.loading ? 0.6 : 1 }}>
+              <StatCard
+                value={t.cell.na ? "n/a" : t.inr ? fmtInr(t.cell.v) : fmtN(t.cell.v)}
+                label={t.label}
+                color={h.color}
+                delay={k * 0.05}
+                title={`${t.sub ? `${t.sub}. ` : ""}Source: ${t.source}${people ? ". Click for the people." : ""}`}
+                onClick={people ? () => drill(t.label, t.cell, env) : undefined}
+                note={
+                  <>
+                    {t.cell.na ? "not tracked here yet" : change(t.cell.v, t.prev, t.inr, vs)}
+                    {test > 0 && <><br />Excludes {test} test payment{test === 1 ? "" : "s"}</>}
+                  </>
+                }
+              />
+            </div>
+          );
+        })}
+      </div>
+      {body && s.env && (
+        <div className="mt-4 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 rounded-xl border-2 border-neutral-900 bg-white px-4 py-2.5 text-sm shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]">
+          <span className="text-xs font-bold uppercase tracking-wide text-neutral-500">Also in range</span>
+          {ALSO.map((key) => {
+            const t = tile(key);
+            if (!t) return null;
+            const c = t.cell.na || t.prev == null ? "" : change(t.cell.v, t.prev, t.inr, "").replace(/^▲ /, "").replace(/^▼ /, "").trim();
+            return (
+              <span key={key} className="whitespace-nowrap text-neutral-700" title={t.sub ? `${t.sub}. Source: ${t.source}` : `Source: ${t.source}`}>
+                {t.label} <N cell={t.cell} env={s.env!} drill={drill} title={t.label} className="font-bold text-neutral-950" />
+                {c && !c.startsWith("no ") && <span className={`ml-1 text-xs ${t.cell.v >= (t.prev ?? 0) ? "text-emerald-700" : "text-red-600"}`}>{c}</span>}
+              </span>
+            );
+          })}
+          {body.testPayments.v > 0 && (
+            <span className="whitespace-nowrap text-neutral-700">
+              Test payments <N cell={body.testPayments} env={s.env} drill={drill} title="Test payments" className="font-bold text-neutral-950" />
+              <span className="ml-1 text-xs text-neutral-500">left out of revenue</span>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ what is going on
+
+function Insights({ s, drill, qs }: { s: SectionState; drill: Drill; qs: string }) {
+  const href = (h: string) => (h.startsWith("#") && !OVERVIEW_ANCHORS.has(h) ? `/usage?${qs}${h}` : h);
+  return (
+    <Card title="What's going on" sub="By rules, most important first" s={s} minH={72}>
+      {(env) => {
+        const list = ((env.body as Insight[]) ?? []).slice(0, 5);
+        if (!list.length) return <p className="text-sm text-neutral-500">Nothing to report for this range.</p>;
+        return (
+          <ol className="grid gap-x-8 gap-y-2 text-[14px] leading-snug lg:grid-cols-2">
+            {list.map((x, k) => (
+              <li key={x.key} className="flex items-start gap-2.5">
+                <span className="tnum mt-[1px] inline-flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-neutral-900 bg-purple-500 text-[11px] font-bold text-white">{k + 1}</span>
+                <span className="min-w-0 text-neutral-800">
+                  {x.text}{" "}
+                  {href(x.href).startsWith("#") ? (
+                    <a href={x.href} className="whitespace-nowrap text-xs font-semibold text-purple-700 underline underline-offset-2">See it</a>
+                  ) : (
+                    <Link to={href(x.href)} className="whitespace-nowrap text-xs font-semibold text-purple-700 underline underline-offset-2">Open</Link>
+                  )}
+                  {x.cell && x.cell.users.length > 0 && (
+                    <button type="button" className="num ml-2 text-xs" onClick={() => drill(x.text, x.cell!, env)}>{x.cell.users.length} people</button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ol>
+        );
+      }}
+    </Card>
+  );
+}
+
+// ------------------------------------------------------------------ chart
+
+interface TrendsBody { days: string[]; series: { key: string; label: string; na: boolean; cells: Cell[] }[] }
+interface UsageTrend { trend: { day: string; dau: Cell }[] }
+
+/** Shades the days of the picked range. */
+const rangeBand = {
+  id: "ovRange",
+  beforeDatasetsDraw(chart: any) {
+    const o = chart.options.plugins?.ovRange;
+    if (!o || o.from < 0 || o.to < o.from) return;
+    const x = chart.scales.x;
+    const { top, bottom, left, right } = chart.chartArea;
+    const n = chart.data.labels?.length ?? 1;
+    const step = n > 1 ? x.getPixelForValue(1) - x.getPixelForValue(0) : right - left;
+    const a = Math.max(left, x.getPixelForValue(o.from) - step / 2);
+    const b = Math.min(right, x.getPixelForValue(o.to) + step / 2);
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.fillStyle = "rgba(168,85,247,0.10)";
+    ctx.fillRect(a, top, b - a, bottom - top);
+    ctx.restore();
+  },
+};
+
+function TrendChart({ trends, usage, kpis, start, end, drill }: { trends: SectionState; usage: SectionState; kpis: SectionState; start: string; end: string; drill: Drill }) {
+  const tb = trends.env?.body as TrendsBody | undefined;
+  const ub = usage.env?.body as UsageTrend | undefined;
+  const ready = Boolean(tb && ub && trends.env && usage.env);
+  const error = trends.error || usage.error;
+  const t = PALETTE;
+
+  let content: React.ReactNode = null;
+  if (ready) {
+    const days = tb!.days;
+    const cellsOf = (key: string) => tb!.series.find((x) => x.key === key)?.cells ?? days.map(() => ({ v: 0, users: [] }) as Cell);
+    const active = new Map(ub!.trend.map((x) => [x.day, x.dau]));
+    const lines: { key: keyof typeof SERIES; label: string; cells: Cell[]; env: Env }[] = [
+      { key: "signups", label: "Sign-ups", cells: cellsOf("signups"), env: trends.env! },
+      { key: "onboarded", label: "Onboarded", cells: cellsOf("onboarded"), env: trends.env! },
+      { key: "active", label: "Active students", cells: days.map((d) => active.get(d) ?? ({ v: 0, users: [] } as Cell)), env: usage.env! },
+    ];
+    const paid = { label: "Paid (people)", cells: cellsOf("paid"), env: trends.env! };
+    // Revenue by day exists for the last 14 days (the KPI section); shown in the tooltip where known.
+    const revSpark = (kpis.env?.body as { tiles: KpiTile[] } | undefined)?.tiles.find((x) => x.key === "revenue")?.spark ?? [];
+    const revenue = new Map(revSpark.map((p) => [p.day, p.v]));
+    const from = days.findIndex((d) => d >= start);
+    const to = days.reduce((m, d, i) => (d <= end ? i : m), -1);
+    const all = [...lines.map((l) => ({ ...l, kind: "line" as const })), { ...paid, key: "paid" as const, kind: "bar" as const }];
+    const data = {
+      labels: days.map(dayLabel),
+      datasets: [
+        ...lines.map((l) => ({
+          type: "line" as const, label: l.label, data: l.cells.map((c) => (c.na ? null : c.v)), borderColor: SERIES[l.key], backgroundColor: SERIES[l.key],
+          borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBorderColor: "#fff", cubicInterpolationMode: "monotone" as const, spanGaps: true, order: 1,
+        })),
+        {
+          type: "bar" as const, label: paid.label, data: paid.cells.map((c) => (c.na ? null : c.v)), backgroundColor: "rgba(168,85,247,0.35)",
+          borderColor: SERIES.paid, borderWidth: 1.5, borderRadius: 3, maxBarThickness: 16, order: 2,
+        },
+      ],
+    };
+    const options: any = {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        ovCrosshair: { color: t.axis },
+        ovRange: { from, to },
+        tooltip: {
+          backgroundColor: "#fff", borderColor: t.ink, borderWidth: 2, titleColor: t.ink, bodyColor: t.ink, footerColor: t.ink2, padding: 10, boxWidth: 10, boxHeight: 10,
+          callbacks: {
+            label: (c: any) => ` ${c.parsed.y == null ? "n/a" : fmtN(c.parsed.y)}  ${c.dataset.label}`,
+            footer: (items: any[]) => {
+              const day = days[items[0]?.dataIndex];
+              return revenue.has(day) ? `Revenue ${fmtInr(revenue.get(day)!)}` : "";
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, border: { color: t.ink, width: 2 }, ticks: { color: t.muted, maxTicksLimit: 8, maxRotation: 0, font: { size: 11 } } },
+        y: { beginAtZero: true, grid: { color: t.grid }, border: { display: false }, ticks: { color: t.muted, precision: 0, maxTicksLimit: 5, font: { size: 11 } } },
+      },
+      onClick: (evt: any, _els: any, chart: any) => {
+        const hit = chart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, true)[0];
+        if (!hit) return;
+        const sr = all[hit.datasetIndex];
+        const cell = sr?.cells[hit.index];
+        if (cell && (cell.users.length || cell.visitors?.length)) drill(`${sr.label}, ${dayLabel(days[hit.index])}`, cell, sr.env);
+      },
+    };
+    const total = (cells: Cell[]) => cells.reduce((a, c) => a + c.v, 0);
+    content = (
+      <div className="fade" style={{ opacity: trends.loading || usage.loading ? 0.6 : 1 }}>
+        <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-neutral-700">
+          {lines.map((l) => (
+            <span key={l.key} className="flex items-center gap-1.5">
+              <span className="inline-block h-[3px] w-5 rounded" style={{ background: SERIES[l.key] }} />
+              {l.label}
+            </span>
+          ))}
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-3 w-3 rounded-sm border-[1.5px]" style={{ background: "rgba(168,85,247,0.35)", borderColor: SERIES.paid }} />
+            {paid.label} <span className="text-neutral-500">{fmtN(total(paid.cells))} in 30 days</span>
+          </span>
+          {from >= 0 && <span className="flex items-center gap-1.5 text-neutral-500"><span className="inline-block h-3 w-4 rounded-sm" style={{ background: "rgba(168,85,247,0.18)" }} />your range</span>}
+        </div>
+        <div className="h-64 md:h-72"><Chart type="bar" data={data as any} options={options} plugins={[crosshair, rangeBand]} /></div>
+      </div>
+    );
+  }
+
+  return (
+    <section className={`${CARD} overflow-hidden`} aria-busy={trends.loading || usage.loading}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b-2 border-neutral-900 bg-neutral-50 px-4 py-2.5">
+        <h2 className="font-['Clash_Display'] text-lg font-semibold text-neutral-950">Last 30 days to {dayLabel(end)}</h2>
+        <span className="text-xs text-neutral-500">People a day, IST. Click a day for its people.</span>
+      </div>
+      <div className="p-4">
+        {error && !ready && <div className="text-xs text-red-600">Could not read: {error}</div>}
+        {content ?? (!error && <div className="h-64 animate-pulse rounded-lg bg-neutral-100 md:h-72" />)}
+      </div>
     </section>
   );
 }
 
-function Seg<T extends string>({ value, options, onChange, label }: { value: T; options: { v: T; l: string }[]; onChange: (v: T) => void; label: string }) {
+// ------------------------------------------------------------ short funnel
+
+function ShortFunnel({ s, drill, qs }: { s: SectionState; drill: Drill; qs: string }) {
   return (
-    <div className="seg" role="group" aria-label={label}>
-      {options.map((o) => <button key={o.v} type="button" aria-pressed={value === o.v} onClick={() => onChange(o.v)}>{o.l}</button>)}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ alerts
-
-function Alerts({ s, drill }: { s: SectionState; drill: Drill }) {
-  const list = (s.env?.body as Alert[] | undefined) ?? null;
-  if (!list) return <div className="mt-3 h-9" />;
-  if (!list.length) {
-    return (
-      <div className="card mt-3 flex items-center gap-2 px-4 py-2 text-sm" style={{ color: "var(--ink2)" }}>
-        <span aria-hidden style={{ color: STATUS.good }}>✓</span> No alerts: self-check within 2%, calls failing under 20%, every step that fired yesterday has fired today.
-      </div>
-    );
-  }
-  return (
-    <div className="mt-3 flex flex-col gap-1.5">
-      {list.map((a) => (
-        <div key={a.key} className="card flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ borderLeft: `4px solid ${a.level === "critical" ? STATUS.critical : STATUS.warning}` }}>
-          <span aria-hidden className="font-bold" style={{ color: a.level === "critical" ? STATUS.critical : STATUS.serious }}>{a.level === "critical" ? "▲" : "●"}</span>
-          <span className="font-semibold">{a.level === "critical" ? "Critical" : "Check"}</span>
-          <span className="min-w-0 flex-1">{a.text}</span>
-          {a.cell && a.cell.users.length > 0 && <button type="button" className="num text-xs" onClick={() => drill(a.text, a.cell!, s.env!)}>People</button>}
-          {a.href && <Link to={a.href} className="text-xs font-semibold underline" style={{ color: "var(--s1)" }}>Open</Link>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// -------------------------------------------------------------------- KPIs
-
-function Spark({ pts, t, label }: { pts: KpiTile["spark"]; t: Theme; label: string }) {
-  const W = 120, H = 30, P = 4;
-  const max = Math.max(1, ...pts.map((p) => p.v));
-  const x = (i: number) => P + (i * (W - 2 * P)) / Math.max(1, pts.length - 1);
-  const y = (v: number) => H - P - (v / max) * (H - 2 * P);
-  const path = (sel: number[]) => sel.map((i, k) => `${k ? "L" : "M"}${x(i).toFixed(1)},${y(pts[i].v).toFixed(1)}`).join("");
-  const all = pts.map((_, i) => i);
-  const inR = all.filter((i) => pts[i].inRange);
-  const last = pts.length - 1;
-  return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="mt-2 block h-[30px]" role="img" aria-label={`${label}, last 14 days`}>
-      <path d={path(all)} fill="none" stroke={t.axis} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-      {inR.length > 1 && <path d={path(inR)} fill="none" stroke={t.series[0]} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
-      {pts.map((p, i) => (
-        <rect key={p.day} x={x(i) - (W - 2 * P) / (2 * Math.max(1, last))} y={0} width={(W - 2 * P) / Math.max(1, last)} height={H} fill="transparent">
-          <title>{`${dayLabel(p.day)}: ${fmtN(p.v)}`}</title>
-        </rect>
-      ))}
-    </svg>
-  );
-}
-
-function Delta({ cur, prev, inr, range, days }: { cur: number; prev: number | null; inr?: boolean; range: RangeKey; days: number }) {
-  if (prev == null) return <span style={{ color: "var(--muted)" }}>no earlier data</span>;
-  const diff = cur - prev;
-  const vs = range === "today" ? "vs yesterday" : range === "yesterday" ? "vs day before" : `vs prev ${days} days`;
-  if (diff === 0) return <span style={{ color: "var(--muted)" }}>no change {vs}</span>;
-  const up = diff > 0;
-  const p = prev > 0 ? `${Math.abs(Math.round((diff / prev) * 100))}%` : inr ? fmtInr(Math.abs(diff)) : fmtN(Math.abs(diff));
-  return (
-    <span style={{ color: up ? "var(--up)" : "var(--down)" }}>
-      <span aria-hidden>{up ? "▲" : "▼"}</span> {up ? "+" : "-"}{p} <span style={{ color: "var(--muted)" }}>{vs}</span>
-    </span>
-  );
-}
-
-const daysIn = (b: { prevStart: string; prevEnd: string }) => Math.round((Date.parse(b.prevEnd) - Date.parse(b.prevStart)) / 86_400_000) + 1;
-
-function Kpis({ s, t, drill, range }: { s: SectionState; t: Theme; drill: Drill; range: RangeKey }) {
-  const body = s.env?.body as { tiles: KpiTile[]; testPayments: Cell; prevStart: string; prevEnd: string } | undefined;
-  return (
-    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9" aria-busy={s.loading}>
-      {s.error && !body && <div className="col-span-full text-xs" style={{ color: "var(--down)" }}>Could not read the tiles: {s.error}</div>}
-      {(body?.tiles ?? Array.from({ length: 9 }, () => null)).map((tile, k) =>
-        tile ? (
-          <div key={tile.key} className="card fade min-w-0 px-3 pb-2 pt-2.5" style={{ opacity: s.loading ? 0.55 : 1 }} title={`source: ${tile.source}`}>
-            <div className="truncate text-xs font-medium" style={{ color: "var(--ink2)" }}>{tile.label}</div>
-            <div className="mt-0.5 text-[26px] font-semibold leading-tight">
-              <N cell={tile.cell} env={s.env!} drill={drill} title={tile.label} fmt={tile.inr ? fmtInr : undefined} />
-            </div>
-            <div className="truncate text-[11px]"><Delta cur={tile.cell.v} prev={tile.prev} inr={tile.inr} range={range} days={tile.spark.length && body ? daysIn(body) : 1} /></div>
-            <Spark pts={tile.spark} t={t} label={tile.label} />
-            <div className="mt-0.5 truncate text-[10px]" style={{ color: "var(--muted)" }}>
-              {tile.key === "revenue" && body!.testPayments.v > 0 ? (
-                <>Excludes <N cell={body!.testPayments} env={s.env!} drill={drill} title="Test payments" /> test payment{body!.testPayments.v === 1 ? "" : "s"}</>
-              ) : tile.key === "revenue" ? "No test payments in range" : tile.sub ?? "14 days, range in blue"}
-            </div>
-          </div>
-        ) : (
-          <div key={k} className="card h-[124px] animate-pulse" />
-        ),
-      )}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ funnel
-
-function Funnel({ s, drill, t }: { s: SectionState; drill: Drill; t: Theme }) {
-  const [view, setView] = useState<"key" | "all">("key");
-  const body = s.env?.body as { key: FunnelBar[]; all: FunnelBar[]; dropKey: string | null; dropAll: string | null; cohort: number } | undefined;
-  return (
-    <Card
-      title="Funnel, visitor to paid"
-      sub="Bars: count; then % of the bar above and the median time from it. Nested: each step counts people who passed the gate steps before it."
-      s={s}
-      minH={320}
-      right={<Seg label="Funnel steps" value={view} onChange={setView} options={[{ v: "key", l: "Key steps" }, { v: "all", l: "All steps" }]} />}
-    >
+    <Card title="Funnel" sub="People who joined in range; each step counts those who passed the steps before it. % is of the step above." s={s} minH={230}>
       {(env) => {
-        const bars = view === "key" ? body!.key : body!.all;
-        const drop = view === "key" ? body!.dropKey : body!.dropAll;
+        const body = env.body as { key: FunnelBar[]; cohort: number };
+        const bars = FUNNEL_STEPS.map((k) => body.key.find((b) => b.key === k)).filter((b): b is FunnelBar => Boolean(b));
+        // % of the shown step above (the nearest tracked one).
+        let prev: FunnelBar | null = null;
+        const rows = bars.map((b, i) => {
+          const from = b.untracked ? null : prev;
+          const p = from && !from.cell.na && !b.cell.na ? pct(b.cell.v, from.cell.v) : null;
+          // A step at zero with people at a later step is a missing beacon, not a drop.
+          const gap = b.cell.v === 0 && bars.slice(i + 1).some((x) => x.cell.v > 0);
+          if (!b.untracked) prev = b;
+          return { b, p, canDrop: p != null && from != null && from.cell.v > 0 && !gap };
+        });
+        const drop = rows.filter((r) => r.canDrop).reduce<(typeof rows)[number] | null>((m, r) => (m == null || r.p! < m.p! ? r : m), null);
+        const dropKey = drop && drop.p! < 100 ? drop.b.key : null;
         const max = Math.max(1, ...bars.map((b) => (b.cell.na ? 0 : b.cell.v)));
-        const dropBar = bars.find((x) => x.key === drop);
-        const dropFrom = dropBar && bars.find((x) => x.key === dropBar.fromKey);
         return (
           <div>
-            {dropBar && dropFrom && (
-              <p className="mb-2 text-[13px]">
-                <span aria-hidden className="mr-1" style={{ color: "var(--down)" }}>▼</span>
-                <span className="font-semibold">Biggest drop:</span> {dropFrom.label} to {dropBar.label}, {fmtPct(dropBar.pctPrev)} make it ({fmtN(dropBar.cell.v)} of {fmtN(dropFrom.cell.v)}).
-              </p>
-            )}
-            <div className="grid grid-cols-[minmax(76px,150px)_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[3px] text-[13px] sm:gap-x-3">
-              {bars.map((b, k) => {
-                const isDrop = b.key === drop;
-                const w = b.cell.na ? 0 : (b.cell.v / max) * 100;
-                const phaseStart = k > 0 && bars[k - 1].phase !== b.phase;
+            <div className="grid grid-cols-[minmax(84px,130px)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 text-sm">
+              {rows.map(({ b, p }) => {
+                const isDrop = b.key === dropKey;
                 return (
                   <div key={b.key} className="contents">
-                    <div className={`truncate ${phaseStart ? "pt-1.5" : ""}`} style={{ color: "var(--ink2)" }} title={`${b.n}. ${b.label}${b.gate ? " (gate)" : ""}`}>
-                      {b.label}
-                    </div>
-                    <div className={`relative h-[22px] ${phaseStart ? "mt-1.5" : ""}`} title={b.untracked ? `${b.label}: the journey log has no events for this step yet` : `${b.label}: ${b.cell.na ? "n/a" : fmtN(b.cell.v)}${b.pctPrev != null ? `, ${b.pctPrev}% of the bar above` : ""}`}>
-                      {b.untracked ? <div className="flex h-full items-center whitespace-nowrap text-xs" style={{ color: "var(--muted)" }}>not tracked yet</div> : <div className="flex h-full items-center">
-                        <div style={{ width: `${w * 0.8}%`, minWidth: b.cell.v > 0 ? 3 : 0, height: 18, background: b.anon ? t.ordinal[0] : t.series[0], borderRadius: "0 4px 4px 0" }} />
-                        <span className="ml-1.5 whitespace-nowrap font-semibold">
-                          <N cell={b.cell} env={env} drill={drill} title={`${b.n}. ${b.label}, ${b.anon ? "visitor ids in range" : "joined in range"}`} />
-                        </span>
-                      </div>}
-                    </div>
-                    <div className={`tnum whitespace-nowrap text-right text-xs ${phaseStart ? "pt-1.5" : ""}`} style={{ color: isDrop ? "var(--down)" : "var(--ink2)" }}>
-                      {b.untracked ? <span style={{ color: "var(--muted)" }}>·</span> : !b.fromKey ? <span style={{ color: "var(--muted)" }}>start</span> : (
+                    <div className="truncate text-neutral-700" title={b.anon ? `${b.label}: visitor ids in range` : b.label}>{b.label}</div>
+                    <div className="flex h-6 items-center">
+                      {b.untracked ? (
+                        <span className="text-xs text-neutral-400">not tracked yet</span>
+                      ) : (
                         <>
-                          {isDrop && <span aria-label="biggest drop" className="mr-1 font-semibold">▼</span>}
-                          <span className={isDrop ? "font-semibold" : ""}>{fmtPct(b.pctPrev)}</span>
-                          <span className="ml-2" style={{ color: "var(--muted)" }}>{b.medianMs != null ? fmtDur(b.medianMs) : "·"}</span>
+                          {b.cell.v > 0 && !b.cell.na && (
+                            <div className={`h-[18px] rounded-r-md border-2 border-neutral-900 ${b.anon ? "bg-purple-200" : "bg-purple-500"}`} style={{ width: `${(b.cell.v / max) * 78}%`, minWidth: 6 }} />
+                          )}
+                          <span className="ml-2 font-bold text-neutral-950"><N cell={b.cell} env={env} drill={drill} title={`${b.label}, ${b.anon ? "visitor ids in range" : "joined in range"}`} /></span>
                         </>
                       )}
+                    </div>
+                    <div className={`tnum whitespace-nowrap text-right text-xs ${isDrop ? "font-bold text-red-600" : "text-neutral-500"}`}>
+                      {b.untracked ? "" : p == null ? (b.anon ? "start" : "") : <>{isDrop && <span aria-label="biggest drop">▼ </span>}{p}%</>}
                     </div>
                   </div>
                 );
               })}
             </div>
-            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px]" style={{ color: "var(--muted)" }}>
-              <span><span className="mr-1 inline-block h-2.5 w-3 rounded-sm align-middle" style={{ background: t.ordinal[0] }} />Visitor ids before sign-in</span>
-              <span><span className="mr-1 inline-block h-2.5 w-3 rounded-sm align-middle" style={{ background: t.series[0] }} />People who joined in range ({fmtN(body!.cohort)})</span>
-              <span>Right column: % of the tracked bar above, median time from it</span>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500">
+              <span>
+                <span className="mr-1 inline-block h-2.5 w-3 rounded-sm border border-neutral-900 bg-purple-200 align-middle" />visitor ids
+                <span className="ml-3 mr-1 inline-block h-2.5 w-3 rounded-sm border border-neutral-900 bg-purple-500 align-middle" />joined in range ({fmtN(body.cohort)})
+                {dropKey && <span className="ml-3 font-semibold text-red-600">▼ biggest drop</span>}
+              </span>
+              <Link to={`/funnel?${qs}`} className="font-semibold text-purple-700 underline underline-offset-2">All steps →</Link>
             </div>
           </div>
         );
@@ -502,662 +581,50 @@ function Funnel({ s, drill, t }: { s: SectionState; drill: Drill; t: Theme }) {
   );
 }
 
-// ------------------------------------------------------------------ trends
+// ------------------------------------------------------------- top sources
 
-const crosshair = {
-  id: "ovCrosshair",
-  afterDatasetsDraw(chart: any) {
-    const active = chart.tooltip?.getActiveElements?.() ?? [];
-    if (!active.length) return;
-    const x = active[0].element.x;
-    const { top, bottom } = chart.chartArea;
-    const ctx = chart.ctx;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = chart.options.plugins?.ovCrosshair?.color ?? "#c3c2b7";
-    ctx.stroke();
-    ctx.restore();
-  },
-};
-
-interface TrendsBody { days: string[]; series: { key: string; label: string; na: boolean; cells: Cell[] }[]; rates: { key: string; label: string; values: (number | null)[] }[] }
-
-function Trends({ s, drill, t }: { s: SectionState; drill: Drill; t: Theme }) {
-  const [view, setView] = useState<"counts" | "rates" | "table">("counts");
-  const body = s.env?.body as TrendsBody | undefined;
+function TopSources({ s, drill, qs }: { s: SectionState; drill: Drill; qs: string }) {
+  const [by, setBy] = useState<"source" | "campaign">("source");
   return (
     <Card
-      title="Last 30 days"
-      sub={view === "rates" ? "Conversion, trailing 7 days, %" : "People a day (visitors: visitor ids). Click a point for its people."}
+      title="Top sources"
+      sub="First touch of the people who joined in range."
       s={s}
-      minH={300}
-      right={<Seg label="Trend view" value={view} onChange={setView} options={[{ v: "counts", l: "Counts" }, { v: "rates", l: "Conversion" }, { v: "table", l: "Table" }]} />}
+      minH={230}
+      right={<Seg label="Split by" value={by} onChange={setBy} options={[{ v: "source", l: "Source" }, { v: "campaign", l: "Campaign" }]} />}
     >
       {(env) => {
-        const b = body!;
-        const labels = b.days.map(dayLabel);
-        const lines = view === "rates" ? b.rates.map((r) => ({ label: r.label, data: r.values })) : b.series.map((x) => ({ label: x.label, data: x.cells.map((c) => (c.na ? null : c.v)) }));
-        if (view === "table") {
-          return (
-            <div className="max-h-[300px] overflow-auto text-xs">
-              <table className="tnum w-full">
-                <thead className="sticky top-0" style={{ background: "var(--surface)", color: "var(--muted)" }}>
-                  <tr><th className="py-1 text-left font-medium">Day</th>{b.series.map((x) => <th key={x.key} className="py-1 text-right font-medium">{x.label}</th>)}{b.rates.map((r) => <th key={r.key} className="py-1 text-right font-medium">{r.label}</th>)}</tr>
+        const { rows } = (env.body as Record<"source" | "campaign", { rows: SourceRow[]; total: number }>)[by];
+        if (!rows.length) return <p className="text-sm text-neutral-500">Nobody joined in this range.</p>;
+        return (
+          <div>
+            <div className="-mx-1 overflow-x-auto">
+              <table className="tnum w-full text-sm">
+                <thead className="text-left text-[11px] font-bold uppercase tracking-wide text-neutral-500">
+                  <tr>
+                    <th className="px-1 pb-1.5">{by === "source" ? "Source / medium" : "Campaign"}</th>
+                    <th className="px-1 pb-1.5 text-right">Sign-ups</th>
+                    <th className="px-1 pb-1.5 text-right">Onboarded</th>
+                    <th className="px-1 pb-1.5 text-right">Paid</th>
+                    <th className="px-1 pb-1.5 text-right">Revenue</th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {b.days.map((day, k) => ({ day, k })).reverse().map(({ day, k }) => (
-                    <tr key={day} style={{ borderTop: "1px solid var(--grid)" }}>
-                      <td className="py-1">{dayLabel(day)}</td>
-                      {b.series.map((x) => <td key={x.key} className="py-1 text-right"><N cell={x.cells[k]} env={env} drill={drill} title={`${x.label}, ${day}`} /></td>)}
-                      {b.rates.map((r) => <td key={r.key} className="py-1 text-right" style={{ color: "var(--ink2)" }}>{fmtPct(r.values[k])}</td>)}
+                  {rows.map((r) => (
+                    <tr key={r.key} className="row-hover border-t-2 border-neutral-100">
+                      <td className="max-w-[160px] truncate px-1 py-1.5 font-medium text-neutral-900" title={r.key}>{r.key}{r.other ? <span className="text-neutral-500"> ({r.other})</span> : null}</td>
+                      <td className="px-1 py-1.5 text-right font-bold"><N cell={r.signups} env={env} drill={drill} title={`Sign-ups from ${r.key}`} /></td>
+                      <td className="px-1 py-1.5 text-right"><N cell={r.onboarded} env={env} drill={drill} title={`Onboarded from ${r.key}`} /></td>
+                      <td className="px-1 py-1.5 text-right"><N cell={r.paid} env={env} drill={drill} title={`Paid from ${r.key}`} /></td>
+                      <td className="px-1 py-1.5 text-right"><N cell={r.revenue} env={env} drill={drill} title={`Revenue from ${r.key}`} fmt={fmtInr} /></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          );
-        }
-        const data = {
-          labels,
-          datasets: lines.map((l, i) => ({
-            label: l.label, data: l.data, borderColor: t.series[i], backgroundColor: t.series[i], borderWidth: 2, pointRadius: 0,
-            pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBorderColor: t.surface, tension: 0, spanGaps: true,
-          })),
-        };
-        const options: any = {
-          responsive: true, maintainAspectRatio: false, animation: false,
-          interaction: { mode: "index", intersect: false },
-          plugins: {
-            legend: { display: false },
-            ovCrosshair: { color: t.axis },
-            tooltip: {
-              backgroundColor: t.surface, borderColor: t.axis, borderWidth: 1, titleColor: t.ink2, bodyColor: t.ink, padding: 8,
-              boxWidth: 10, boxHeight: 2, usePointStyle: false,
-              callbacks: { label: (c: any) => ` ${c.parsed.y == null ? "n/a" : view === "rates" ? `${c.parsed.y}%` : fmtN(c.parsed.y)}  ${c.dataset.label}` },
-            },
-          },
-          scales: {
-            x: { grid: { display: false }, border: { color: t.axis }, ticks: { color: t.muted, maxTicksLimit: 6, maxRotation: 0, font: { size: 11 } } },
-            y: { beginAtZero: true, grid: { color: t.grid }, border: { display: false }, ticks: { color: t.muted, precision: 0, maxTicksLimit: 5, font: { size: 11 }, callback: (v: any) => (view === "rates" ? `${v}%` : fmtN(Number(v))) } },
-          },
-          onClick: (evt: any, _els: any, chart: any) => {
-            if (view !== "counts") return;
-            const hit = chart.getElementsAtEventForMode(evt, "nearest", { intersect: false }, true)[0];
-            if (!hit) return;
-            const series = b.series[hit.datasetIndex];
-            const cell = series?.cells[hit.index];
-            if (cell && (cell.users.length || cell.visitors?.length)) drill(`${series.label}, ${b.days[hit.index]}`, cell, env);
-          },
-        };
-        return (
-          <div>
-            <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "var(--ink2)" }}>
-              {lines.map((l, i) => {
-                const total = view === "rates" ? null : b.series[i].cells.reduce((a, c) => a + c.v, 0);
-                return (
-                  <span key={l.label} className="flex items-center gap-1.5">
-                    <span className="inline-block h-[2px] w-4 rounded" style={{ background: t.series[i] }} />
-                    {l.label}{total != null ? <span style={{ color: "var(--muted)" }}>{fmtN(total)}</span> : null}
-                  </span>
-                );
-              })}
+            <div className="mt-3 flex justify-end text-xs">
+              <Link to={`/sources?${qs}`} className="font-semibold text-purple-700 underline underline-offset-2">Channels and more →</Link>
             </div>
-            <div className="h-[260px]"><Line data={data} options={options} plugins={[crosshair]} /></div>
-          </div>
-        );
-      }}
-    </Card>
-  );
-}
-
-// ----------------------------------------------------------------- sources
-
-function Sources({ s, drill, t }: { s: SectionState; drill: Drill; t: Theme }) {
-  const [by, setBy] = useState<"source" | "campaign">("source");
-  const body = s.env?.body as Record<"source" | "campaign", { rows: SourceRow[]; total: number }> | undefined;
-  return (
-    <Card
-      title="Where sign-ups and payers come from"
-      sub="First touch of people who joined in range. Top 8, the rest as Other."
-      s={s}
-      right={<Seg label="Split by" value={by} onChange={setBy} options={[{ v: "source", l: "utm_source" }, { v: "campaign", l: "Campaign" }]} />}
-    >
-      {(env) => {
-        const { rows } = body![by];
-        if (!rows.length) return <p className="text-sm" style={{ color: "var(--muted)" }}>Nobody joined in this range.</p>;
-        const max = Math.max(1, ...rows.map((r) => r.signups.v));
-        return (
-          <div>
-            <div className="mb-2 flex gap-4 text-xs" style={{ color: "var(--ink2)" }}>
-              <span><span className="mr-1 inline-block h-2.5 w-3 rounded-sm align-middle" style={{ background: t.series[0] }} />Sign-ups</span>
-              <span><span className="mr-1 inline-block h-2.5 w-3 rounded-sm align-middle" style={{ background: t.series[1] }} />Paid</span>
-            </div>
-            <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] text-[13px]">
-              <thead className="text-left text-[11px]" style={{ color: "var(--muted)" }}>
-                <tr><th className="pb-1 font-medium">{by === "source" ? "Source / medium" : "Campaign"}</th><th className="w-[38%] pb-1 font-medium" /><th className="pb-1 text-right font-medium">Onboarded</th><th className="pb-1 text-right font-medium">Paid %</th><th className="pb-1 text-right font-medium">Revenue</th></tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.key} className="row-hover" style={{ borderTop: "1px solid var(--grid)" }}>
-                    <td className="max-w-[150px] truncate py-1.5 pr-2" title={r.key}>{r.key}{r.other ? <span style={{ color: "var(--muted)" }}> ({r.other})</span> : null}</td>
-                    <td className="py-1.5">
-                      <div className="flex items-center gap-1.5"><div style={{ width: `${(r.signups.v / max) * 80}%`, minWidth: 3, height: 9, background: t.series[0], borderRadius: "0 3px 3px 0" }} /><N cell={r.signups} env={env} drill={drill} title={`Sign-ups from ${r.key}`} className="tnum text-xs font-semibold" /></div>
-                      <div className="mt-[2px] flex items-center gap-1.5"><div style={{ width: `${(r.paid.v / max) * 80}%`, minWidth: r.paid.v ? 3 : 0, height: 9, background: t.series[1], borderRadius: "0 3px 3px 0" }} /><N cell={r.paid} env={env} drill={drill} title={`Paid from ${r.key}`} className="tnum text-xs" /></div>
-                    </td>
-                    <td className="tnum py-1.5 text-right"><N cell={r.onboarded} env={env} drill={drill} title={`Onboarded from ${r.key}`} /></td>
-                    <td className="tnum py-1.5 text-right" style={{ color: "var(--ink2)" }}>{fmtPct(r.signups.v ? Math.round((r.paid.v / r.signups.v) * 1000) / 10 : null)}</td>
-                    <td className="tnum py-1.5 text-right"><N cell={r.revenue} env={env} drill={drill} title={`Revenue from ${r.key}`} fmt={fmtInr} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-          </div>
-        );
-      }}
-    </Card>
-  );
-}
-
-// -------------------------------------------------------------- call health
-
-const OUTCOME_STYLE: Record<string, { color: string; icon: string }> = {
-  completed: { color: STATUS.good, icon: "✓" },
-  failed: { color: STATUS.critical, icon: "✕" },
-  dropped: { color: STATUS.serious, icon: "▼" },
-  hung_up_first_minute: { color: STATUS.warning, icon: "!" },
-};
-
-interface Rate { label: string; value: number | null; num: Cell; den: Cell }
-interface CallsBody {
-  total: Cell; started: Cell; outcomes: { key: string; label: string; cell: Cell }[];
-  reasons: { key: string; label: string; cell: Cell; of: Cell }[];
-  micDenied: Rate; failCalls: Rate; failPeople: Rate; medianSeconds: number | null;
-}
-
-function StackBar({ segs, onPick }: { segs: { key: string; label: string; v: number; color: string; cell: Cell }[]; onPick: (k: string) => void }) {
-  const total = segs.reduce((a, x) => a + x.v, 0);
-  if (!total) return <div className="h-[18px] rounded" style={{ background: "var(--track)" }} />;
-  return (
-    <div className="flex h-[18px] w-full gap-[2px] overflow-hidden rounded">
-      {segs.filter((x) => x.v > 0).map((x) => (
-        <button key={x.key} type="button" onClick={() => onPick(x.key)} title={`${x.label}: ${fmtN(x.v)} (${Math.round((x.v / total) * 100)}%)`} aria-label={`${x.label}: ${x.v}`}
-          className="h-full hover:opacity-80 focus-visible:opacity-80" style={{ flexGrow: x.v, flexBasis: 0, minWidth: 3, background: x.color }} />
-      ))}
-    </div>
-  );
-}
-
-function Calls({ s, drill, t }: { s: SectionState; drill: Drill; t: Theme }) {
-  const body = s.env?.body as CallsBody | undefined;
-  return (
-    <Card title="Call health" sub="Onboarding calls by people who joined in range (as Drop-offs and Ratios count them)." s={s}>
-      {(env) => {
-        const b = body!;
-        const oc = (k: string) => b.outcomes.find((o) => o.key === k)?.cell ?? { v: 0, users: [] };
-        const segs = b.outcomes.map((o) => ({ key: o.key, label: o.label, v: o.cell.v, cell: o.cell, color: OUTCOME_STYLE[o.key]?.color ?? t.neutral }));
-        const tried = Math.max(1, ...b.reasons.map((r) => r.of.v));
-        const fig = (label: string, node: React.ReactNode, note?: string) => (
-          <div className="min-w-0">
-            <div className="truncate text-[11px]" style={{ color: "var(--ink2)" }}>{label}</div>
-            <div className="text-xl font-semibold">{node}</div>
-            {note && <div className="truncate text-[10px]" style={{ color: "var(--muted)" }}>{note}</div>}
-          </div>
-        );
-        return (
-          <div>
-            <div className="grid grid-cols-4 gap-2">
-              {fig("Started", <N cell={b.started} env={env} drill={drill} title="Calls started" />, `of ${fmtN(b.total.v)} calls`)}
-              {fig("Completed", <N cell={oc("completed")} env={env} drill={drill} title="Calls completed" />, fmtPct(b.started.v ? Math.round((oc("completed").v / b.started.v) * 1000) / 10 : null) + " of started")}
-              {fig("Failed", <N cell={oc("failed")} env={env} drill={drill} title="Calls failed" />, `${fmtPct(b.failCalls.value)} of calls`)}
-              {fig("Dropped", <N cell={oc("dropped")} env={env} drill={drill} title="Calls dropped" />, "connection went")}
-            </div>
-            <div className="mt-3"><StackBar segs={segs} onPick={(k) => { const o = b.outcomes.find((x) => x.key === k); if (o) drill(`Calls: ${o.label}`, o.cell, env); }} /></div>
-            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px]" style={{ color: "var(--ink2)" }}>
-              {segs.map((x) => (
-                <span key={x.key} className="flex items-center gap-1">
-                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: x.color }} />
-                  {OUTCOME_STYLE[x.key] && <span aria-hidden>{OUTCOME_STYLE[x.key].icon}</span>}{x.label} <span style={{ color: "var(--muted)" }}>{fmtN(x.v)}</span>
-                </span>
-              ))}
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-2" style={{ borderTop: "1px solid var(--grid)", paddingTop: 10 }}>
-              {fig("Mic denied (people)", b.micDenied.value == null ? <span style={{ color: "var(--muted)" }}>n/a</span> : <N cell={b.micDenied.num} env={env} drill={drill} title="Mic denied" fmt={() => fmtPct(b.micDenied.value)} />, `${fmtN(b.micDenied.num.v)} of ${fmtN(b.micDenied.den.v)} who tried`)}
-              {fig("Failure rate (people)", <N cell={b.failPeople.num} env={env} drill={drill} title="People with a failed call" fmt={() => fmtPct(b.failPeople.value)} />, `${fmtN(b.failPeople.num.v)} of ${fmtN(b.failPeople.den.v)}`)}
-              {fig("Median call length", <span>{b.medianSeconds != null ? fmtDur(b.medianSeconds * 1000) : "n/a"}</span>, "started calls")}
-            </div>
-            <div className="mt-3 text-[11px] font-semibold" style={{ color: "var(--ink2)" }}>Why calls did not finish (people)</div>
-            {b.reasons.length ? (
-              <div className="mt-1 grid grid-cols-[minmax(0,1fr)_minmax(60px,35%)_auto] items-center gap-x-2 gap-y-1 text-xs">
-                {b.reasons.slice(0, 7).map((r) => (
-                  <div key={r.key} className="contents">
-                    <span className="truncate" title={r.label}>{r.label}</span>
-                    <div className="h-[8px] rounded-r" style={{ width: `${(r.cell.v / tried) * 100}%`, minWidth: r.cell.v ? 3 : 0, background: t.series[0] }} />
-                    <span className="tnum text-right"><N cell={r.cell} env={env} drill={drill} title={r.label} /> <span style={{ color: "var(--muted)" }}>{fmtPct(r.of.v ? Math.round((r.cell.v / r.of.v) * 1000) / 10 : null)}</span></span>
-                  </div>
-                ))}
-              </div>
-            ) : <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>No failed, dropped or short calls.</p>}
-          </div>
-        );
-      }}
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------- drop-offs
-
-const PHASES = ["Sign up", "Call", "Use", "Outreach", "Pay"];
-
-function Dropoffs({ s, drill, t, qs }: { s: SectionState; drill: Drill; t: Theme; qs: string }) {
-  const body = s.env?.body as { stuck: { key: string; n: string; label: string; phase: string; cell: Cell }[]; total: number; reasons: { key: string; label: string; cell: Cell; of: Cell }[] } | undefined;
-  return (
-    <Card title="Where people stop" sub="Furthest step reached by people who joined in range. Click a step for those people in Journeys." s={s}>
-      {(env) => {
-        const b = body!;
-        const color = (phase: string) => t.ordinal[Math.max(0, PHASES.indexOf(phase))];
-        const segs = b.stuck.filter((x) => x.cell.v > 0);
-        const top = segs.reduce((m, x) => (x.cell.v > (m?.cell.v ?? -1) ? x : m), null as (typeof segs)[number] | null);
-        return (
-          <div>
-            {top && <p className="mb-2 text-sm">Most stop at <span className="font-semibold">{top.label}</span>: {fmtN(top.cell.v)} of {fmtN(b.total)} ({Math.round((top.cell.v / Math.max(1, b.total)) * 100)}%).</p>}
-            <div className="flex h-[22px] w-full gap-[2px] overflow-hidden rounded">
-              {segs.map((x) => (
-                <Link key={x.key} to={`/journeys?${qs}&cohort=1&stuck=${x.key}`} title={`${x.n}. ${x.label}: ${x.cell.v} (${Math.round((x.cell.v / Math.max(1, b.total)) * 100)}%)`}
-                  className="h-full hover:opacity-80" style={{ flexGrow: x.cell.v, flexBasis: 0, minWidth: 3, background: color(x.phase) }} aria-label={`${x.label}: ${x.cell.v}`} />
-              ))}
-              {!segs.length && <div className="h-full w-full" style={{ background: "var(--track)" }} />}
-            </div>
-            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px]" style={{ color: "var(--ink2)" }}>
-              {PHASES.map((p) => <span key={p} className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color(p) }} />{p}</span>)}
-            </div>
-            <div className="mt-3 grid grid-cols-1 gap-x-6 sm:grid-cols-2">
-              {segs.map((x) => (
-                <div key={x.key} className="row-hover flex items-center justify-between gap-2 rounded px-1 py-[3px] text-xs" style={{ borderTop: "1px solid var(--grid)" }}>
-                  <Link to={`/journeys?${qs}&cohort=1&stuck=${x.key}`} className="truncate hover:underline" title="Open these people in Journeys">
-                    <span className="mr-1 inline-block h-2 w-2 rounded-sm" style={{ background: color(x.phase) }} />{x.n}. {x.label}
-                  </Link>
-                  <span className="tnum whitespace-nowrap"><N cell={x.cell} env={env} drill={drill} title={`Stopped at ${x.label}`} /> <span style={{ color: "var(--muted)" }}>{Math.round((x.cell.v / Math.max(1, b.total)) * 100)}%</span></span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 text-[11px] font-semibold" style={{ color: "var(--ink2)" }}>Gaps worth a look</div>
-            <div className="mt-1 grid gap-y-1 text-xs">
-              {b.reasons.map((r) => (
-                <div key={r.key} className="flex items-center justify-between gap-2">
-                  <span className="truncate">{r.label}</span>
-                  <span className="tnum whitespace-nowrap"><N cell={r.cell} env={env} drill={drill} title={r.label} /> <span style={{ color: "var(--muted)" }}>of {fmtN(r.of.v)}</span></span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      }}
-    </Card>
-  );
-}
-
-// --------------------------------------------------------------- engagement
-
-interface EngBody {
-  headline: { n: number; back: Cell; eligible: Cell; value: number | null }[];
-  heat: { day: string; size: Cell; d: { n: number; back: Cell; eligible: number; value: number | null }[] }[];
-  active: Cell; chats: Cell; chatters: Cell; jobOpens: Cell; applies: Cell; saved: Cell;
-  perActive: { chats: number | null; jobs: number | null; applies: number | null };
-}
-
-function Engagement({ s, drill, t }: { s: SectionState; drill: Drill; t: Theme }) {
-  const body = s.env?.body as EngBody | undefined;
-  return (
-    <Card title="Retention" sub="Return to the desk on day N after the IST day they joined (as the Retention page counts it); people whose day N has not come yet are left out." s={s}>
-      {(env) => {
-        const b = body!;
-        const shade = (v: number | null) => {
-          if (v == null) return null;
-          const k = Math.min(t.seq.length - 1, Math.round((v / 100) * (t.seq.length - 1)));
-          return { bg: v === 0 ? t.track : t.seq[k], fg: v === 0 ? t.muted : (t === THEME.dark ? k <= 7 : k >= 6) ? "#ffffff" : "#0b0b0b" };
-        };
-        const stat = (label: string, node: React.ReactNode, note: string) => (
-          <div className="min-w-0">
-            <div className="truncate text-[11px]" style={{ color: "var(--ink2)" }}>{label}</div>
-            <div className="text-xl font-semibold">{node}</div>
-            <div className="truncate text-[10px]" style={{ color: "var(--muted)" }}>{note}</div>
-          </div>
-        );
-        return (
-          <div>
-            <div className="grid grid-cols-3 gap-2">
-              {b.headline.map((h) => stat(`D${h.n} return`, h.value == null ? <span style={{ color: "var(--muted)" }}>n/a</span> : <N cell={h.back} env={env} drill={drill} title={`Back on day ${h.n}`} fmt={() => fmtPct(h.value)} />, `${fmtN(h.back.v)} of ${fmtN(h.eligible.v)}`))}
-            </div>
-            <div className="mt-3 grid grid-cols-4 gap-2" style={{ borderTop: "1px solid var(--grid)", paddingTop: 10 }}>
-              {stat("Active students", <N cell={b.active} env={env} drill={drill} title="Active in range" />, "any activity in range")}
-              {stat("Chats per active", <span>{b.perActive.chats ?? "n/a"}</span>, `${fmtN(b.chats.v)} messages, ${fmtN(b.chatters.v)} chatted`)}
-              {stat("Jobs opened per active", <span>{b.perActive.jobs ?? "n/a"}</span>, `${fmtN(b.jobOpens.v)} opens`)}
-              {stat("Apply clicks per active", <span>{b.perActive.applies ?? "n/a"}</span>, `${fmtN(b.applies.v)} clicks, ${fmtN(b.saved.v)} saved`)}
-            </div>
-            <div className="mt-3 text-[11px] font-semibold" style={{ color: "var(--ink2)" }}>Cohorts by sign-up day, % back on day N</div>
-            {b.heat.length ? (
-              <div className="mt-1 overflow-x-auto">
-                <table className="tnum w-full border-separate text-[11px]" style={{ borderSpacing: 2 }}>
-                  <thead style={{ color: "var(--muted)" }}>
-                    <tr><th className="text-left font-medium">Joined</th><th className="text-right font-medium">People</th>{HEAT_DAYS.map((n) => <th key={n} className="font-medium">D{n}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {b.heat.map((r) => (
-                      <tr key={r.day}>
-                        <td className="whitespace-nowrap pr-2">{dayLabel(r.day)}</td>
-                        <td className="pr-2 text-right"><N cell={r.size} env={env} drill={drill} title={`Joined ${r.day}`} /></td>
-                        {r.d.map((c) => {
-                          const sh = shade(c.value);
-                          return (
-                            <td key={c.n} className="h-[22px] min-w-[38px] rounded text-center" style={{ background: sh?.bg ?? "transparent", color: sh?.fg ?? t.muted }} title={c.value == null ? `D${c.n}: not yet` : `D${c.n}: ${c.back.v} of ${c.eligible} (${c.value}%)`}>
-                              {c.value == null ? "" : c.back.v > 0 ? <button type="button" className="h-full w-full" onClick={() => drill(`Joined ${r.day}, back on day ${c.n}`, c.back, env)}>{c.value}%</button> : `${c.value}%`}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>Nobody joined in this range.</p>}
-          </div>
-        );
-      }}
-    </Card>
-  );
-}
-
-// -------------------------------------------------------------------- feed
-
-function Feed({ s, qs }: { s: SectionState; qs: string }) {
-  const rows = s.env?.body as FeedRow[] | undefined;
-  return (
-    <Card title="Live feed" sub="The last 20 journey events, newest first (all days). Click a person for their journey." s={s} minH={200}>
-      {(env) => (
-        rows!.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead className="text-left text-[11px]" style={{ color: "var(--muted)" }}>
-                <tr><th className="pb-1 font-medium">Time (IST)</th><th className="pb-1 font-medium">Step</th><th className="pb-1 font-medium">Who</th><th className="hidden pb-1 font-medium sm:table-cell">Source</th></tr>
-              </thead>
-              <tbody>
-                {rows!.map((r) => {
-                  const person = r.u >= 0 ? env.people[r.u] : null;
-                  return (
-                    <tr key={r.id} className="row-hover" style={{ borderTop: "1px solid var(--grid)" }}>
-                      <td className="tnum whitespace-nowrap py-1 pr-3" style={{ color: "var(--ink2)" }}>{istShort(r.at)}</td>
-                      <td className="py-1 pr-3" title={r.step}>{r.label}</td>
-                      <td className="max-w-[220px] truncate py-1 pr-3">
-                        {person ? <Link to={`/journeys?${qs}&u=${encodeURIComponent(person.id)}`} className="hover:underline" style={{ color: "var(--s1)" }}>{r.who}</Link> : <span style={{ color: "var(--muted)" }}>{r.who}</span>}
-                        {person?.internal && <span className="ml-1 text-[10px]" style={{ color: "var(--muted)" }}>internal</span>}
-                      </td>
-                      <td className="hidden max-w-[260px] truncate py-1 sm:table-cell" style={{ color: "var(--ink2)" }}>{r.source.startsWith("channel: ") ? channelLabel(r.source.slice(9)) : r.source}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : <p className="text-sm" style={{ color: "var(--muted)" }}>No journey events yet.</p>
-      )}
-    </Card>
-  );
-}
-
-// ----------------------------------------------------------------- insights
-
-function Insights({ s, drill }: { s: SectionState; drill: Drill }) {
-  const list = (s.env?.body as Insight[] | undefined) ?? null;
-  return (
-    <section className="card mt-3 px-4 py-3" aria-busy={s.loading}>
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <h2 className="text-[15px] font-semibold">What is going on</h2>
-        <span className="text-[11px]" style={{ color: "var(--muted)" }}>By rules, most important first</span>
-      </div>
-      {s.error && !list && <div className="text-xs" style={{ color: "var(--down)" }}>Could not read: {s.error}</div>}
-      {!list && !s.error && <div className="h-[72px] animate-pulse rounded-lg" style={{ background: "var(--track)" }} />}
-      {list && (
-        <ol className="fade grid gap-x-8 gap-y-1.5 text-[13.5px] leading-snug xl:grid-cols-2" style={{ opacity: s.loading ? 0.55 : 1 }}>
-          {list.map((x, k) => (
-            <li key={x.key} className="flex items-start gap-2">
-              <span className="tnum mt-[1px] inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full text-[11px] font-semibold" style={{ background: "var(--track)", color: "var(--ink2)" }}>{k + 1}</span>
-              <span className="min-w-0">
-                {x.text}{" "}
-                {x.href.startsWith("#") ? (
-                  <a href={x.href} className="whitespace-nowrap text-xs font-semibold underline" style={{ color: "var(--s1)" }}>See it</a>
-                ) : (
-                  <Link to={x.href} className="whitespace-nowrap text-xs font-semibold underline" style={{ color: "var(--s1)" }}>Open</Link>
-                )}
-                {x.cell && x.cell.users.length > 0 && (
-                  <button type="button" className="num ml-2 text-xs" onClick={() => drill(x.text, x.cell!, s.env!)}>{x.cell.users.length} people</button>
-                )}
-              </span>
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  );
-}
-
-// ------------------------------------------------------- usage: DAU, WAU, MAU
-
-interface UsageBody {
-  dau: Cell; wau: Cell; mau: Cell; avgDau: number; stickiness: number | null;
-  trend: { day: string; dau: Cell; wau: number; mau: number; stick: number | null; new: Cell; returning: Cell }[];
-  repeat: Cell; cohort: Cell; repeatPct: number | null; repeaters: Cell; oneTime: Cell;
-  features: { key: string; label: string; rep: Cell; one: Cell; repPct: number | null; onePct: number | null }[];
-  source: string; beacons: boolean;
-}
-
-function chartOptions(t: Theme, opts: { pct?: boolean; stacked?: boolean; onClick?: (evt: any, els: any, chart: any) => void }): any {
-  return {
-    responsive: true, maintainAspectRatio: false, animation: false,
-    interaction: { mode: "index", intersect: false },
-    plugins: {
-      legend: { display: false },
-      ovCrosshair: { color: t.axis },
-      tooltip: {
-        backgroundColor: t.surface, borderColor: t.axis, borderWidth: 1, titleColor: t.ink2, bodyColor: t.ink, padding: 8, boxWidth: 10, boxHeight: 2,
-        callbacks: { label: (c: any) => ` ${c.parsed.y == null ? "n/a" : opts.pct ? `${c.parsed.y}%` : fmtN(c.parsed.y)}  ${c.dataset.label}` },
-      },
-    },
-    scales: {
-      x: { stacked: opts.stacked, grid: { display: false }, border: { color: t.axis }, ticks: { color: t.muted, maxTicksLimit: 6, maxRotation: 0, font: { size: 11 } } },
-      y: { stacked: opts.stacked, beginAtZero: true, grid: { color: t.grid }, border: { display: false }, ticks: { color: t.muted, precision: 0, maxTicksLimit: 5, font: { size: 11 }, callback: (v: any) => (opts.pct ? `${v}%` : fmtN(Number(v))) } },
-    },
-    onClick: opts.onClick,
-  };
-}
-
-function Legend({ items }: { items: { label: string; color: string; line?: boolean; note?: string }[] }) {
-  return (
-    <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "var(--ink2)" }}>
-      {items.map((x) => (
-        <span key={x.label} className="flex items-center gap-1.5">
-          <span className={`inline-block ${x.line ? "h-[2px] w-4 rounded" : "h-2.5 w-3 rounded-sm"}`} style={{ background: x.color }} />
-          {x.label}{x.note && <span style={{ color: "var(--muted)" }}>{x.note}</span>}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function Usage({ s, drill, t }: { s: SectionState; drill: Drill; t: Theme }) {
-  const [view, setView] = useState<"newret" | "stick" | "dwm">("newret");
-  const body = s.env?.body as UsageBody | undefined;
-  return (
-    <Card
-      title="Engagement"
-      sub="Active: any use of Stu that day (IST). DAU on the range's last day, WAU 7 days, MAU 30 days to it."
-      s={s}
-      minH={360}
-      right={<Seg label="Engagement view" value={view} onChange={setView} options={[{ v: "newret", l: "New, returning" }, { v: "stick", l: "Stickiness" }, { v: "dwm", l: "DAU, WAU, MAU" }]} />}
-    >
-      {(env) => {
-        const b = body!;
-        const labels = b.trend.map((x) => dayLabel(x.day));
-        const pick = (cells: Cell[], name: string) => (_e: any, els: any[]) => {
-          const el = els?.[0];
-          if (!el) return;
-          const c = cells[el.index];
-          if (c && c.users.length) drill(`${name}, ${b.trend[el.index].day}`, c, env);
-        };
-        const stat = (label: string, node: React.ReactNode, note: string) => (
-          <div className="min-w-0">
-            <div className="truncate text-[11px]" style={{ color: "var(--ink2)" }}>{label}</div>
-            <div className="text-xl font-semibold">{node}</div>
-            <div className="truncate text-[10px]" style={{ color: "var(--muted)" }}>{note}</div>
-          </div>
-        );
-        let chart: React.ReactNode;
-        if (view === "newret") {
-          const data = {
-            labels,
-            datasets: [
-              { label: "New (joined that day)", data: b.trend.map((x) => x.new.v), backgroundColor: t.series[0], borderRadius: { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 }, borderSkipped: false, maxBarThickness: 18, borderColor: t.surface, borderWidth: { top: 2 } },
-              { label: "Returning", data: b.trend.map((x) => x.returning.v), backgroundColor: t.series[1], borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: false, maxBarThickness: 18 },
-            ],
-          };
-          const cellsAt = (i: number, ds: number) => (ds === 0 ? b.trend[i].new : b.trend[i].returning);
-          chart = (
-            <>
-              <Legend items={[{ label: "New (joined that day)", color: t.series[0] }, { label: "Returning", color: t.series[1] }]} />
-              <div className="h-[170px]">
-                <Bar data={data} options={chartOptions(t, { stacked: true, onClick: (evt: any, _els: any, ch: any) => {
-                  const el = ch.getElementsAtEventForMode(evt, "nearest", { intersect: false }, true)[0];
-                  if (!el) return;
-                  const c = cellsAt(el.index, el.datasetIndex);
-                  if (c.users.length) drill(`${el.datasetIndex === 0 ? "New actives" : "Returning actives"}, ${b.trend[el.index].day}`, c, env);
-                } })} />
-              </div>
-            </>
-          );
-        } else if (view === "stick") {
-          const data = { labels, datasets: [{ label: "DAU / MAU", data: b.trend.map((x) => x.stick), borderColor: t.series[0], backgroundColor: t.series[0], borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0, spanGaps: true }] };
-          chart = (
-            <>
-              <div className="mb-2 text-xs" style={{ color: "var(--ink2)" }}>DAU / MAU each day, %</div>
-              <div className="h-[170px]"><Line data={data} options={chartOptions(t, { pct: true, onClick: pick(b.trend.map((x) => x.dau), "Active") })} plugins={[crosshair]} /></div>
-            </>
-          );
-        } else {
-          const data = {
-            labels,
-            datasets: [
-              { label: "DAU", data: b.trend.map((x) => x.dau.v), borderColor: t.series[0], backgroundColor: t.series[0] },
-              { label: "WAU", data: b.trend.map((x) => x.wau), borderColor: t.series[1], backgroundColor: t.series[1] },
-              { label: "MAU", data: b.trend.map((x) => x.mau), borderColor: t.series[2], backgroundColor: t.series[2] },
-            ].map((x) => ({ ...x, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0 })),
-          };
-          chart = (
-            <>
-              <Legend items={[{ label: "DAU", color: t.series[0], line: true }, { label: "WAU (7 days)", color: t.series[1], line: true }, { label: "MAU (30 days)", color: t.series[2], line: true }]} />
-              <div className="h-[170px]"><Line data={data} options={chartOptions(t, { onClick: pick(b.trend.map((x) => x.dau), "Active") })} plugins={[crosshair]} /></div>
-            </>
-          );
-        }
-        const maxPct = 100;
-        return (
-          <div>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-              {stat("DAU", <N cell={b.dau} env={env} drill={drill} title="Active on the last day" />, `avg ${b.avgDau} over 7 days`)}
-              {stat("WAU", <N cell={b.wau} env={env} drill={drill} title="Active in 7 days" />, "7 days")}
-              {stat("MAU", <N cell={b.mau} env={env} drill={drill} title="Active in 30 days" />, "30 days")}
-              {stat("Stickiness", <span>{fmtPct(b.stickiness)}</span>, "avg DAU 7 days / MAU")}
-              {stat("Repeat users", <N cell={b.repeat} env={env} drill={drill} title="Joined in range, active on 2+ days" />, `${fmtPct(b.repeatPct)} of ${fmtN(b.cohort.v)} sign-ups, 2+ days`)}
-            </div>
-            <div className="mt-3">{chart}</div>
-            <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2" style={{ borderTop: "1px solid var(--grid)", paddingTop: 10 }}>
-              <div className="text-[11px] font-semibold" style={{ color: "var(--ink2)" }}>What repeat users use, against one-time users</div>
-              <Legend items={[
-                { label: "Repeat (2+ days)", color: t.series[0], note: ` ${fmtN(b.repeaters.v)}` },
-                { label: "One day only", color: t.series[1], note: ` ${fmtN(b.oneTime.v)}` },
-              ]} />
-            </div>
-            {b.features.length ? (
-              <div className="grid grid-cols-[minmax(80px,120px)_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-xs">
-                {b.features.map((x) => (
-                  <div key={x.key} className="contents">
-                    <span className="truncate" style={{ color: "var(--ink2)" }}>{x.label}</span>
-                    <div>
-                      <div className="flex items-center gap-1.5" title={`Repeat users: ${x.rep.v} (${fmtPct(x.repPct)})`}>
-                        <div style={{ width: `${((x.repPct ?? 0) / maxPct) * 85}%`, minWidth: x.rep.v ? 3 : 0, height: 8, background: t.series[0], borderRadius: "0 3px 3px 0" }} />
-                        <N cell={x.rep} env={env} drill={drill} title={`Repeat users who used ${x.label}`} fmt={() => fmtPct(x.repPct)} className="tnum text-[11px]" />
-                      </div>
-                      <div className="mt-[2px] flex items-center gap-1.5" title={`One-time users: ${x.one.v} (${fmtPct(x.onePct)})`}>
-                        <div style={{ width: `${((x.onePct ?? 0) / maxPct) * 85}%`, minWidth: x.one.v ? 3 : 0, height: 8, background: t.series[1], borderRadius: "0 3px 3px 0" }} />
-                        <N cell={x.one} env={env} drill={drill} title={`One-time users who used ${x.label}`} fmt={() => fmtPct(x.onePct)} className="tnum text-[11px]" />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : <p className="text-xs" style={{ color: "var(--muted)" }}>Nobody active in this range.</p>}
-            <p className="mt-2 text-[10px]" style={{ color: "var(--muted)" }}>source: {b.source}</p>
-          </div>
-        );
-      }}
-    </Card>
-  );
-}
-
-// -------------------------------------------------------------- power users
-
-interface PowerBody { rule: string; cell: Cell; trend: { day: string; v: number }[]; rows: PowerRow[]; more: number; weekAgo: number | null; byChannel: [string, number][]; source: string }
-
-function Power({ s, drill, t, qs }: { s: SectionState; drill: Drill; t: Theme; qs: string }) {
-  const body = s.env?.body as PowerBody | undefined;
-  return (
-    <Card title="Power users" s={s} minH={360}>
-      {(env) => {
-        const b = body!;
-        const data = { labels: b.trend.map((x) => dayLabel(x.day)), datasets: [{ label: "Power users", data: b.trend.map((x) => x.v), borderColor: t.series[0], backgroundColor: t.series[0], borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0 }] };
-        return (
-          <div>
-            <p className="text-[13px]" style={{ color: "var(--ink2)" }}>{b.rule}</p>
-            <div className="mt-2 flex flex-wrap items-end gap-x-6 gap-y-1">
-              <div>
-                <div className="text-[11px]" style={{ color: "var(--ink2)" }}>Now</div>
-                <div className="text-[26px] font-semibold leading-tight"><N cell={b.cell} env={env} drill={drill} title="Power users" /></div>
-              </div>
-              <div className="pb-1 text-xs" style={{ color: "var(--muted)" }}>
-                {b.weekAgo != null ? `${b.weekAgo} a week earlier` : ""}
-                {b.byChannel.length ? ` · ${b.byChannel.slice(0, 3).map(([c, n]) => `${channelLabel(c)} ${n}`).join(", ")}` : ""}
-              </div>
-            </div>
-            <div className="mt-2 text-[11px]" style={{ color: "var(--ink2)" }}>Power users each day, last 30 days</div>
-            <div className="h-[90px]"><Line data={data} options={chartOptions(t, {})} plugins={[crosshair]} /></div>
-            {b.rows.length ? (
-              <div className="mt-3 max-h-[260px] overflow-auto">
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 text-left text-[11px]" style={{ background: "var(--surface)", color: "var(--muted)" }}>
-                    <tr><th className="pb-1 font-medium">Who</th><th className="pb-1 font-medium">Last active</th><th className="pb-1 text-right font-medium">Days</th><th className="pb-1 pl-2 font-medium">Top features</th><th className="hidden pb-1 font-medium sm:table-cell">Source</th></tr>
-                  </thead>
-                  <tbody>
-                    {b.rows.map((r) => {
-                      const p = env.people[r.u];
-                      return (
-                        <tr key={r.u} className="row-hover" style={{ borderTop: "1px solid var(--grid)" }}>
-                          <td className="max-w-[150px] truncate py-1 pr-2">{p ? <Link to={`/journeys?${qs}&u=${encodeURIComponent(p.id)}`} className="hover:underline" style={{ color: "var(--s1)" }}>{r.who}</Link> : r.who}</td>
-                          <td className="tnum whitespace-nowrap py-1 pr-2">{r.lastActive ? dayLabel(r.lastActive) : ""}</td>
-                          <td className="tnum py-1 pr-2 text-right" title={`${r.activeDays} active days, ${r.richDays} with 3+ features, in the last 7`}>{r.activeDays}</td>
-                          <td className="max-w-[160px] truncate py-1 pl-2 pr-2" style={{ color: "var(--ink2)" }}>{r.top.join(", ")}</td>
-                          <td className="hidden max-w-[120px] truncate py-1 sm:table-cell" style={{ color: "var(--ink2)" }}>{r.source || channelLabel(r.ch)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {b.more > 0 && <p className="mt-1 text-[11px]" style={{ color: "var(--muted)" }}>and {b.more} more (open the count for all)</p>}
-              </div>
-            ) : <p className="mt-3 text-xs" style={{ color: "var(--muted)" }}>Nobody meets the rule yet.</p>}
-            <p className="mt-2 text-[10px]" style={{ color: "var(--muted)" }}>source: {b.source}</p>
           </div>
         );
       }}
