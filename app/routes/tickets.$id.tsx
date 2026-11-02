@@ -57,6 +57,14 @@ const PRIORITY_BADGE: Record<string, string> = {
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
+  account: "Account",
+  billing: "Billing and credits",
+  bug: "Bug",
+  sign_in: "Sign-in",
+  whatsapp: "WhatsApp linking",
+  data_deletion: "Delete my data",
+  human: "Talk to a person",
+  feature_request: "Feature request",
   campaign_broken: "Campaign broken",
   campaign_changes: "Campaign changes",
   website_broken: "Site broken",
@@ -70,6 +78,62 @@ const STATUS_OPTIONS = [
   { value: "resolved", label: "Resolved" },
   { value: "wont_fix", label: "Won't fix" },
 ];
+
+function show(v: unknown): string {
+  return typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+}
+
+function StuContextCard({ ctx, userId }: { ctx: Record<string, any>; userId: string }) {
+  const page = ctx.page && typeof ctx.page === "object" ? ctx.page : null;
+  const journey: { step?: string; at?: string }[] = Array.isArray(ctx.journey)
+    ? ctx.journey.slice(-10)
+    : [];
+  const rows: [string, unknown][] = [
+    ["Category", ctx.category],
+    ["Page", page ? [page.s, page.sub, page.place].filter(Boolean).join(" / ") : null],
+    ["Plan", ctx.plan],
+    ["Email credits", ctx.email_credits],
+    ["Last call id", ctx.last_call_id],
+    ["Thread id", ctx.thread_id],
+    ["Surface", ctx.surface],
+  ];
+  return (
+    <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/50 px-3 py-2 text-xs text-neutral-700">
+      <div className="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">
+        Stu context
+      </div>
+      {ctx.summary ? (
+        <p className="mb-2 text-sm text-neutral-900">{String(ctx.summary)}</p>
+      ) : null}
+      {rows.map(([k, v]) =>
+        v == null || v === "" ? null : (
+          <div key={k}>
+            <strong>{k}:</strong> {show(v)}
+          </div>
+        ),
+      )}
+      {journey.length > 0 && (
+        <div className="mt-2">
+          <div className="font-bold">Last {journey.length} journey events</div>
+          <ul className="mt-0.5 space-y-0.5">
+            {journey.map((e, i) => (
+              <li key={i}>
+                {e.step ?? "?"}
+                {e.at ? <span className="text-neutral-400"> · {fmt(e.at)}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <a
+        href={`/journeys?u=${encodeURIComponent(ctx.user_id || userId)}`}
+        className="mt-2 inline-block font-semibold text-violet-700 hover:underline"
+      >
+        Open journey
+      </a>
+    </div>
+  );
+}
 
 function fmt(iso: string): string {
   return new Date(iso).toLocaleString("en-GB", {
@@ -242,12 +306,34 @@ export default function TicketDetailPage({ params }: Route.ComponentProps) {
                   </span>{" "}
                   · {fmt(detail.created_at)}
                 </p>
-                {detail.context && Object.keys(detail.context).length > 0 && (
+                {detail.source === "contact_form" && (
+                  <div className="mt-3 rounded-lg bg-neutral-50 px-3 py-2 text-xs text-neutral-700">
+                    <div>
+                      <strong>Visitor email:</strong>{" "}
+                      <a
+                        href={`mailto:${detail.user_email}`}
+                        className="font-semibold text-violet-700 hover:underline"
+                      >
+                        {detail.user_email}
+                      </a>
+                    </div>
+                    <div className="mt-1 text-neutral-500">
+                      Signed-out visitor: nothing is emailed automatically. Reply from your own
+                      mailbox if needed.
+                    </div>
+                  </div>
+                )}
+                {detail.source === "stu" && detail.context ? (
+                  <StuContextCard
+                    ctx={{ category: detail.category, ...detail.context }}
+                    userId={detail.user_id}
+                  />
+                ) : detail.context && Object.keys(detail.context).length > 0 && (
                   <div className="mt-3 rounded-lg bg-neutral-50 px-3 py-2 text-xs text-neutral-700">
                     {Object.entries(detail.context).map(([k, v]) =>
                       v == null ? null : (
                         <div key={k}>
-                          <strong>{k}:</strong> {String(v)}
+                          <strong>{k}:</strong> {show(v)}
                         </div>
                       ),
                     )}
@@ -363,7 +449,11 @@ export default function TicketDetailPage({ params }: Route.ComponentProps) {
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
                 rows={4}
-                placeholder="Reply to the user. They'll get this as an email and see it in their support chat."
+                placeholder={
+                  detail.source === "stu"
+                    ? "They see this in Stu, under Help, and on WhatsApp when their chat window is open. No email goes."
+                    : "No email goes to students."
+                }
                 className="w-full rounded-lg border-2 border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:border-neutral-900 resize-none"
               />
               <div className="flex justify-between mt-2">

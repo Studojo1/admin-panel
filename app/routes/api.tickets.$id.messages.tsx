@@ -90,10 +90,10 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   // Look up the ticket so we know which user to email.
   const tRes = await db.execute(sql`
-    SELECT id, user_email, user_name FROM tickets WHERE id = ${id} LIMIT 1
+    SELECT id, user_email, user_name, source FROM tickets WHERE id = ${id} LIMIT 1
   `);
   const ticket = tRes.rows[0] as
-    | { id: number; user_email: string; user_name: string | null }
+    | { id: number; user_email: string; user_name: string | null; source: string | null }
     | undefined;
   if (!ticket) {
     return Response.json({ error: "Not found" }, { status: 404 });
@@ -111,12 +111,18 @@ export async function action({ request, params }: Route.ActionArgs) {
     WHERE id = ${id}
   `);
 
-  const emailed = await notifyUserOfReply({
-    ticket_id: id,
-    user_email: ticket.user_email,
-    user_name: ticket.user_name,
-    reply_body: text,
-  });
+  // Owner rule: no emails to students. Only Sensei (B2B staff) tickets get the
+  // reply email. Stu tickets are relayed by Stu itself; contact-form visitors
+  // are answered from a mailbox.
+  let emailed = false;
+  if (ticket.source === "sensei") {
+    emailed = await notifyUserOfReply({
+      ticket_id: id,
+      user_email: ticket.user_email,
+      user_name: ticket.user_name,
+      reply_body: text,
+    });
+  }
 
   return Response.json({ message: mRes.rows[0], emailed });
 }
