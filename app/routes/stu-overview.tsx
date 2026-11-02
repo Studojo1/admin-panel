@@ -149,7 +149,7 @@ export default function StuOverview() {
           <div>
             <h1 className="font-['Clash_Display'] text-3xl font-medium tracking-tight text-neutral-950 md:text-4xl">Overview</h1>
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-neutral-500">
-              <span>Stu, studojo.pro · {rangeText}, IST</span>
+              <span>Stu · {rangeText}, IST</span>
               {envName && (
                 <span className={`rounded-full border-2 px-2 py-0.5 text-[11px] font-bold ${anyEnv?.env === "production" ? "border-emerald-600 text-emerald-700" : "border-amber-500 text-amber-700"}`}>
                   {local ? `Local, ${envName.toLowerCase()} data` : envName}
