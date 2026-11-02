@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AdminHeader } from "~/components";
+import { FellowshipProgramSwitch } from "~/components/fellowship-program-switch";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
 import { welcomeWhatsapp } from "~/lib/ugc-creators";
@@ -382,6 +383,7 @@ function Desk(P: DeskProps) {
             <p>{cohorts.length ? `${cohorts.length === 1 ? `Cohort ${cohorts[0]}` : `${cohorts.length} cohorts`} · ` : ""}{plural(live.length, "fellow")} · Week {weekNo(THIS)} of the fellowship · {DOWL[day(today).getUTCDay()]} {fmt(today)}</p>
           </div>
           <div className="head-actions">
+            <FellowshipProgramSwitch />
             <button className="btn btn-line" type="button" onClick={() => setDrawer({ mode: "add-fellow" })}><Icon id="plus" />Add a fellow</button>
             <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "post", id: null })}><Icon id="plus" />Add a post</button>
           </div>

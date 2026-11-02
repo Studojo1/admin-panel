@@ -6,7 +6,8 @@ import { authClient } from "~/lib/auth-client";
 // The new product (Stu) first, at the root; then live tools at their original
 // paths. The retired student product's dashboards follow under /old (read-only
 // archive, relaunch 2 Nov 2026).
-const NAV_LINKS: readonly { to: string; label: string; archive?: true; stu?: true }[] = [
+// section: the entry also stands for its sub-pages (/fellowship-program/calendar).
+const NAV_LINKS: readonly { to: string; label: string; archive?: true; stu?: true; section?: true }[] = [
   { to: "/", label: "Stu: Overview", stu: true },
   { to: "/daily", label: "Stu: Daily", stu: true },
   { to: "/funnel", label: "Stu: Funnel", stu: true },
@@ -24,8 +25,7 @@ const NAV_LINKS: readonly { to: string; label: string; archive?: true; stu?: tru
   { to: "/webinar-registrations", label: "Webinar Signups" },
   { to: "/campus-ambassadors", label: "Studojo Insiders" },
   { to: "/fellowship", label: "Growth Fellowship" },
-  { to: "/fellowship-program", label: "Program dashboard" },
-  { to: "/fellowship-program/calendar", label: "Editorial calendar" },
+  { to: "/fellowship-program", label: "Fellowship program", section: true },
   { to: "/sensei", label: "Sensei" },
   { to: "/utm-builder", label: "UTM Links" },
   { to: "/b2b-gtm", label: "B2B GTM" },
@@ -55,7 +55,8 @@ export function AdminHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const currentLink = NAV_LINKS.find((l) => l.to === location.pathname) ?? { label: "Navigate" };
+  const current = NAV_LINKS.find((l) => l.to === location.pathname || (l.section && location.pathname.startsWith(l.to + "/")));
+  const currentLink = current ?? { label: "Navigate" };
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -134,7 +135,7 @@ export function AdminHeader() {
                   className="absolute right-0 top-full mt-2 w-52 overflow-y-auto rounded-2xl border-2 border-neutral-900 bg-white shadow-[4px_4px_0px_0px_rgba(25,26,35,1)] max-h-[calc(100vh-6rem)]"
                 >
                   {NAV_LINKS.map((link, i) => {
-                    const isActive = location.pathname === link.to;
+                    const isActive = link === current;
                     const archiveStart = link.archive && !NAV_LINKS[i - 1]?.archive;
                     const stuStart = link.stu && !NAV_LINKS[i - 1]?.stu;
                     const toolsStart = !link.stu && !link.archive && NAV_LINKS[i - 1]?.stu;
