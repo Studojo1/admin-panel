@@ -2,19 +2,37 @@
 // onboarding, jobs, emails, payments), per step, since the log began. A gap over
 // 2% is flagged, and every Stu page shows a red banner while one is. Computed
 // on load from the same data the pages use; no cron.
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { CARD, Num, PageTitle, useStu } from "~/components/stu/ui";
-import { CHECK_THRESHOLD_PCT, fmtIst, selfCheck } from "~/lib/stu/model";
+import { CHECK_THRESHOLD_PCT, type CheckWindow, fmtIst, selfCheck } from "~/lib/stu/model";
 
 export default function StuSelfCheck() {
   const { data, filters } = useStu();
-  const c = useMemo(() => selfCheck(data, filters), [data, filters]);
+  const [win, setWin] = useState<CheckWindow>("live");
+  const c = useMemo(() => selfCheck(data, filters, win), [data, filters, win]);
   return (
     <div>
-      <PageTitle
-        title="Self-check"
-        sub={`Each step's people in the journey log against its ground-truth table, since the log began${c.from ? ` (${fmtIst(c.from)})` : ""}. Flagged above ${CHECK_THRESHOLD_PCT}%.`}
-      />
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <PageTitle
+          title="Self-check"
+          sub={`Each step's people in the journey log against its ground-truth table, ${win === "live" ? "since the log's first live event" : "since the log's first event, the backfill included"}${c.from ? ` (${fmtIst(c.from)})` : ""}. Flagged above ${CHECK_THRESHOLD_PCT}%. The page range does not apply here.`}
+        />
+        <div className="mb-4 flex items-center gap-1 rounded-xl border-2 border-neutral-900 bg-white p-0.5">
+          {([{ v: "live", l: "Live logging" }, { v: "all", l: "With the backfill" }] as const).map((x) => (
+            <button key={x.v} onClick={() => setWin(x.v)} className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${win === x.v ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"}`}>{x.l}</button>
+          ))}
+        </div>
+      </div>
+      {data.journeyLive && (
+        <div className={`mb-4 p-3 text-xs text-neutral-600 ${CARD}`}>
+          {win === "all" ? "The backfill (props.backfill) rebuilt the days before live logging from the product's tables with its own rules, so a gap here can be the backfill's, not the live logging's. " : ""}
+          Known differences (2 Nov 2026, career-agent fixes asked for): older studojo.com accounts got no backfilled signed_up (their account date is before the backfill's start; live logging records them);
+          a job added to outreach turns its match to applied with no job_saved, so Saved a job differs; a desk call with Stu counts as chatting in the tables but writes no chatted.
+        </div>
+      )}
+      {data.journeyLive && c.from == null && (
+        <div className={`mb-4 p-3 text-sm ${CARD}`}>No live journey events yet, only the backfill: switch to "With the backfill" to compare it.</div>
+      )}
       {!data.journeyLive ? (
         <div className={`mb-6 p-4 text-sm ${CARD}`}>The journey log is not in this database yet, so there is nothing to compare. The pages count from the product's tables meanwhile.</div>
       ) : (

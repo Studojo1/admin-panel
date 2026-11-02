@@ -427,7 +427,7 @@ export function alertsFromData(d: StuData, f: Filters, refs: Refs): Alert[] {
     const names = flagged.slice(0, 4).map((r) => `${r.label.replace(/^\S+\.\s*/, "")} ${r.gap}%`).join(", ");
     out.push({
       key: "check", level: "warning", href: "/self-check",
-      text: `Self-check: ${flagged.length} step${flagged.length === 1 ? "" : "s"} differ by more than 2% between the journey log and the product's tables: ${names}${flagged.length > 4 ? `, and ${flagged.length - 4} more` : ""}`,
+      text: `Self-check (since live logging began): ${flagged.length} step${flagged.length === 1 ? "" : "s"} differ by more than 2% between the journey log and the product's tables: ${names}${flagged.length > 4 ? `, and ${flagged.length - 4} more` : ""}`,
     });
   }
   const fail = ratios(d, f).find((x) => x.key === "call_fail_calls")!;
@@ -601,7 +601,7 @@ export function insights(d: StuData, f: Filters, refs: Refs, channelName: (k: st
     const r = flagged[0];
     out.push({
       key: "check", score: 95, href: "/self-check",
-      text: `Self-check: ${r.label.replace(/^\S+\.\s*/, "")} is off by ${r.gap}% between the journey log (${r.journey.v}) and the product's tables (${r.truth.v})${flagged.length > 1 ? `, and ${flagged.length - 1} more step${flagged.length === 2 ? "" : "s"} over 2%` : ""}.`,
+      text: `Self-check, live logging: ${r.label.replace(/^\S+\.\s*/, "")} is off by ${r.gap}% between the journey log (${r.journey.v}) and the product's tables (${r.truth.v})${flagged.length > 1 ? `, and ${flagged.length - 1} more step${flagged.length === 2 ? "" : "s"} over 2%` : ""}.`,
     });
   }
   const cl = calls(d, f, scratch);
