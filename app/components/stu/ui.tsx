@@ -2,7 +2,7 @@
 // opens the people behind it, the source note and the drill-down list.
 import { Link, useOutletContext } from "react-router";
 import { CHANNELS } from "~/lib/utm-dictionary";
-import { type Cell, type Filters, type StuData, fmtIst, fmtN, istDay } from "~/lib/stu/model";
+import { type Cell, type Filters, type StuData, type WireUser, type WireVisitor, fmtIst, fmtN, istDay } from "~/lib/stu/model";
 
 export interface StuCtx {
   data: StuData;
@@ -51,7 +51,13 @@ export function PageTitle({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-export function DrillModal({ title, cell, data, onClose }: { title: string; cell: Cell; data: StuData; onClose: () => void }) {
+/** What the drill-down needs: the Stu dataset, or the Overview's people for one section. */
+export interface DrillPeople {
+  users: Pick<WireUser, "id" | "email" | "name" | "internal" | "joined" | "existing" | "ch">[];
+  visitors: Pick<WireVisitor, "id" | "u">[];
+}
+
+export function DrillModal({ title, cell, data, onClose }: { title: string; cell: Cell; data: DrillPeople; onClose: () => void }) {
   const users = cell.users.map((i) => ({ i, u: data.users[i] })).filter((x) => x.u).sort((a, b) => b.u.joined - a.u.joined);
   const visitors = cell.visitors ?? [];
   return (

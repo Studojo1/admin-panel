@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   STEPS, USER_STEPS, DAILY_METRICS, istDay, stepAt, cohortOf, funnel, selfCheck, dailyTable, retention, ratios, dropoffs, sources,
+  activity, activeCell,
 } from "../app/lib/stu/model.ts";
 
 const ms = (iso) => Date.parse(iso);
@@ -121,4 +122,32 @@ test("no em or en dashes in any label or source note", () => {
     ...USER_STEPS.map((s) => s.label),
   ].join("\n");
   assert.ok(!/[\u2013\u2014]/.test(text));
+});
+
+test("activity: product rows and calls count before the beacons; beacons add features, never replace", () => {
+  const call = [0, "onboarding", "ready", null, ms("2026-11-01T05:10:00Z"), ms("2026-11-01T05:10:00Z"), ms("2026-11-01T05:20:00Z"), 600, 0, 1, 1];
+  const d = data([user({ id: "a" }), user({ id: "b" })], {
+    calls: [call],
+    act: [["chat_desk", 0, "2026-11-02", 4, 0], ["job_view", 1, "2026-11-01", 2, 0], ["pay", 1, "2026-11-03", 1, 100], ["f:resume", 0, "2026-11-02", 1, 0], ["active_day", 1, "2026-11-04", 1, 0]],
+  });
+  const a = activity(d);
+  assert.equal(a.beacons, true);
+  assert.deepEqual([...a.days.get(0).keys()].sort(), ["2026-11-01", "2026-11-02"]);
+  assert.deepEqual([...a.days.get(0).get("2026-11-02")].sort(), ["chat", "resume"]);
+  assert.deepEqual([...a.days.get(1).keys()].sort(), ["2026-11-01", "2026-11-04"], "a payment alone is not activity; active_day is");
+  const scope = new Set([0, 1]);
+  assert.equal(activeCell(d, new Set(["2026-11-01"]), scope, "new").v, 2);
+  assert.equal(activeCell(d, new Set(["2026-11-02", "2026-11-04"]), scope, "returning").v, 2);
+  assert.equal(activity(data([user()])).beacons, false);
+});
+
+test("retention by sign-up day: one row per IST join day, any day offsets", () => {
+  // Relative to today: retention only counts people whose day N has come.
+  const day = (n) => istDay(Date.now() + n * 86_400_000);
+  const at = (d) => Date.parse(`${d}T06:00:00+05:30`);
+  const d = data([user({ id: "a", joined: at(day(-5)) }), user({ id: "b", joined: at(day(-6)) })], { act: [["desk", 0, day(-3), 1, 0]] });
+  const rows = retention(d, { ...F, start: day(-6), end: day(0) }, false, "day", [1, 2]);
+  assert.deepEqual(rows.map((r) => r.week), [day(-5), day(-6)]);
+  assert.equal(rows[0].d.d2.back.v, 1);
+  assert.equal(rows[0].d.d1.back.v, 0);
 });

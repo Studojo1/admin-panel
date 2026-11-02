@@ -12,7 +12,7 @@ import { sql } from "drizzle-orm";
 import db from "~/lib/db.server";
 import { CHANNELS, channelOf } from "~/lib/utm-dictionary";
 import {
-  ANON_STEPS, EXTRA_EVENTS, JOURNEY_NAME_TO_STEP, STEPS, USER_STEPS,
+  ACTIVITY_EVENTS, ANON_STEPS, EXTRA_EVENTS, JOURNEY_NAME_TO_STEP, STEPS, USER_STEPS,
   type Act, type JourneyStepRow, type StuData, type Touch, type WireCall, type WireFail, type WireUser, type WireVisitor,
 } from "./model";
 
@@ -287,6 +287,17 @@ async function load(q: Q): Promise<StuData> {
       const i = U(r.user_id);
       if (i >= 0) act.push([actKinds[r.step], i, r.day, Number(r.n), 0]);
     }
+    // Activity beacons (career-agent, 2 Nov 2026): active_day once a person a day,
+    // feature_used once a person, feature and day (props.feature). Read whenever
+    // the log has them; the activity model (model.ts activity) adds them to what
+    // the product tables show.
+    for (const r of await q(`
+      SELECT user_id, step, ${day("at")} AS day, left(coalesce(props->>'feature', ''), 30) AS feature, count(*)::int AS n FROM ${J}
+       WHERE user_id IS NOT NULL AND step = ANY(${lit(ACTIVITY_EVENTS)})
+       GROUP BY 1, 2, 3, 4 LIMIT 500000`)) {
+      const i = U(r.user_id);
+      if (i >= 0) act.push([r.step === "active_day" ? "active_day" : `f:${r.feature || "other"}`, i, r.day, Number(r.n), 0]);
+    }
     for (const r of await q(`
       SELECT user_id, ${ms("at")} AS at, coalesce(props->>'reason', props->>'error', '') AS reason FROM ${J}
        WHERE user_id IS NOT NULL AND step = ANY(${lit(EXTRA_EVENTS.call_failed)})
@@ -412,6 +423,10 @@ async function load(q: Q): Promise<StuData> {
     perDay.push(["chat_wa", `SELECT user_id, ${day("created_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_channel_messages")} WHERE direction = 'in' AND user_id IS NOT NULL GROUP BY 1, 2`]);
   if (has("career_voice_calls") && hasCol("career_voice_calls", "mode"))
     perDay.push(["chat_call", `SELECT user_id, ${day("started_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_voice_calls")} WHERE started_at IS NOT NULL AND mode IN ('desk', 'interview', 'returning') GROUP BY 1, 2`]);
+  if (has("career_job_views"))
+    perDay.push(["job_view", `SELECT user_id, ${day("viewed_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_job_views")} GROUP BY 1, 2`]);
+  if (has("career_matches"))
+    perDay.push(["save", `SELECT user_id, ${day("updated_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_matches")} WHERE state IN ('saved', 'applied') GROUP BY 1, 2`]);
   if (has("career_outreach"))
     perDay.push(["outreach_row", `SELECT user_id, ${day("created_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_outreach")} GROUP BY 1, 2`]);
   if (has("career_emails")) {
