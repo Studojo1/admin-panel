@@ -54,8 +54,8 @@ export function weekOf(day: string): string {
 }
 
 /**
- * The next posting day (Tuesday, Thursday or Saturday) from today that no
- * existing post already uses, so three posts a week fall into place.
+ * The next posting day (Monday to Friday) from today that no existing post
+ * already uses, so five posts a week fall into place.
  */
 export function suggestDueDate(taken: string[]): string {
   const used = new Set(taken.map((d) => String(d).slice(0, 10)));
@@ -63,7 +63,7 @@ export function suggestDueDate(taken: string[]): string {
   for (let i = 1; i <= 60; i++) {
     const t = new Date(Date.UTC(y, m - 1, d) + i * 86400000);
     const day = t.toISOString().slice(0, 10);
-    if ([2, 4, 6].includes(t.getUTCDay()) && !used.has(day)) return day;
+    if ([1, 2, 3, 4, 5].includes(t.getUTCDay()) && !used.has(day)) return day;
   }
   return new Date(Date.UTC(y, m - 1, d) + 86400000).toISOString().slice(0, 10);
 }
