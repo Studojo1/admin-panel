@@ -22,6 +22,9 @@ export default [
   ]),
   route("api/stu", "routes/api.stu.tsx"),
   route("api/stu/overview", "routes/api.stu-overview.tsx"),
+  // Vendors and credits (LeadsForge, Apollo): balances, spend, run-out dates.
+  route("vendors", "routes/vendors.tsx"),
+  route("api/vendors", "routes/api.vendors.tsx"),
   route("login", "routes/login.tsx"),
   route("users", "routes/users.tsx"),
   route("chat-logs", "routes/chat-logs.tsx"),

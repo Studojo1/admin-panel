@@ -34,6 +34,9 @@ jobs:
       # UTM links (2 Nov 2026): the naming scheme, utm_id = slug first, utm_*
       # as the fallback, IST ranges, internal accounts and bots apart.
       - run: node --test scripts/utm-attribution.test.mjs
+      # Vendors and credits (2 Nov 2026): balance answers (402, 403
+      # API_INACCESSIBLE, 422), burn per IST day, days left, the next-thing line.
+      - run: node --test scripts/vendors-model.test.mjs
       # Deploy workflows never write a secret into a Deployment as a literal
       # env value (audit ST-N07).
       - run: bash scripts/ci/check_no_literal_secrets.sh

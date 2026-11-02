@@ -48,6 +48,14 @@ secret_ref() {  # secret_ref ENV KEY: point ENV at app-secrets/KEY (drops any li
   echo "$1 -> app-secrets/$2"
 }
 
+secret_ref_optional() {  # secret_ref_optional ENV KEY: like secret_ref, with optional: true
+  # The pod starts without the key when app-secrets lacks it, and picks it up on
+  # the next rollout once it is added. Drops any literal, like secret_ref.
+  secret_has "$2" || echo "::warning::app-secrets/$2 missing in $NS; $1 referenced as optional (empty until added)"
+  kubectl -n "$NS" patch "deployment/$DEP" --type=strategic -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"$DEP\",\"env\":[{\"name\":\"$1\",\"value\":null,\"valueFrom\":{\"secretKeyRef\":{\"name\":\"app-secrets\",\"key\":\"$2\",\"optional\":true}}}]}]}}}}" >/dev/null
+  echo "$1 -> app-secrets/$2 (optional)"
+}
+
 secret_adopt() {  # secret_adopt ENV KEY: move a hand-set literal into app-secrets, then ref it
   local lit
   lit=$(_literal "$1")
