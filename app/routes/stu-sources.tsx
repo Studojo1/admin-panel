@@ -1,4 +1,4 @@
-// Stu Sources: the funnel per channel (or source, campaign, device, city), with
+// Stu Sources: the funnel per channel (or source, campaign, device, in-app browser, city), with
 // revenue per channel. The source is the person's first touch, saved when they
 // reach Stu (career_agent.career_user_source), else the journey log's first.
 import { useMemo, useState } from "react";
@@ -10,6 +10,7 @@ const SPLITS = [
   { v: "source", l: "utm source / medium" },
   { v: "campaign", l: "Campaign" },
   { v: "device", l: "Device" },
+  { v: "inapp", l: "In-app browser" },
   { v: "city", l: "City" },
 ];
 

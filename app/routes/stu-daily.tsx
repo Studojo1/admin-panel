@@ -57,7 +57,8 @@ export default function StuDaily() {
                     {order.map((ci) => {
                       const cur = r.cells[ci];
                       const prev = ci > 0 ? r.cells[ci - 1] : null;
-                      const tone = r.def.kind === "test" || !prev || cur.na || prev.na
+                      // An old visitor count (crawlers in it) next to a real one is not a rise or a fall.
+                      const tone = r.def.kind === "test" || !prev || cur.na || prev.na || cur.old !== prev.old
                         ? ""
                         : cur.v > prev.v ? "bg-emerald-100 text-emerald-900" : cur.v < prev.v ? "bg-red-100 text-red-900" : "";
                       return (

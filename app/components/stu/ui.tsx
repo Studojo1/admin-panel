@@ -25,17 +25,26 @@ export function Num({ cell, title, fmt, className = "" }: { cell: Cell; title: s
   }
   const text = fmt ? fmt(cell.v) : fmtN(cell.v);
   const people = cell.users.length + (cell.visitors?.length ?? 0);
-  if (!people) return <span className={`tabular-nums ${className}`}>{text}</span>;
+  const old = cell.old ? <OldMark /> : null;
+  if (!people) return <span className={`tabular-nums ${className}`}>{text}{old}</span>;
   return (
-    <button
-      type="button"
-      onClick={() => drill(title, cell)}
-      className={`tabular-nums underline decoration-dotted decoration-neutral-400 underline-offset-2 hover:decoration-violet-600 ${className}`}
-      title={`${cell.users.length} people${cell.visitors?.length ? `, ${cell.visitors.length} visitors` : ""}: click for the list`}
-    >
-      {text}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => drill(title, cell)}
+        className={`tabular-nums underline decoration-dotted decoration-neutral-400 underline-offset-2 hover:decoration-violet-600 ${className}`}
+        title={`${cell.users.length} people${cell.visitors?.length ? `, ${cell.visitors.length} visitors` : ""}: click for the list`}
+      >
+        {text}
+      </button>
+      {old}
+    </>
   );
+}
+
+/** REAL-VISITORS: a visitor number that reaches back before the first page_view, when crawlers still counted. */
+export function OldMark() {
+  return <sup className="ml-0.5 text-[9px] font-semibold uppercase text-amber-600" title="Counts days before the first page_view, so crawlers are in it (the old count)">old</sup>;
 }
 
 export function SourceNote({ children }: { children: React.ReactNode }) {
@@ -54,7 +63,7 @@ export function PageTitle({ title, sub }: { title: string; sub?: string }) {
 /** What the drill-down needs: the Stu dataset, or the Overview's people for one section. */
 export interface DrillPeople {
   users: Pick<WireUser, "id" | "email" | "name" | "internal" | "joined" | "existing" | "ch">[];
-  visitors: Pick<WireVisitor, "id" | "u">[];
+  visitors: (Pick<WireVisitor, "id" | "u"> & Partial<Pick<WireVisitor, "device" | "inapp">>)[];
 }
 
 export function DrillModal({ title, cell, data, onClose }: { title: string; cell: Cell; data: DrillPeople; onClose: () => void }) {
@@ -100,9 +109,10 @@ export function DrillModal({ title, cell, data, onClose }: { title: string; cell
                 {visitors.slice(0, 1000).map((v) => {
                   const w = data.visitors.find((x) => x.id === v);
                   const u = w && w.u >= 0 ? data.users[w.u] : null;
+                  const dev = w && "device" in w ? [w.device, w.inapp && w.inapp !== "none" ? `in ${w.inapp}` : null].filter(Boolean).join(", ") : "";
                   return (
                     <span key={v} className="rounded border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 font-mono text-[11px] text-neutral-700" title={u ? `became ${u.email}` : "no account yet"}>
-                      {v.slice(0, 12)}{u ? ` → ${u.email}` : ""}
+                      {v.slice(0, 12)}{dev ? ` (${dev})` : ""}{u ? ` → ${u.email}` : ""}
                     </span>
                   );
                 })}

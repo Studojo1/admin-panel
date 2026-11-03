@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   STEPS, USER_STEPS, DAILY_METRICS, istDay, stepAt, cohortOf, funnel, sinceReset, countFrom, dailyTable, retention, ratios, dropoffs, sources,
-  activity, activeCell,
+  activity, activeCell, splitKey, visitSource, oldVisitCount,
 } from "../app/lib/stu/model.ts";
 
 const ms = (iso) => Date.parse(iso);
@@ -161,4 +161,32 @@ test("reset: nothing before the line counts; an earlier person who comes back jo
   assert.equal(countFrom(undefined), line, "the default line is 3 Nov 2026, 00:00 IST");
   assert.equal(countFrom("junk"), line);
   assert.equal(countFrom("2026-11-05T00:00:00Z"), ms("2026-11-05T00:00:00Z"));
+});
+
+test("real visitors: after the first page_view a visitor counts only by page_view days; earlier days are the old count", () => {
+  // The loader (data.server.ts) folds page_view days into visited_home and drops server-only hits after the line;
+  // the model marks any range that reaches back before it as the old count.
+  const start = ms("2026-11-03T21:58:00+05:30");
+  const visitors = [
+    { id: "real", u: -1, ch: "direct", device: "mobile", inapp: "instagram", city: null, days: { visited_home: ["2026-11-04"] }, first: { visited_home: ms("2026-11-04T00:04:00+05:30") } },
+    { id: "before", u: -1, ch: "direct", device: null, city: null, days: { visited_home: ["2026-11-03"] }, first: { visited_home: ms("2026-11-03T10:00:00+05:30") } },
+  ];
+  const d = data([], { visitors, pageViewStart: start });
+  const cell = (s, e) => dailyTable(d, { ...F, start: s, end: e }, 1).rows.find((r) => r.def.key === "visitors").total;
+  assert.equal(cell("2026-11-04", "2026-11-04").v, 1);
+  assert.equal(cell("2026-11-04", "2026-11-04").old, undefined, "a day after the line is the real count");
+  assert.equal(cell("2026-11-03", "2026-11-03").old, true, "the day the line falls on still holds old rows");
+  assert.equal(cell("2026-11-03", "2026-11-04").old, true, "a range reaching back is marked");
+  assert.equal(oldVisitCount(data([], { pageViewStart: null }), ["2026-11-10"]), true, "no page_view in the log: every count is the old one");
+  assert.match(visitSource(d), /page_view/);
+  assert.match(visitSource(d), /crawlers/);
+  assert.match(visitSource(data([])), /old count/);
+});
+
+test("device and in-app split: the person's own device first, then the source row's", () => {
+  assert.equal(splitKey(user({ device: "mobile", touch: { device: "desktop" } }), "device"), "mobile");
+  assert.equal(splitKey(user({ device: null, touch: { device: "tablet" } }), "device"), "tablet");
+  assert.equal(splitKey(user({}), "device"), "unknown");
+  assert.equal(splitKey(user({ inapp: "instagram" }), "inapp"), "instagram");
+  assert.equal(splitKey(user({}), "inapp"), "unknown");
 });

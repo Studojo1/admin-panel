@@ -43,10 +43,13 @@ const lit = (xs: readonly string[]) => `ARRAY[${xs.map((x) => `'${x.replace(/'/g
 
 async function feed(d: StuData, f: Filters, refs: Refs): Promise<FeedRow[]> {
   if (!hasJourney(d)) return [];
+  // REAL-VISITORS (4 Nov 2026): page_engaged is a browser heartbeat (several a page view), so it stays out; once
+  // page_view exists a visit shows as its page_view, and visited_home (a server row, crawlers too) stays out.
+  const serverHits = d.pageViewStart == null ? sql`` : sql` AND NOT (step = 'visited_home' AND at >= to_timestamp(${d.pageViewStart / 1000}))`;
   const rows = await readOnly((q) =>
-    q(sql`SELECT id::text AS id, (extract(epoch from at) * 1000)::float8 AS at, step, user_id, visitor_id, source
+    q(sql`SELECT id::text AS id, (extract(epoch from at) * 1000)::float8 AS at, step, user_id, visitor_id, source, left(props->>'path', 80) AS path
             FROM career_agent.career_journey_events
-           WHERE at >= to_timestamp(${countFrom(process.env.STU_COUNT_FROM) / 1000})
+           WHERE at >= to_timestamp(${countFrom(process.env.STU_COUNT_FROM) / 1000}) AND step <> 'page_engaged'${serverHits}
            ORDER BY id DESC LIMIT 400`),
   );
   const idx = new Map(d.users.map((u, i) => [u.id, i]));
@@ -61,7 +64,7 @@ async function feed(d: StuData, f: Filters, refs: Refs): Promise<FeedRow[]> {
     const { label, phase } = journeyLabel(String(r.step));
     if (person) refs.cell({ v: 1, users: [u] });
     out.push({
-      id: String(r.id), at: Number(r.at), step: String(r.step), label, phase, u,
+      id: String(r.id), at: Number(r.at), step: String(r.step), label: r.step === "page_view" && r.path ? `${label} ${r.path}` : label, phase, u,
       who: person ? maskEmail(person.email) || person.id.slice(0, 10) : r.visitor_id ? `visitor ${String(r.visitor_id).slice(0, 8)}` : "unknown",
       source: t?.source ? [t.source, t.medium].filter(Boolean).join(" / ") + (t.campaign ? ` (${t.campaign})` : "") : person ? `channel: ${person.ch}` : "",
     });
