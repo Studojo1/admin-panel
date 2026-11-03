@@ -29,7 +29,9 @@ interface Post {
   postedAt: string | null; url: string | null; impressions: number | null; reactions: number | null; comments: number | null; screenshot: string | null;
   metricsAt: string | null; review: Review | null; insight: string | null; createdBy: string | null; verdict: Verdict | null;
   photoIdea: string | null; photos: string[]; photoHelpAt: string | null;
+  analytics: PostAnalytics | null; analyticsFiles: string[];
 }
+interface PostAnalytics { uploadedAt: string; file: string; postedOn: string | null; postUrl: string | null; metrics: Record<string, number>; demographics: Record<string, { value: string; pct: number }[]> }
 interface Draft { id: number; creatorId: number; title: string; body: string; kind: Kind; due: string; angle: string; photoIdea: string; status: "review" | "changes"; batch: string | null; feedback: Feedback[]; versions: Version[]; updatedAt: string }
 interface Standing {
   thisWeek: { due: number; posted: number; missed: number }; lastWeek: { due: number; posted: number }; run: number; completedWeeks: number;
@@ -135,6 +137,7 @@ const ICONS: Record<string, ReactNode> = {
   link: <><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" /><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /></>,
   trash: <path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" />,
   back: <path d="M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />,
+  mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></>,
 };
 const Icon = ({ id, sm }: { id: string; sm?: boolean }) => (
   <svg className={`i${sm ? " i-sm" : ""}`} viewBox="0 0 24 24" aria-hidden="true">{ICONS[id]}</svg>
@@ -188,7 +191,8 @@ type DrawerState =
   | { mode: "fellow"; id: number }
   | { mode: "review"; id: number; draftId?: number }
   | { mode: "post"; id: number | null; postId?: number; date?: string; from?: "fellow"; text?: string }
-  | { mode: "add-fellow" };
+  | { mode: "add-fellow" }
+  | { mode: "queue" };
 type AttKind = "review" | "blocked" | "nudge" | "numbers" | "stories" | "ask";
 type NudgeState = { id: number; post?: Post; ask?: boolean } | null;
 
@@ -407,7 +411,7 @@ function Desk(P: DeskProps) {
           <div className="head-actions">
             <FellowshipProgramSwitch />
             <button className="btn btn-line" type="button" onClick={() => setDrawer({ mode: "add-fellow" })}><Icon id="plus" />Add a fellow</button>
-            <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "post", id: null })}><Icon id="plus" />Add a post</button>
+            <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "queue" })}><Icon id="pen" />Review posts{T.draftsWaiting ? ` (${T.draftsWaiting})` : ""}</button>
           </div>
         </div>
 
@@ -527,7 +531,8 @@ function Desk(P: DeskProps) {
                         if (!on) return <td key={d} className={`d d-off${isToday}`} />;
                         if (f.status === "paused" && date >= today) return <td key={d} className={`d d-on${isToday}`}><span className="slot s-paused" aria-label={`${label}, paused`}><span className="st"><Icon id="pause" />Paused</span></span></td>;
                         if (date < today) return <td key={d} className={`d d-on${isToday}`} />;
-                        return <td key={d} className={`d d-on${isToday}`}><button className="slot s-empty" type="button" aria-label={`${label}: add a post`} onClick={() => setDrawer({ mode: "post", id: f.id, date })}><span className="st"><Icon id="plus" />Add</span></button></td>;
+                        // Posts come from Claude (Vanshika's Claude Code), never typed in here: an open day stays empty.
+                        return <td key={d} className={`d d-on${isToday}`} aria-label={`${label}: nothing planned`} />;
                       }
                       const it = items[0];
                       const s = "d" in it && it.d ? draftSlot(it.d) : postSlot((it as { p: Post }).p, today, f.status === "paused");
@@ -572,6 +577,7 @@ function Desk(P: DeskProps) {
             {drawer.mode === "review" && byId(drawer.id) ? <ReviewView f={byId(drawer.id)!} D={D} act={act} setDrawer={setDrawer} draftId={drawer.draftId} /> : null}
             {drawer.mode === "post" ? <PostEditor D={D} state={drawer} byId={byId} act={act} upload={uploadPhoto} creatorApi={creatorApi} setDrawer={setDrawer} postDays={POST_DAYS} /> : null}
             {drawer.mode === "add-fellow" ? <AddFellow D={D} creatorApi={creatorApi} setDrawer={setDrawer} toast={toast} /> : null}
+            {drawer.mode === "queue" ? <QueueView D={D} setDrawer={setDrawer} /> : null}
             {((drawer.mode === "fellow" || drawer.mode === "review") && !byId(drawer.id)) ? <><div className="sheet-head"><span className="crumb">Gone</span><CloseBtn onClick={() => setDrawer(null)} /></div><div className="sheet-body"><div className="empty"><b>That fellow isn't here any more</b></div></div></> : null}
           </aside>
         </div>
@@ -848,7 +854,6 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
           {f.status === "paused" ? <button className="btn btn-primary" type="button" onClick={() => creatorApi("/api/ugc-creators", { intent: "set-status", id: f.id, status: "active" }, `${f.first} is back on the calendar.`)}><Icon id="play" />Resume</button> : null}
           {f.drafts.some((d) => d.status === "review") ? <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "review", id: f.id })}><Icon id="pen" />Review {plural(f.drafts.filter((d) => d.status === "review").length, "draft")}</button> : null}
           {f.status === "active" && left > 0 ? <button className="btn btn-outline" type="button" onClick={() => nudge(f.id)}><Icon id="chat" />Nudge on WhatsApp</button> : null}
-          <button className="btn btn-line" type="button" onClick={() => setDrawer({ mode: "post", id: f.id, from: "fellow" })}><Icon id="plus" />Add a post</button>
           {f.status === "active" && !hasNext ? <button className="btn btn-line" type="button" onClick={() => copyPlan([f.name], addDays(THIS, 7))}><Icon id="wand" />Plan next week</button> : null}
         </div>
         {confirmPause ? <div className="confirm" role="alert"><p><b>Pause {f.first}?</b> Their open posts stop showing as due, and they drop out of nudges until you resume.</p><div className="actions">
@@ -908,6 +913,103 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
         </section>
       </div>
     </>
+  );
+}
+
+// ---------------------------------------------------------------- speaking feedback
+// The browser's own speech-to-text (Google in Chrome, Apple in Safari), in Indian English: the words land in the
+// feedback box as the team talks, to check before sending. No audio reaches Studojo. Browsers without it just type.
+type SpeechRec = { lang: string; continuous: boolean; interimResults: boolean; start: () => void; stop: () => void; onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null; onerror: ((e: { error: string }) => void) | null; onend: (() => void) | null };
+function MicButton({ onText }: { onText: (text: string) => void }) {
+  const [on, setOn] = useState(false);
+  const [err, setErr] = useState("");
+  const rec = useRef<SpeechRec | null>(null);
+  const keep = useRef(false);
+  const Ctor = typeof window === "undefined" ? null : ((window as unknown as Record<string, unknown>).SpeechRecognition ?? (window as unknown as Record<string, unknown>).webkitSpeechRecognition) as (new () => SpeechRec) | undefined;
+  useEffect(() => () => { keep.current = false; rec.current?.stop(); }, []);
+  if (!Ctor) return null;
+  const start = () => {
+    const r = new Ctor();
+    r.lang = "en-IN"; r.continuous = true; r.interimResults = false;
+    r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) { const t = e.results[i][0].transcript.trim(); if (t) onText(t); } };
+    r.onerror = (e) => {
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      keep.current = false;
+      setErr(e.error === "not-allowed" || e.error === "service-not-allowed" ? "Allow the microphone for this site to speak, or type instead." : e.error === "network" ? "Speaking needs an internet connection." : "Speaking stopped. Tap Speak to carry on.");
+    };
+    // The browser ends a session after a pause: carry on until they tap stop.
+    r.onend = () => { if (keep.current) { try { r.start(); return; } catch { /* fall through */ } } setOn(false); };
+    rec.current = r; keep.current = true; setErr(""); setOn(true);
+    try { r.start(); } catch { keep.current = false; setOn(false); setErr("Couldn't start the microphone."); }
+  };
+  const stop = () => { keep.current = false; rec.current?.stop(); setOn(false); };
+  return (
+    <>
+      <button className={`btn btn-sm ${on ? "btn-primary" : "btn-outline"}`} type="button" aria-pressed={on} onClick={on ? stop : start}><Icon id="mic" />{on ? "Listening… tap to stop" : "Speak"}</button>
+      {err ? <span className="hint" role="alert">{err}</span> : null}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- review queue: every draft Claude has written
+// The one place posts come in. Claude (Vanshika's Claude Code) writes them; the team edits, speaks feedback and
+// sends a draft back, or approves it, and only then does it reach the fellow's page.
+function QueueView({ D, setDrawer }: { D: Desk; setDrawer: (d: DrawerState | null) => void }) {
+  const rows = D.fellows.flatMap((f) => f.drafts.map((d) => ({ f, d }))).sort((a, b) => (a.d.status === b.d.status ? 0 : a.d.status === "review" ? -1 : 1) || a.d.due.localeCompare(b.d.due) || a.d.id - b.d.id);
+  const waiting = rows.filter((r) => r.d.status === "review"), back = rows.filter((r) => r.d.status === "changes");
+  const item = ({ f, d }: { f: Fellow; d: Draft }) => (
+    <div className="prow" key={d.id}><span className="dt">{dow(d.due)} {fmt(d.due)}</span>
+      <span className="tt"><b>{d.title || "Untitled post"}</b><small>{f.name} · {d.kind === "studojo" ? "Studojo" : "Their story"}{d.status === "changes" ? " · waiting for Claude's revision" : d.versions.filter((v) => v.by === "claude").length > 1 ? " · revised by Claude" : ""}</small></span>
+      <button className={`btn btn-sm ${d.status === "review" ? "btn-primary" : "btn-line"}`} type="button" onClick={() => setDrawer({ mode: "review", id: f.id, draftId: d.id })}>{d.status === "review" ? "Review" : "Open"}</button></div>
+  );
+  return (
+    <>
+      <div className="sheet-head"><span className="crumb">Review posts</span><CloseBtn onClick={() => setDrawer(null)} /></div>
+      <div className="sheet-body">
+        <div>
+          <h2 id="sheet-title" style={{ margin: 0, font: "600 23px/1.2 var(--serif)" }}>Posts to review</h2>
+          <p className="card-sub">Claude writes every post from the fellow's call notes and stories. Open one to edit it, speak or type your feedback and send it back, or approve it. Nothing reaches a fellow until you approve it.</p>
+        </div>
+        <section aria-labelledby="q-wait"><div className="sec-h"><h3 id="q-wait">Waiting for you</h3><span>{waiting.length}</span></div>
+          {waiting.length ? waiting.map(item) : <div className="empty"><b>No posts waiting</b>When Claude writes posts, they appear here. Ask Vanshika's Claude Code to write a fellow's week, or use "Plan week" on the calendar to copy the request.</div>}
+        </section>
+        {back.length ? <section aria-labelledby="q-back"><div className="sec-h"><h3 id="q-back">Sent back to Claude</h3><span>{back.length}</span></div>{back.map(item)}
+          <p className="hint">Claude picks these up the next time it checks for feedback, and the revised post comes back to "Waiting for you".</p></section> : null}
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- a posted post's LinkedIn analytics export
+const METRIC_ORDER = ["impressions", "membersReached", "reactions", "comments", "reposts", "saves", "sends", "profileViewers", "followersGained"];
+const metricLabel = (k: string) => ({ membersReached: "Members reached", profileViewers: "Profile viewers", followersGained: "Followers gained" } as Record<string, string>)[k]
+  ?? k.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+function AnalyticsBox({ p, first }: { p: Post; first: string }) {
+  const a = p.analytics;
+  const [err, setErr] = useState("");
+  const download = async () => {
+    setErr("");
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/fellowship-proof?ref=${encodeURIComponent(a!.file)}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { const j = await res.json().catch(() => null); setErr((j && j.error) || "Couldn't download it"); return; }
+      const u = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a"); link.href = u; link.download = `linkedin-analytics-${first.toLowerCase()}-${p.id}.xlsx`; link.click();
+      setTimeout(() => URL.revokeObjectURL(u), 10_000);
+    } catch { setErr("Couldn't download it"); }
+  };
+  if (!a) return <div className="proofs"><h3 className="label" style={{ margin: 0 }}>LinkedIn analytics</h3><p className="hint">Not uploaded yet. {first} exports it from the post on LinkedIn (View analytics, then Export) and uploads the file on their page.</p></div>;
+  const keys = [...METRIC_ORDER.filter((k) => k in a.metrics), ...Object.keys(a.metrics).filter((k) => !METRIC_ORDER.includes(k))];
+  return (
+    <div className="proofs">
+      <h3 className="label" style={{ margin: 0 }}>LinkedIn analytics <small className="hint">uploaded {a.uploadedAt ? fmt(istDay(a.uploadedAt)) : ""}{p.analyticsFiles.length > 1 ? ` · ${p.analyticsFiles.length} uploads, latest shown` : ""}</small></h3>
+      <dl className="kv">{keys.map((k) => <div key={k}><dt>{metricLabel(k)}</dt><dd>{num(a.metrics[k])}</dd></div>)}</dl>
+      {Object.entries(a.demographics).filter(([, rows]) => rows.length).map(([k, rows]) => (
+        <details className="more" key={k}><summary>Who saw it: {k}</summary>
+          <ul className="thread">{rows.slice(0, 8).map((r) => <li key={r.value}>{r.value} <b>{(r.pct * 100).toFixed(1)}%</b></li>)}</ul></details>
+      ))}
+      {a.file ? <div className="actions"><button className="btn btn-line btn-sm" type="button" onClick={download}><Icon id="down" />Download the file</button>{err ? <span className="hint" role="alert">{err}</span> : null}</div> : null}
+    </div>
   );
 }
 
@@ -982,8 +1084,10 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
       {d.feedback.length ? <ul className="thread" aria-label="Feedback so far">{d.feedback.map((x) => <li key={x.id}><b>{x.by ? x.by.split("@")[0] : "Team"}, {fmt(istDay(x.t))}:</b> {x.text}{x.resolvedAt ? <><br /><b>Claude, {fmt(istDay(x.resolvedAt))}:</b> {x.reply || "Revised"}</> : null}</li>)}</ul> : null}
       {back !== null ? (
         <div className="backbox">
-          <textarea className="input" aria-label="What should Claude change?" placeholder="What should Claude change? For example: open with the internship, cut the last paragraph, sound less formal." value={back} onChange={(e) => setBack(e.target.value)} autoFocus rows={3} />
+          <label className="label" htmlFor={`fb-${d.id}`}>Tell Claude what to change. Type it, or tap Speak and say it.</label>
+          <textarea className="input" id={`fb-${d.id}`} placeholder="For example: open with the internship, cut the last paragraph, sound less formal." value={back} onChange={(e) => setBack(e.target.value)} autoFocus rows={4} />
           <div className="actions">
+            <MicButton onText={(t) => setBack((v) => `${(v ?? "").trimEnd()}${v && v.trim() ? " " : ""}${t}`)} />
             <button className="btn btn-primary btn-sm" type="button" disabled={back.trim().length < 3} onClick={async () => { const r = await run({ intent: "send-back", ...edits, feedback: back.trim() }, "Sent back. Claude revises it next time it checks for feedback."); if (r) setBack(null); }}><Icon id="chat" />Send back</button>
             <button className="btn btn-quiet btn-sm" type="button" onClick={() => setBack(null)}>Cancel</button></div>
         </div>
@@ -991,7 +1095,7 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
       <div className="actions">
         <button className="btn btn-primary btn-sm" type="button" disabled={noLabel} onClick={() => run({ intent: "approve", ...edits }, `Approved. It's on ${f.first}'s page for ${dow(due)} ${fmt(due)}.`)}><Icon id="check" />Approve</button>
         <button className="btn btn-line btn-sm" type="button" disabled={!dirty} onClick={() => run({ intent: "save", ...edits }, "Edits saved. It's still waiting for approval.")}>Save edits</button>
-        {back === null ? <button className="btn btn-line btn-sm" type="button" onClick={() => setBack("")}><Icon id="chat" />Send back to Claude</button> : null}
+        {back === null ? <button className="btn btn-line btn-sm" type="button" onClick={() => setBack("")}><Icon id="mic" />Give feedback</button> : null}
         {confirmRm
           ? <span className="inline-confirm">Remove this draft?<button className="btn btn-primary btn-sm" type="button" onClick={() => run({ intent: "remove" }, "Draft removed.")}><Icon id="trash" />Remove</button><button className="btn btn-quiet btn-sm" type="button" onClick={() => setConfirmRm(false)}>Keep</button></span>
           : <button className="btn btn-quiet btn-sm" type="button" onClick={() => setConfirmRm(true)}><Icon id="trash" />Remove</button>}
@@ -1040,7 +1144,8 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
         <div className="actions">{safeUrl(existing.url) ? <a className="btn btn-line btn-sm" href={safeUrl(existing.url)!} target="_blank" rel="noopener noreferrer"><Icon id="link" />LinkedIn post</a> : null}
           <VerdictPill v={existing.verdict} /></div>
         {existing.insight ? <p className="note note-ok"><Icon id="chart" /><span><b>Claude: </b>{existing.insight}</span></p> : existing.impressions != null ? <p className="hint">Claude hasn't written its note on this one yet.</p> : null}
-        <ProofShots value={existing.screenshot} />
+        <AnalyticsBox p={existing} first={f!.first} />
+        {proofRefs(existing.screenshot).length ? <ProofShots value={existing.screenshot} /> : null}
         <PostPhotos p={existing} first={f!.first} act={act} upload={null} />
         <p className="post-text">{existing.body}</p>
         {r && r.editedByTeam ? <details className="more"><summary>What Claude wrote before the team's edits</summary><p className="post-text" style={{ marginTop: 8 }}>{r.claudeBody}</p></details> : null}

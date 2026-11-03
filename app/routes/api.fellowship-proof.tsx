@@ -1,11 +1,11 @@
 import type { Route } from "./+types/api.fellowship-proof";
 import { requireAdmin } from "~/lib/auth-helper.server";
-import { fetchProof, isProofRef, MAX_PHOTO_BYTES } from "~/lib/fellow-proof.server";
+import { fetchProof, isAnalyticsRef, isProofRef, MAX_PHOTO_BYTES } from "~/lib/fellow-proof.server";
 import { addTeamPhoto, calendarView, isRefused } from "~/lib/fellowship.server";
 
 // The pictures fellows add on their page, for the editorial calendar. GET
-// streams one (?ref=fellow-proof/…: an analytics screenshot or a post photo)
-// from private storage, never cached. POST ?post=<id> with a JPEG body adds a
+// streams one (?ref=fellow-proof/…: an analytics screenshot, a post photo, or
+// a LinkedIn analytics export, sent as a download) from private storage, never cached. POST ?post=<id> with a JPEG body adds a
 // photo to a post that isn't up yet, for a fellow who has none of their own,
 // and answers with the fresh desk.
 
@@ -18,8 +18,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   const res = await fetchProof(ref);
   if (!res) return Response.json({ error: "Picture storage isn't set up on admin" }, { status: 503 });
   if (!res.ok) return Response.json({ error: res.status === 404 ? "Picture not found" : "Couldn't load the picture" }, { status: res.status === 404 ? 404 : 502 });
+  const xlsx = isAnalyticsRef(ref);
   return new Response(res.body, {
-    headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" },
+    headers: {
+      "Content-Type": xlsx ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "image/jpeg",
+      ...(xlsx ? { "Content-Disposition": `attachment; filename="linkedin-analytics-${ref.split("/")[2]}.xlsx"` } : {}),
+      "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+    },
   });
 }
 

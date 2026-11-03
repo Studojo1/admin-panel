@@ -1,5 +1,5 @@
 import db from "~/lib/db.server";
-import { deletePhoto, isPhotoRef, newPhotoRef, PHOTOS_PER_POST, proofRefs, putPhoto } from "~/lib/fellow-proof.server";
+import { deletePhoto, isAnalyticsRef, isPhotoRef, newPhotoRef, PHOTOS_PER_POST, proofRefs, putPhoto } from "~/lib/fellow-proof.server";
 import { sql } from "drizzle-orm";
 import {
   HIRING_PIPELINE,
@@ -52,6 +52,27 @@ export interface Post {
   review: Review | null; insight: string | null; insightAt: string | null; createdAt: string; createdBy: string | null;
   /** What photo fits the post, the photos added to it (refs), and when the fellow said they have none. */
   photoIdea: string | null; photos: string[]; photoHelpAt: string | null;
+  /** The post's LinkedIn analytics export, parsed by studojo.com (the latest upload), and every file uploaded (refs). */
+  analytics: PostAnalytics | null; analyticsFiles: string[];
+}
+/** studojo.com's parse of a LinkedIn post analytics export (fellow-page side, 3 Nov 2026). */
+export interface PostAnalytics {
+  uploadedAt: string; file: string; postedOn: string | null; postUrl: string | null;
+  metrics: Record<string, number>;
+  demographics: Record<string, { value: string; pct: number }[]>;
+}
+function analyticsOf(v: unknown): PostAnalytics | null {
+  const a = jsonOf<Record<string, unknown> | null>(v, null);
+  if (!a || typeof a !== "object" || !a.metrics || typeof a.metrics !== "object") return null;
+  const metrics = Object.fromEntries(Object.entries(a.metrics as Record<string, unknown>).filter(([, n]) => typeof n === "number" && Number.isFinite(n))) as Record<string, number>;
+  const demographics: PostAnalytics["demographics"] = {};
+  for (const [k, rows] of Object.entries((a.demographics as Record<string, unknown>) ?? {})) {
+    if (Array.isArray(rows)) demographics[k] = rows.filter((r) => r && typeof r.value === "string" && typeof r.pct === "number").map((r) => ({ value: r.value as string, pct: r.pct as number }));
+  }
+  return {
+    uploadedAt: String(a.uploadedAt ?? ""), file: String(a.file ?? ""), postedOn: typeof a.postedOn === "string" ? a.postedOn : null,
+    postUrl: typeof a.postUrl === "string" ? a.postUrl : null, metrics, demographics,
+  };
 }
 export interface Fellow {
   id: number; name: string; first: string; slug: string | null; link: string | null; applicationId: number | null;
@@ -109,6 +130,7 @@ function toPost(r: Record<string, unknown>): Post {
     screenshot: (r.screenshot_url as string) ?? null, metricsAt: iso(r.metrics_at), review: jsonOf<Review | null>(r.review, null),
     insight: (r.insight as string) ?? null, insightAt: iso(r.insight_at), createdAt: iso(r.created_at) ?? "", createdBy: (r.created_by as string) ?? null,
     photoIdea: (r.photo_idea as string) || null, photos: proofRefs((r.photo_url as string) ?? null).filter(isPhotoRef), photoHelpAt: iso(r.photo_help_at),
+    analytics: analyticsOf(r.analytics), analyticsFiles: proofRefs((r.analytics_url as string) ?? null).filter(isAnalyticsRef),
   };
 }
 function toDraft(r: Record<string, unknown>): Draft {
@@ -123,7 +145,7 @@ const FELLOW_COLS = sql`id, application_id, slug, full_name, email, whatsapp, li
   connections_at_join, to_char(joined_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS joined_day, learnings, team_notes, nudged_at, intern_at, referred_at`;
 const POST_COLS = sql`id, creator_id, title, body, kind, to_char(due_date, 'YYYY-MM-DD') AS due, status, copied_at, own_line, posted_at,
   post_url, impressions, reactions, comments, screenshot_url, metrics_at, review, insight, insight_at, created_at, created_by,
-  photo_idea, photo_url, photo_help_at`;
+  photo_idea, photo_url, photo_help_at, analytics_url, analytics`;
 const DRAFT_COLS = sql`id, creator_id, title, body, kind, to_char(due_date, 'YYYY-MM-DD') AS due, angle, photo_idea, status, batch, feedback, versions, created_at, updated_at`;
 
 /** How many of a fellow's weekly posts are Studojo posts, when the team has set it (ugc_programme.rules.studojoPerWeek). */
@@ -772,7 +794,7 @@ export async function programmeDashboard() {
       blocked: posts.filter((p) => p.status === "blocked").length,
       posted: posts.filter(isPosted).length,
       awaitingNumbers: posts.filter((p) => isPosted(p) && p.impressions == null).length,
-      withScreenshots: posts.filter((p) => isPosted(p) && proofRefs(p.screenshot).length > 0).length,
+      withAnalytics: posts.filter((p) => isPosted(p) && (!!p.analytics || proofRefs(p.screenshot).length > 0)).length,
       // Approved posts the fellow can't put up yet because they have no photo, and those where they asked the team for one.
       needPhoto: posts.filter((p) => p.status === "ready" && !p.photos.length).length,
       askedForPhoto: posts.filter((p) => p.status === "ready" && !p.photos.length && p.photoHelpAt).length,
@@ -851,6 +873,11 @@ function agentPost(p: Post, own: Post[], all: Post[]) {
     postedOn: p.postedAt ? istDate(p.postedAt) : null, url: p.url, fellowsOwnLine: p.ownLine,
     numbers: p.impressions != null ? { impressions: p.impressions, reactions: p.reactions, comments: p.comments, reportedOn: p.metricsAt ? istDate(p.metricsAt) : null } : null,
     verdict: verdictOf(p, own, all), insight: p.insight,
+    // The fellow's LinkedIn export: every metric LinkedIn gave, and who saw it (top 5 of each kind).
+    analytics: p.analytics ? {
+      uploadedOn: p.analytics.uploadedAt ? istDate(p.analytics.uploadedAt) : null, metrics: p.analytics.metrics,
+      whoSawIt: Object.fromEntries(Object.entries(p.analytics.demographics).map(([k, rows]) => [k, rows.slice(0, 5).map((r) => `${r.value} ${Math.round(r.pct * 1000) / 10}%`)])),
+    } : null,
     photoIdea: p.photoIdea,
     photos: { added: p.photos.length, byTeam: p.photos.filter((x) => p.review?.teamPhotos?.includes(x)).length, fellowHadNone: !!p.photoHelpAt || p.photos.some((x) => p.review?.teamPhotos?.includes(x)) },
     // What the team changed before approving: the best signal for how to write the next one.
