@@ -1,12 +1,12 @@
 // Stu Overview (the admin root, 2 Nov 2026): one screen, one section per API call.
 // Every number here comes from the same model functions the Stu pages use
-// (DAILY_METRICS, funnel, arriveCells, sources, dropoffs, ratios, retention,
-// selfCheck), so the Overview and the pages always agree. This file only picks,
+// (DAILY_METRICS, funnel, arriveCells, sources, dropoffs, ratios and
+// retention), so the Overview and the pages always agree. This file only picks,
 // groups and shapes; it adds no metric of its own except the median call length
 // and the median time between the funnel bars it shows.
 import {
   type Cell, type Filters, type StuData, type WireUser, ANON_STEPS, DAILY_METRICS, FEATURES, FEATURE_LABELS, activity, activitySource, fmtInr, istDay, NON_DESK, STEP_BY_KEY, USER_STEPS,
-  addDays, arriveCells, cellOf, cohortOf, dayRange, dropoffs, funnel, median, pct, ratios, retention, selfCheck, sources, stepAt, scopeUsers,
+  addDays, arriveCells, cellOf, cohortOf, dayRange, dropoffs, funnel, median, pct, ratios, retention, sources, stepAt, scopeUsers,
 } from "./model";
 
 export const OV_SECTIONS = ["insights", "usage", "power", "kpis", "funnel", "trends", "sources", "calls", "dropoffs", "engagement", "feed", "alerts"] as const;
@@ -422,14 +422,6 @@ export const CALL_FAIL_ALERT_PCT = 20;
 /** The alerts that need only the dataset; the zero-today check is added by the server (it reads the journey log by day). */
 export function alertsFromData(d: StuData, f: Filters, refs: Refs): Alert[] {
   const out: Alert[] = [];
-  const flagged = selfCheck(d, f).rows.filter((x) => x.flagged).sort((a, b) => (b.gap ?? 0) - (a.gap ?? 0));
-  if (flagged.length) {
-    const names = flagged.slice(0, 4).map((r) => `${r.label.replace(/^\S+\.\s*/, "")} ${r.gap}%`).join(", ");
-    out.push({
-      key: "check", level: "warning", href: "/self-check",
-      text: `Self-check (since live logging began): ${flagged.length} step${flagged.length === 1 ? "" : "s"} differ by more than 2% between the journey log and the product's tables: ${names}${flagged.length > 4 ? `, and ${flagged.length - 4} more` : ""}`,
-    });
-  }
   const fail = ratios(d, f).find((x) => x.key === "call_fail_calls")!;
   if (fail.value != null && fail.value > CALL_FAIL_ALERT_PCT) {
     out.push({ key: "call_fail", level: "critical", text: `Failed calls at ${fail.value}% (${fail.num.v} of ${fail.den.v}), over the ${CALL_FAIL_ALERT_PCT}% line`, cell: refs.cell(fail.num), href: "/drop-offs" });
@@ -595,15 +587,7 @@ export function insights(d: StuData, f: Filters, refs: Refs, channelName: (k: st
   const pf = previousRange(f);
   const when = dayRange(f.start, f.end).length === 1 ? (f.end === todayIstSafe() ? "today" : `on ${niceDay(f.end)}`) : "in this range";
 
-  // Self-check gaps and failing calls first: they say a number may be wrong or students are stuck.
-  const flagged = selfCheck(d, f).rows.filter((x) => x.flagged).sort((a, b) => (b.gap ?? 0) - (a.gap ?? 0));
-  if (flagged.length) {
-    const r = flagged[0];
-    out.push({
-      key: "check", score: 95, href: "/self-check",
-      text: `Self-check, live logging: ${r.label.replace(/^\S+\.\s*/, "")} is off by ${r.gap}% between the journey log (${r.journey.v}) and the product's tables (${r.truth.v})${flagged.length > 1 ? `, and ${flagged.length - 1} more step${flagged.length === 2 ? "" : "s"} over 2%` : ""}.`,
-    });
-  }
+  // Failing calls first: they say students are stuck.
   const cl = calls(d, f, scratch);
   const topReason = cl.reasons[0];
   if (cl.failCalls.value != null && cl.failCalls.value > CALL_FAIL_ALERT_PCT) {

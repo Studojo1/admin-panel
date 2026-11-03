@@ -31,7 +31,7 @@ export function meta() {
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** Stu went live on studojo.com on this IST day. */
-const LAUNCH_DAY = "2026-11-02";
+const LAUNCH_DAY = "2026-11-03";
 const SECTIONS: readonly OvSection[] = ["kpis", "alerts", "insights", "trends", "usage", "funnel", "sources"];
 
 type RangeKey = "today" | "yesterday" | "7d" | "30d" | "launch" | "custom";
@@ -165,7 +165,7 @@ export default function StuOverview() {
                   type="button"
                   aria-pressed={range === r.key}
                   onClick={() => setRange(r.key)}
-                  title={r.key === "launch" ? "From 2 Nov 2026, the day Stu went live" : undefined}
+                  title={r.key === "launch" ? "From 3 Nov 2026, when the counts were reset" : undefined}
                   className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${range === r.key ? "bg-purple-500 text-white" : "text-neutral-600 hover:bg-neutral-100"}`}
                 >
                   {r.label}

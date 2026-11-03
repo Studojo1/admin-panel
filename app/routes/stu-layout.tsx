@@ -1,13 +1,13 @@
 // The Stu section (new product, studojo.pro) at the root of the admin panel:
 // the admin gate, the shared range / channel / internal controls (kept in the
-// address, so a view can be shared), the self-check banner, and the drill-down.
+// address, so a view can be shared), the reset line, and the drill-down.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useSearchParams } from "react-router";
 import { AdminHeader } from "~/components";
 import { DrillModal, type StuCtx, channelLabel } from "~/components/stu/ui";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { fetchStu } from "~/lib/stu/client";
-import { type Cell, type Filters, type StuData, addDays, fmtIst, scopeUsers, selfCheck, todayIst } from "~/lib/stu/model";
+import { type Cell, type Filters, type StuData, addDays, fmtIst, scopeUsers, todayIst } from "~/lib/stu/model";
 
 export function meta() {
   return [{ title: "Stu tracking · Studojo Admin" }];
@@ -23,11 +23,10 @@ const TABS = [
   { to: "/journeys", label: "Journeys" },
   { to: "/retention", label: "Retention" },
   { to: "/usage", label: "Usage" },
-  { to: "/self-check", label: "Self-check" },
 ];
 
-/** Stu's history starts here (the backfill goes back to 25 Oct 2026). */
-const HISTORY_START = "2026-10-25";
+/** Stu's history starts here: the reset of 3 Nov 2026 (model.ts COUNT_FROM_DEFAULT). */
+const HISTORY_START = "2026-11-03";
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export default function StuLayout() {
@@ -81,7 +80,6 @@ export default function StuLayout() {
   if (!isAuthorized) return null;
 
   const channels = data ? [...new Set(scopeUsers(data, { ...filters, channel: "all" }).map((i) => data.users[i].ch))].sort() : [];
-  const check = data ? selfCheck(data, filters) : null;
   const ctx: StuCtx | null = data ? { data, filters, setFilters, drill: (title, cell) => setDrill({ title, cell }) } : null;
   const qs = params.toString() ? `?${params.toString()}` : "";
   const preset = (days: number) => setFilters({ start: addDays(today, -(days - 1)), end: today });
@@ -104,7 +102,6 @@ export default function StuLayout() {
                   }
                 >
                   {t.label}
-                  {t.to === "/self-check" && check && check.flagged > 0 ? <span className="ml-1 rounded bg-red-500 px-1 text-[10px] text-white">{check.flagged}</span> : null}
                 </NavLink>
               ))}
             </nav>
@@ -114,7 +111,7 @@ export default function StuLayout() {
               {[7, 14, 30, 90].map((n) => (
                 <button key={n} onClick={() => preset(n)} className="rounded-lg px-2.5 py-1 font-semibold text-neutral-600 hover:bg-neutral-100">{n}d</button>
               ))}
-              <button onClick={() => setFilters({ start: HISTORY_START, end: today })} className="rounded-lg px-2.5 py-1 font-semibold text-neutral-600 hover:bg-neutral-100">Since 25 Oct</button>
+              <button onClick={() => setFilters({ start: HISTORY_START, end: today })} className="rounded-lg px-2.5 py-1 font-semibold text-neutral-600 hover:bg-neutral-100">Since 3 Nov</button>
             </div>
             <input type="date" value={filters.start} max={filters.end} onChange={(e) => e.target.value && setFilters({ start: e.target.value })} className="rounded-lg border-2 border-neutral-900 bg-white px-2 py-1" />
             <span className="text-neutral-500">to</span>
@@ -133,7 +130,7 @@ export default function StuLayout() {
 
         {data && (
           <p className="mb-3 text-xs text-neutral-500">
-            Days are IST. Read {fmtIst(Date.parse(data.generatedAt))}. {filters.internal ? "Internal accounts included" : "Excluded: staff (admin, ops), @studojo.com, the test accounts, guests"}.
+            Days are IST. Read {fmtIst(Date.parse(data.generatedAt))}.{data.countFrom ? ` Counting from ${fmtIst(data.countFrom)} (the reset).` : ""} {filters.internal ? "Internal accounts included" : "Excluded: staff (admin, ops), @studojo.com, the test accounts, guests"}.
             Every number opens the people behind it.
           </p>
         )}
@@ -141,11 +138,6 @@ export default function StuLayout() {
           <div className="mb-3 rounded-xl border-2 border-amber-400 bg-amber-50 px-4 py-2 text-sm text-amber-900">
             The journey log (career_agent.career_journey_events) is not in this database yet. Numbers from the product's own tables show; steps only the log records show n/a until it goes live.
           </div>
-        )}
-        {check && check.flagged > 0 && (
-          <NavLink to={`/self-check${qs}`} className="mb-3 block rounded-xl border-2 border-red-500 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800">
-            Self-check: {check.flagged} step{check.flagged === 1 ? "" : "s"} where the journey log and the product's tables differ by more than 2%. Open the self-check.
-          </NavLink>
         )}
         {error && <div className="mb-3 rounded-xl border-2 border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
         {!data && !error && (
