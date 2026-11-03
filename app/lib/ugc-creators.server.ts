@@ -139,6 +139,11 @@ async function createTables() {
   await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS photo_idea TEXT`);
   await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS photo_url TEXT`);
   await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS photo_help_at TIMESTAMPTZ`);
+  // The fellow's page reads each talk back to them (what we heard, what can become a post, what we'll
+  // leave out, follow-up questions) and keeps that read-back on the talk's last story. An answer to one
+  // of those follow-up questions names the story it answers.
+  await db.execute(sql`ALTER TABLE ugc_creator_stories ADD COLUMN IF NOT EXISTS coach JSONB`);
+  await db.execute(sql`ALTER TABLE ugc_creator_stories ADD COLUMN IF NOT EXISTS reply_to INTEGER`);
   // Posts a fellow wrote before the fellowship, so Claude never repeats them.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_creator_earlier_posts (
