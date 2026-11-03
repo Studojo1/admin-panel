@@ -28,7 +28,7 @@ export const ALLOWLIST = {
       mustContain: "process.env.FELLOWSHIP_AGENT_KEY",
     },
     action: {
-      reason: "Claude Code saving drafts for review (never approving them); authenticated by the FELLOWSHIP_AGENT_KEY shared secret",
+      reason: "Claude Code saving drafts for review (never approving them) and adding fellows the team asks for; authenticated by the FELLOWSHIP_AGENT_KEY shared secret",
       mustContain: "process.env.FELLOWSHIP_AGENT_KEY",
     },
   },
