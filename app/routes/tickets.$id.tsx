@@ -27,6 +27,9 @@ interface TicketAttachment {
 
 interface TicketDetail {
   id: number;
+  /** TICKET-REF (3 Nov 2026): their own number for it and its name, as Stu and Settings, Help show them. */
+  user_number: number;
+  name: string;
   user_id: string;
   user_email: string;
   user_name: string | null;
@@ -305,6 +308,10 @@ export default function TicketDetailPage({ params }: Route.ComponentProps) {
                     {detail.user_name || detail.user_email}
                   </span>{" "}
                   · {fmt(detail.created_at)}
+                </p>
+                {/* TICKET-REF: what the student sees and quotes ("Your ticket 2: Delete my account"). */}
+                <p className="mt-1 text-sm text-neutral-900">
+                  Their <span className="font-semibold">ticket {detail.user_number}: {detail.name}</span>
                 </p>
                 {detail.source === "contact_form" && (
                   <div className="mt-3 rounded-lg bg-neutral-50 px-3 py-2 text-xs text-neutral-700">

@@ -34,6 +34,10 @@ jobs:
       # Vendors and credits (2 Nov 2026): balance answers (402, 403
       # API_INACCESSIBLE, 422), burn per IST day, days left, the next-thing line.
       - run: node --test scripts/vendors-model.test.mjs
+      # TICKET-REF (3 Nov 2026): tickets named and numbered as the student sees
+      # them in Stu ("Your ticket 2: ..."), and the search by email or name
+      # plus that number.
+      - run: node --test scripts/ticket-label.test.mjs
       # Deploy workflows never write a secret into a Deployment as a literal
       # env value (audit ST-N07).
       - run: bash scripts/ci/check_no_literal_secrets.sh
