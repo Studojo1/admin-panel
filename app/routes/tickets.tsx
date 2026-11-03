@@ -10,6 +10,11 @@ export function meta(_args: Route.MetaArgs) {
   return [{ title: "Tickets – Admin Panel" }];
 }
 
+// TICKET-REF (3 Nov 2026, the owner: "or bind it to the user, users first ticket or the name of the ticket like for
+// the user"): students see "Your ticket 2: Delete my account" (their own number and the ticket's name), never the
+// internal id. Each row shows the same, beside the person, and the search box finds it by email or name plus the
+// number they quote ("asha@example.com 2"), or by the internal id ("#49"). lib/ticket-label.ts has the rules.
+
 interface TicketRow {
   id: number;
   user_id: string;
@@ -26,6 +31,9 @@ interface TicketRow {
   closed_at: string | null;
   first_message: string;
   message_count: number;
+  /** Their own number for it (what Stu and Help show) and its name. */
+  user_number: number;
+  name: string;
 }
 
 interface Stats {
@@ -109,6 +117,8 @@ export default function TicketsList() {
   const [statusFilter, setStatusFilter] = useState("open");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [searchBox, setSearchBox] = useState("");
+  const [search, setSearch] = useState("");
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
@@ -119,6 +129,7 @@ export default function TicketsList() {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (priorityFilter !== "all") params.set("priority", priorityFilter);
+      if (search) params.set("q", search);
       const res = await fetch(`/api/tickets?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
@@ -132,7 +143,7 @@ export default function TicketsList() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, priorityFilter]);
+  }, [statusFilter, priorityFilter, search]);
 
   useEffect(() => {
     if (isAuthorized) fetchTickets();
@@ -190,6 +201,44 @@ export default function TicketsList() {
             <StatTile label="Resolved 7d" value={stats?.resolved_7d} />
             <StatTile label="Total" value={stats?.total} />
           </div>
+
+          <form
+            className="flex flex-wrap items-center gap-2 mb-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setSearch(searchBox.trim());
+            }}
+          >
+            <input
+              type="search"
+              value={searchBox}
+              onChange={(e) => setSearchBox(e.target.value)}
+              placeholder="Email or name plus their ticket number (asha@example.com 2), or #id"
+              aria-label="Search tickets"
+              className="w-full max-w-[480px] rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900"
+            />
+            <button
+              type="submit"
+              className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-100"
+            >
+              Search
+            </button>
+            {search && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchBox("");
+                    setSearch("");
+                  }}
+                  className="rounded-lg px-2 py-1.5 text-sm font-semibold text-violet-700 hover:underline"
+                >
+                  Clear
+                </button>
+                <span className="text-xs text-neutral-500">Searching every status and priority.</span>
+              </>
+            )}
+          </form>
 
           <div className="flex flex-wrap gap-2 mb-4">
             <div className="flex gap-1.5">
@@ -257,7 +306,7 @@ export default function TicketsList() {
                     <th className="text-left px-4 py-3">Priority</th>
                     <th className="text-left px-4 py-3">Category</th>
                     <th className="text-left px-4 py-3">User</th>
-                    <th className="text-left px-4 py-3">Preview</th>
+                    <th className="text-left px-4 py-3">Ticket</th>
                     <th className="text-left px-4 py-3">Status</th>
                   </tr>
                 </thead>
@@ -305,6 +354,9 @@ export default function TicketsList() {
                         <Link to={`/tickets/${t.id}`} className="block">
                           <div className="text-neutral-900">
                             {t.user_name || t.user_email}
+                            <span className="ml-1.5 whitespace-nowrap text-xs font-semibold text-violet-700">
+                              ticket {t.user_number}
+                            </span>
                           </div>
                           <div className="text-xs text-neutral-500">
                             {t.user_email}
@@ -312,11 +364,13 @@ export default function TicketsList() {
                         </Link>
                       </td>
                       <td className="px-4 py-3 align-top max-w-[400px]">
-                        <Link
-                          to={`/tickets/${t.id}`}
-                          className="block text-neutral-700 line-clamp-2"
-                        >
-                          {previewOf(t)}
+                        <Link to={`/tickets/${t.id}`} className="block">
+                          <div className="font-semibold text-neutral-900">
+                            Ticket {t.user_number}: {t.name}
+                          </div>
+                          {previewOf(t) && previewOf(t) !== t.name && (
+                            <div className="text-neutral-600 line-clamp-2">{previewOf(t)}</div>
+                          )}
                         </Link>
                         <div className="text-xs text-neutral-400 mt-0.5">
                           {t.message_count} message{t.message_count === 1 ? "" : "s"}

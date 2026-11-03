@@ -1,8 +1,14 @@
 // GET /api/tickets — admin list with filters + stats.
 // Same auth pattern as /api/ops-alerts (admin or ops role).
+// TICKET-REF (3 Nov 2026, the owner: "or bind it to the user, users first ticket or the name of the ticket like for
+// the user"): each row has user_number (their own number for it, what Stu and Help show) and name (ticket-label.ts).
+// ?q= searches by email or name plus their number ("asha@example.com 2"), or the internal id ("#49"), across every
+// status, priority and category (the filters apply only without a search).
 import type { Route } from "./+types/api.tickets";
 import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
+import { parseTicketSearch, ticketName } from "~/lib/ticket-label";
+import { numberedTickets, searchWhere } from "~/lib/ticket-number.server";
 import { sql } from "drizzle-orm";
 
 // Tables are created on the studojo side (api.tickets.tsx in the
@@ -31,8 +37,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   const status = url.searchParams.get("status") || "all";
   const priority = url.searchParams.get("priority") || "all";
   const category = url.searchParams.get("category") || "all";
+  const search = parseTicketSearch(url.searchParams.get("q"));
 
-  const where = sql`
+  const where = search
+    ? searchWhere(search)
+    : sql`
     1=1
     ${status !== "all" ? sql`AND status = ${status}` : sql``}
     ${priority !== "all" ? sql`AND priority = ${priority}` : sql``}
@@ -41,19 +50,20 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const [list, stats] = await Promise.all([
     db.execute(sql`
+      WITH numbered AS (${numberedTickets})
       SELECT
         t.id, t.user_id, t.user_email, t.user_name,
         t.category, t.priority, t.status, t.source,
         t.context, t.assignee_email,
-        t.created_at, t.updated_at, t.closed_at,
+        t.created_at, t.updated_at, t.closed_at, t.user_number,
         COALESCE(
-          (SELECT LEFT(m.body, 160) FROM ticket_messages m
+          (SELECT LEFT(m.body, 400) FROM ticket_messages m
            WHERE m.ticket_id = t.id
-           ORDER BY m.created_at ASC LIMIT 1),
+           ORDER BY m.created_at ASC, m.id ASC LIMIT 1),
           ''
         ) AS first_message,
         (SELECT COUNT(*)::int FROM ticket_messages m WHERE m.ticket_id = t.id) AS message_count
-      FROM tickets t
+      FROM numbered t
       WHERE ${where}
       ORDER BY
         CASE t.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
@@ -72,8 +82,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     `),
   ]);
 
+  const tickets = (list.rows as Record<string, any>[]).map((r) => ({
+    ...r,
+    name: ticketName({ summary: r.context?.summary, firstMessage: r.first_message, category: r.category }),
+  }));
   return Response.json({
-    tickets: list.rows,
+    tickets,
     stats: stats.rows[0],
+    search: Boolean(search),
   });
 }

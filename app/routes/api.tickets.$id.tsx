@@ -1,8 +1,12 @@
 // GET   /api/tickets/:id — ticket detail + full thread
 // PATCH /api/tickets/:id — update status / assignee
+// :id is the internal id (the team's). TICKET-REF (3 Nov 2026): the detail also has user_number and name, the number and
+// name the student sees in Stu and Settings, Help (ticket-label.ts).
 import type { Route } from "./+types/api.tickets.$id";
 import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
+import { ticketName } from "~/lib/ticket-label";
+import { numberedTickets } from "~/lib/ticket-number.server";
 import { sql } from "drizzle-orm";
 
 const ALLOWED_STATUSES = ["open", "in_progress", "resolved", "wont_fix"];
@@ -25,10 +29,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   }
 
   const tRes = await db.execute(sql`
+    WITH numbered AS (${numberedTickets})
     SELECT id, user_id, user_email, user_name, category, priority, status,
            source, context, assignee_email, attachments,
-           created_at, updated_at, closed_at
-    FROM tickets WHERE id = ${id} LIMIT 1
+           created_at, updated_at, closed_at, user_number
+    FROM numbered WHERE id = ${id} LIMIT 1
   `);
   const ticket = tRes.rows[0];
   if (!ticket) return Response.json({ error: "Not found" }, { status: 404 });
@@ -37,10 +42,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     SELECT id, ticket_id, author_type, author_email, body, created_at
     FROM ticket_messages
     WHERE ticket_id = ${id}
-    ORDER BY created_at ASC
+    ORDER BY created_at ASC, id ASC
   `);
 
-  return Response.json({ ...(ticket as Record<string, any>), messages: mRes.rows });
+  const t = ticket as Record<string, any>;
+  const first = mRes.rows[0] as { body?: string } | undefined;
+  const name = ticketName({ summary: t.context?.summary, firstMessage: first?.body, category: t.category });
+  return Response.json({ ...t, name, messages: mRes.rows });
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
