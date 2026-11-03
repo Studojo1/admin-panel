@@ -6,7 +6,7 @@
 import { sql } from "drizzle-orm";
 import db from "~/lib/db.server";
 import { stuData, touchOf } from "./data.server";
-import { type Filters, type StuData, EXTRA_EVENTS, STEPS, addDays, todayIst } from "./model";
+import { type Filters, type StuData, EXTRA_EVENTS, STEPS, addDays, countFrom, todayIst } from "./model";
 import {
   type Alert, type FeedRow, type OvEnvelope, type OvSection, Refs, alertsFromData, calls, engagement, insights, journeyLabel, kpis,
   maskEmail, overviewDropoffs, overviewFunnel, overviewSources, power, trends, usage,
@@ -46,6 +46,7 @@ async function feed(d: StuData, f: Filters, refs: Refs): Promise<FeedRow[]> {
   const rows = await readOnly((q) =>
     q(sql`SELECT id::text AS id, (extract(epoch from at) * 1000)::float8 AS at, step, user_id, visitor_id, source
             FROM career_agent.career_journey_events
+           WHERE at >= to_timestamp(${countFrom(process.env.STU_COUNT_FROM) / 1000})
            ORDER BY id DESC LIMIT 400`),
   );
   const idx = new Map(d.users.map((u, i) => [u.id, i]));
@@ -75,7 +76,8 @@ async function zeroToday(d: StuData, f: Filters): Promise<Alert | null> {
   const today = todayIst();
   const yesterday = addDays(today, -1);
   const names = [...new Set([...STEPS.flatMap((s) => s.journey), ...EXTRA_EVENTS.call_failed, ...d.journeySteps.map((s) => s.step)])];
-  const from = `${yesterday}T00:00:00+05:30`;
+  // RESET: nothing before the line counts, so a first day after it has no "yesterday".
+  const from = new Date(Math.max(Date.parse(`${yesterday}T00:00:00+05:30`), countFrom(process.env.STU_COUNT_FROM))).toISOString();
   const mid = `${today}T00:00:00+05:30`;
   const to = `${addDays(today, 1)}T00:00:00+05:30`;
   const rows = await readOnly((q) =>
@@ -103,7 +105,7 @@ async function zeroToday(d: StuData, f: Filters): Promise<Alert | null> {
     key: "zero_today",
     level: "warning",
     text: `No events yet today for ${quiet.length} step${quiet.length === 1 ? "" : "s"} that had them yesterday: ${quiet.slice(0, 5).map(([l, c]) => `${l} (${c.yesterday})`).join(", ")}${quiet.length > 5 ? `, and ${quiet.length - 5} more` : ""}`,
-    href: "/self-check",
+    href: "/daily",
   };
 }
 

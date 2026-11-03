@@ -153,6 +153,8 @@ export interface StuData {
   journeyStart: number | null;
   /** earliest journey event written live (not props.backfill), epoch ms; null while the log holds only the backfill */
   journeyLiveStart?: number | null;
+  /** RESET: the time the pages count from (sinceReset), epoch ms */
+  countFrom?: number;
   /** per step: the truth table exists here */
   truthOn: Record<string, boolean>;
   users: WireUser[];
@@ -837,77 +839,74 @@ export function retention(d: StuData, f: Filters, orLater: boolean, by: "week" |
   });
 }
 
-// ---------------------------------------------------------------- self-check
-
-export interface CheckRow {
-  key: string;
-  label: string;
-  truth: Cell;
-  journey: Cell;
-  onlyTruth: Cell;
-  onlyJourney: Cell;
-  /** |truth - journey| / max(truth, journey), percent */
-  gap: number | null;
-  flagged: boolean;
-}
-
-export const CHECK_THRESHOLD_PCT = 2;
+// --------------------------------------------------------------------- reset
 
 /**
- * The journey log against the product's own tables, per step, for people in
- * scope. A gap over 2% is flagged.
- *
- * Window (2 Nov 2026): "live" (the default) compares from the log's first live
- * event, so it checks the logging the product does now; "all" compares from the
- * log's first event, the backfill included (25 Oct on staging). The backfill
- * rebuilt history from the tables with its own rules (older accounts got no
- * signed_up, for one), so it is not a test of the live logging.
+ * RESET (3 Nov 2026, the owner: "reset the admin dashboard to 0"): every Stu
+ * page counts from COUNT_FROM, as if the product's data began then. Nothing is
+ * deleted: the loader drops what came before (sinceReset), so moving the line
+ * (env STU_COUNT_FROM, an ISO time) brings it back. Someone active before it
+ * who comes back joins on their first time after it, a new sign-up that day
+ * (the owner's rule of 2 Nov: every first sign-in counts as new).
  */
-export type CheckWindow = "live" | "all";
+export const COUNT_FROM_DEFAULT = "2026-11-03T00:00:00+05:30";
 
-export function checkFrom(d: StuData, window: CheckWindow): number | null {
-  if (window === "all" || d.journeyLiveStart === undefined) return d.journeyStart;
-  return d.journeyLiveStart;
+/** STU_COUNT_FROM as epoch ms: an ISO time, else COUNT_FROM_DEFAULT. Pure. */
+export function countFrom(raw: string | undefined): number {
+  const t = raw ? Date.parse(raw.trim()) : NaN;
+  return Number.isFinite(t) ? t : Date.parse(COUNT_FROM_DEFAULT);
 }
 
-export function selfCheck(d: StuData, f: Filters, window: CheckWindow = "live"): { rows: CheckRow[]; from: number | null; flagged: number; window: CheckWindow } {
-  const from = checkFrom(d, window);
-  if (!d.journeyLive || from == null) return { rows: [], from, flagged: 0, window };
-  const scope = scopeUsers(d, f);
-  const rows: CheckRow[] = [];
-  for (const s of USER_STEPS) {
-    if (!s.truth || !d.truthOn[s.key] || s.key === "signed_up") continue;
-    // Table side: people whose first time in the table falls in the window.
-    const truth = scope.filter((i) => (d.users[i].t[s.key] ?? -1) >= from);
-    const tSet = new Set(truth);
-    // Log side: people the log has in the window, or with a log row for a table row in it.
-    const journey = scope.filter((i) => d.users[i].j[s.key] != null && (d.users[i].j[s.key]! >= from || tSet.has(i)));
-    const jSet = new Set(journey);
-    const onlyT = truth.filter((i) => !jSet.has(i));
-    // A log entry for someone whose table row is older than the window is a
-    // repeat, not a gap; a log entry with no table row at all is a gap.
-    const onlyJ = journey.filter((i) => !tSet.has(i) && d.users[i].t[s.key] == null);
-    const big = Math.max(truth.length, journey.length);
-    const diff = onlyT.length + onlyJ.length;
-    const gap = big > 0 ? Math.round((diff / big) * 1000) / 10 : 0;
-    rows.push({
-      key: s.key, label: `${s.n}. ${s.label}`,
-      truth: cellOf(truth), journey: cellOf(journey), onlyTruth: cellOf(onlyT), onlyJourney: cellOf(onlyJ),
-      gap, flagged: gap > CHECK_THRESHOLD_PCT,
-    });
+/**
+ * The dataset from `from` on: earlier step times, days, calls and failures
+ * dropped, people left with nothing dropped (indexes renumbered), and a person
+ * who joined before it joins at their first time after it. Pure.
+ */
+export function sinceReset(d: StuData, from: number): StuData {
+  const fromDay = istDay(from);
+  const times = <T extends Partial<Record<string, number>>>(o: T): T =>
+    Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v >= from)) as T;
+  const act = d.act.filter((a) => a[2] >= fromDay);
+  const calls = d.calls.filter((c) => c[4] >= from);
+  const fails = d.fails.filter((f) => f[1] >= from);
+  const visitors = d.visitors
+    .map((v) => ({
+      ...v,
+      first: times(v.first),
+      days: Object.fromEntries(Object.entries(v.days).map(([k, ds]) => [k, (ds ?? []).filter((x) => x >= fromDay)]).filter(([, ds]) => ds.length)),
+    }))
+    .filter((v) => Object.keys(v.first).length > 0 || Object.keys(v.days).length > 0);
+  const people = d.users.map((u) => ({ ...u, t: times(u.t), j: times(u.j), testPaid: u.testPaid != null && u.testPaid >= from ? u.testPaid : null }));
+  // Each person's first time from `from` on, from everything that still names them.
+  const first = new Map<number, number>();
+  const seen = (i: number, at: number) => {
+    if (i >= 0 && !(first.get(i)! <= at)) first.set(i, at);
+  };
+  people.forEach((u, i) => {
+    if (u.joined >= from) seen(i, u.joined);
+    for (const v of [...Object.values(u.t), ...Object.values(u.j), u.testPaid]) if (v != null) seen(i, v);
+  });
+  for (const a of act) seen(a[1], Math.max(from, Date.parse(`${a[2]}T00:00:00+05:30`)));
+  for (const c of calls) seen(c[0], c[4]);
+  for (const f of fails) seen(f[0], f[1]);
+  for (const v of visitors) {
+    const ts = Object.values(v.first).filter((x): x is number => x != null);
+    if (v.u >= 0) seen(v.u, ts.length ? Math.min(...ts) : from);
   }
-  // Signed up: the log against the accounts table. The log's signed_up carries
-  // the account's created_at, so an older account's row can predate the window.
-  const su = scope.filter((i) => d.users[i].joined >= from);
-  const suSet = new Set(su);
-  const suJ = scope.filter((i) => d.users[i].j.signed_up != null && (d.users[i].j.signed_up! >= from || suSet.has(i)));
-  const suSetJ = new Set(suJ);
-  const onlyT = su.filter((i) => !suSetJ.has(i));
-  const onlyJ = suJ.filter((i) => !suSet.has(i) && d.users[i].joined >= from);
-  const big = Math.max(su.length, suJ.length);
-  const gap = big > 0 ? Math.round(((onlyT.length + onlyJ.length) / big) * 1000) / 10 : 0;
-  rows.unshift({ key: "signed_up", label: "4. Signed up", truth: cellOf(su), journey: cellOf(suJ), onlyTruth: cellOf(onlyT), onlyJourney: cellOf(onlyJ), gap, flagged: gap > CHECK_THRESHOLD_PCT });
-  return { rows, from, flagged: rows.filter((r) => r.flagged).length, window };
+  const keep = [...first.keys()].sort((a, b) => a - b);
+  const at = new Map(keep.map((old, n) => [old, n]));
+  const re = (i: number) => at.get(i) ?? -1;
+  return {
+    ...d,
+    countFrom: from,
+    journeyStart: d.journeyStart == null ? null : Math.max(d.journeyStart, from),
+    journeyLiveStart: d.journeyLiveStart == null ? d.journeyLiveStart : Math.max(d.journeyLiveStart, from),
+    users: keep.map((i) => (people[i].joined >= from ? people[i] : { ...people[i], joined: first.get(i)! })),
+    visitors: visitors.map((v) => ({ ...v, u: v.u >= 0 ? re(v.u) : -1 })),
+    act: act.map((a): Act => [a[0], re(a[1]), a[2], a[3], a[4]]),
+    calls: calls.map((c): WireCall => [re(c[0]), c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10]]),
+    fails: fails.map((f): WireFail => [re(f[0]), f[1], f[2]]),
+  };
 }
 
 // ------------------------------------------------------------------ formatting

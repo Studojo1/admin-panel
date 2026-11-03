@@ -5,7 +5,7 @@ import { type RouteConfig, index, layout, prefix, route } from "@react-router/de
 // ops alerts, marketing) and the B2B product (Sensei, B2B GTM, GTM dashboards)
 // stay at their original paths. The new product's dashboards (Stu, studojo.pro)
 // are at the root: Daily, Funnel, Ratios, Drop-offs, Sources, Journeys,
-// Retention and the self-check, under one layout (app/routes/stu-layout.tsx).
+// Retention and Usage, under one layout (app/routes/stu-layout.tsx).
 // The Overview (2 Nov 2026) is the root and the landing page after login: one
 // short screen with its own range control, so it sits outside that layout. Its
 // detail panels are on /usage, inside the layout.
@@ -21,7 +21,6 @@ export default [
     route("retention", "routes/stu-retention.tsx"),
     // Engagement, power users, calls, retention and the live feed, moved off the Overview (2 Nov 2026).
     route("usage", "routes/stu-usage.tsx"),
-    route("self-check", "routes/stu-check.tsx"),
   ]),
   route("api/stu", "routes/api.stu.tsx"),
   route("api/stu/overview", "routes/api.stu-overview.tsx"),

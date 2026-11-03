@@ -1,11 +1,11 @@
 // node --test scripts/stu-model.test.mjs
 // The Stu tracking rules (app/lib/stu/model.ts): IST days, the sign-up cohort,
-// truth over the journey log, nested gates, the 2% self-check, retention.
+// truth over the journey log, nested gates, retention, the reset.
 // Imports the TypeScript source directly: Node 22.18+ strips the types itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  STEPS, USER_STEPS, DAILY_METRICS, istDay, stepAt, cohortOf, funnel, selfCheck, dailyTable, retention, ratios, dropoffs, sources,
+  STEPS, USER_STEPS, DAILY_METRICS, istDay, stepAt, cohortOf, funnel, sinceReset, countFrom, dailyTable, retention, ratios, dropoffs, sources,
   activity, activeCell,
 } from "../app/lib/stu/model.ts";
 
@@ -73,20 +73,6 @@ test("nested funnel gates on the spine; unnested counts everyone", () => {
   assert.ok(funnel(d, F, true).rows.some((r) => r.key === "paid_test"), "test payments have their own row");
 });
 
-test("self-check flags a gap over 2% and lists who is missing", () => {
-  const t = ms("2026-11-01T06:00:00Z");
-  const users = Array.from({ length: 50 }, (_, k) => user({ id: `u${k}`, t: { onboarded: t }, j: k < 48 ? { onboarded: t } : {} }));
-  const c = selfCheck(data(users), F);
-  const row = c.rows.find((r) => r.key === "onboarded");
-  assert.equal(row.truth.v, 50);
-  assert.equal(row.journey.v, 48);
-  assert.equal(row.onlyTruth.v, 2);
-  assert.equal(row.gap, 4);
-  assert.equal(row.flagged, true);
-  const ok = selfCheck(data(users.map((u) => ({ ...u, j: { onboarded: t } }))), F).rows.find((r) => r.key === "onboarded");
-  assert.equal(ok.flagged, false);
-});
-
 test("daily: a step counts once, on its first IST day; test rows exist", () => {
   const d = data([user({ t: { onboarded: ms("2026-11-01T19:00:00Z") } })], {
     act: [["pay_test", 0, "2026-11-02", 1, 29900], ["email", 0, "2026-11-02", 3, 0]],
@@ -110,7 +96,7 @@ test("retention: back on day N after the IST join day, out of people whose day N
 
 test("every page computes on empty data without throwing", () => {
   const d = data([], { journeyLive: false });
-  assert.doesNotThrow(() => { funnel(d, F, true); ratios(d, F); dropoffs(d, F); sources(d, F, "channel"); retention(d, F, false); selfCheck(d, F); dailyTable(d, F, 7); });
+  assert.doesNotThrow(() => { funnel(d, F, true); ratios(d, F); dropoffs(d, F); sources(d, F, "channel"); retention(d, F, false); sinceReset(d, Date.now()); dailyTable(d, F, 7); });
   assert.ok(dailyTable(d, F, 1).rows.find((r) => r.def.key === "visitors").total.na, "log-only rows say n/a when the log is not live");
 });
 
@@ -152,19 +138,27 @@ test("retention by sign-up day: one row per IST join day, any day offsets", () =
   assert.equal(rows[0].d.d1.back.v, 0);
 });
 
-test("self-check window: live (default) compares from the first live event; all includes the backfill", () => {
-  const t = (iso) => ms(iso);
-  // Backfill era (journeyStart 25 Oct): a table row with no log row. Live from 2 Nov: matched.
+test("reset: nothing before the line counts; an earlier person who comes back joins after it", () => {
+  const line = ms("2026-11-03T00:00:00+05:30");
   const users = [
-    user({ id: "old", t: { onboarded: t("2026-10-27T06:00:00Z") }, j: {} }),
-    user({ id: "new", t: { onboarded: t("2026-11-02T06:00:00Z") }, j: { onboarded: t("2026-11-02T06:00:00Z") } }),
+    user({ id: "gone", joined: ms("2026-11-02T10:00:00Z"), t: { onboarded: ms("2026-11-02T11:00:00Z") }, j: { onboarded: ms("2026-11-02T11:00:00Z") } }),
+    user({ id: "back", joined: ms("2026-11-02T10:00:00Z"), t: { call_started: ms("2026-11-02T12:00:00Z"), saw_jobs: ms("2026-11-03T08:00:00Z") }, j: {} }),
+    user({ id: "new", joined: ms("2026-11-03T09:00:00Z"), t: {}, j: {} }),
   ];
-  const d = data(users, { journeyStart: t("2026-10-25T00:00:00Z"), journeyLiveStart: t("2026-11-02T01:00:00Z") });
-  const live = selfCheck(d, F).rows.find((r) => r.key === "onboarded");
-  assert.equal(live.truth.v, 1);
-  assert.equal(live.flagged, false);
-  const all = selfCheck(d, F, "all").rows.find((r) => r.key === "onboarded");
-  assert.equal(all.onlyTruth.v, 1);
-  assert.equal(all.flagged, true);
-  assert.equal(selfCheck(data(users, { journeyLiveStart: null }), F).rows.length, 0, "no live events yet: nothing to compare live");
+  const d = data(users, {
+    act: [["desk", 0, "2026-11-02", 2, 0], ["desk", 1, "2026-11-03", 1, 0]],
+    calls: [[0, "onboarding", "finished", null, ms("2026-11-02T11:00:00Z"), null, null, 60, 0, 0, 1], [2, "onboarding", "ready", null, ms("2026-11-03T09:05:00Z"), null, null, 30, 0, 0, 1]],
+    visitors: [{ id: "v1", u: 0, ch: "direct", device: null, city: null, days: { visited_home: ["2026-11-02"] }, first: { visited_home: ms("2026-11-02T09:00:00Z") } }],
+  });
+  const r = sinceReset(d, line);
+  assert.deepEqual(r.users.map((u) => u.id), ["back", "new"], "the person with nothing after the line is gone");
+  assert.equal(r.users[0].joined, ms("2026-11-03T00:00:00+05:30"), "a comeback joins at their first time after the line (the desk day's start here)");
+  assert.deepEqual(Object.keys(r.users[0].t), ["saw_jobs"], "their earlier call is dropped");
+  assert.deepEqual(r.act, [["desk", 0, "2026-11-03", 1, 0]], "activity days before the line go, the rest is renumbered");
+  assert.deepEqual(r.calls.map((c) => c[0]), [1], "calls before the line go, the rest point at the new indexes");
+  assert.equal(r.visitors.length, 0, "a visitor with nothing after the line goes");
+  assert.equal(r.countFrom, line);
+  assert.equal(countFrom(undefined), line, "the default line is 3 Nov 2026, 00:00 IST");
+  assert.equal(countFrom("junk"), line);
+  assert.equal(countFrom("2026-11-05T00:00:00Z"), ms("2026-11-05T00:00:00Z"));
 });

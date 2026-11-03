@@ -14,6 +14,7 @@ import { CHANNELS, channelOf } from "~/lib/utm-dictionary";
 import {
   ACTIVITY_EVENTS, ANON_STEPS, EXTRA_EVENTS, JOURNEY_NAME_TO_STEP, STEPS, USER_STEPS,
   type Act, type JourneyStepRow, type StuData, type Touch, type WireCall, type WireFail, type WireUser, type WireVisitor,
+  countFrom, sinceReset,
 } from "./model";
 
 const S = "career_agent";
@@ -506,10 +507,10 @@ async function readOnly<T>(fn: (q: Q) => Promise<T>): Promise<T> {
 let cache: { at: number; data: Promise<StuData> } | null = null;
 const TTL_MS = 60_000;
 
-/** The Stu dataset, at most a minute old (fresh: read now). */
+/** The Stu dataset from the reset on (model.ts sinceReset), at most a minute old (fresh: read now). */
 export function stuData(fresh = false): Promise<StuData> {
   if (!fresh && cache && Date.now() - cache.at < TTL_MS) return cache.data;
-  const data = readOnly(load);
+  const data = readOnly(load).then((d) => sinceReset(d, countFrom(process.env.STU_COUNT_FROM)));
   cache = { at: Date.now(), data };
   data.catch(() => {
     if (cache?.data === data) cache = null;
