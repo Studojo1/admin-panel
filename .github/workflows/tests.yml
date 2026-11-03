@@ -28,6 +28,9 @@ jobs:
       # Stu tracking (2 Nov 2026): IST days, the sign-up cohort, truth over the
       # journey log, nested gates, the 2% self-check, retention.
       - run: node --test scripts/stu-model.test.mjs
+      # Stu Auditor (4 Nov 2026): every failure in plain words, ours (Broke) or
+      # maybe the student's (Check), the IST window, the since-yesterday line.
+      - run: node --test scripts/stu-auditor.test.mjs
       # UTM links (2 Nov 2026): the naming scheme, utm_id = slug first, utm_*
       # as the fallback, IST ranges, internal accounts and bots apart.
       - run: node --test scripts/utm-attribution.test.mjs

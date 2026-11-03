@@ -63,6 +63,7 @@ const PAGES = [
   { to: "/retention", label: "Retention", note: "Who comes back, by week joined" },
   { to: "/ratios", label: "Ratios", note: "The headline conversions" },
   { to: "/usage", label: "Usage", note: "Engagement, power users, calls, live feed", fresh: true },
+  { to: "/auditor", label: "Auditor", note: "Everything that failed, with who and why", fresh: true },
 ];
 
 const SERIES = { signups: "#10b981", onboarded: "#f59e0b", active: "#ec4899", paid: "#a855f7" };

@@ -23,6 +23,7 @@ const TABS = [
   { to: "/journeys", label: "Journeys" },
   { to: "/retention", label: "Retention" },
   { to: "/usage", label: "Usage" },
+  { to: "/auditor", label: "Auditor" },
 ];
 
 /** Stu's history starts here: the reset of 3 Nov 2026 (model.ts COUNT_FROM_DEFAULT). */
