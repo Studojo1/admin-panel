@@ -23,13 +23,14 @@ type Kind = "personal" | "studojo";
 interface Feedback { id: string; t: string; text: string; by?: string; resolvedAt?: string; reply?: string }
 interface Version { t: string; by: "claude" | "team"; title: string; body: string; note?: string }
 interface Verdict { level: "good" | "okay" | "bad" | "ugly" | null; ratio: number | null; base: number | null; basis: string | null }
-interface Review { approvedAt: string; approvedBy: string | null; angle: string; claudeTitle: string; claudeBody: string; editedByTeam: boolean; feedback: Feedback[]; blocked?: { at: string; by: string; reason: string } | null }
+interface Review { approvedAt: string; approvedBy: string | null; angle: string; claudeTitle: string; claudeBody: string; editedByTeam: boolean; feedback: Feedback[]; blocked?: { at: string; by: string; reason: string } | null; teamPhotos?: string[] }
 interface Post {
   id: number; creatorId: number; title: string; body: string; kind: Kind; due: string; status: string; copiedAt: string | null; ownLine: string | null;
   postedAt: string | null; url: string | null; impressions: number | null; reactions: number | null; comments: number | null; screenshot: string | null;
   metricsAt: string | null; review: Review | null; insight: string | null; createdBy: string | null; verdict: Verdict | null;
+  photoIdea: string | null; photos: string[]; photoHelpAt: string | null;
 }
-interface Draft { id: number; creatorId: number; title: string; body: string; kind: Kind; due: string; angle: string; status: "review" | "changes"; batch: string | null; feedback: Feedback[]; versions: Version[]; updatedAt: string }
+interface Draft { id: number; creatorId: number; title: string; body: string; kind: Kind; due: string; angle: string; photoIdea: string; status: "review" | "changes"; batch: string | null; feedback: Feedback[]; versions: Version[]; updatedAt: string }
 interface Standing {
   thisWeek: { due: number; posted: number; missed: number }; lastWeek: { due: number; posted: number }; run: number; completedWeeks: number;
   impressions: number; awaitingNumbers: number; atRisk: boolean; lastActivity: string | null; nextMilestone: { name: string; weeksToGo: number } | null; milestonesReached: string[];
@@ -151,13 +152,17 @@ const SLOT: Record<string, Slot> = {
   missed: { key: "missed", label: "Missed", icon: "alert" },
   paused: { key: "paused", label: "Paused", icon: "pause" },
   blocked: { key: "blocked", label: "Blocked", icon: "alert" },
+  photo: { key: "photo", label: "Needs photo", icon: "alert" },
+  askedPhoto: { key: "photo", label: "Asked us for a photo", icon: "alert" },
 };
-const LEGEND = ["review", "back", "ready", "copied", "posted", "numbers", "missed", "blocked", "paused"];
+const LEGEND = ["review", "back", "photo", "ready", "copied", "posted", "numbers", "missed", "blocked", "paused"];
 function postSlot(p: Post, today: string, paused: boolean): Slot {
   if (p.status === "blocked") return SLOT.blocked;
   if (p.status === "posted") return p.impressions != null ? SLOT.numbers : SLOT.posted;
   if (p.due < today) return SLOT.missed;
   if (paused) return SLOT.paused;
+  // No post goes up without a photo: the fellow's page keeps it locked until one is added.
+  if (!p.photos.length) return p.photoHelpAt ? SLOT.askedPhoto : SLOT.photo;
   return p.copiedAt ? SLOT.copied : SLOT.ready;
 }
 const draftSlot = (d: Draft) => (d.status === "changes" ? SLOT.back : SLOT.review);
@@ -282,6 +287,17 @@ function Desk(P: DeskProps) {
   const act = useCallback(async (body: Record<string, unknown>, done?: string) => {
     try { const d = await api("/api/fellowship-calendar", body); P.setD(d); if (done) toast(done); return d; }
     catch (e) { toast((e as Error).message); return null; }
+  }, [P, toast]);
+  // A photo the team adds to a post, for a fellow who has none: the server answers with the fresh desk.
+  const uploadPhoto = useCallback(async (postId: number, file: File) => {
+    try {
+      const jpeg = await toJpeg(file);
+      const token = await getToken();
+      const res = await fetch(`/api/fellowship-proof?post=${postId}`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/jpeg" }, body: jpeg });
+      const j = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((j && j.error) || `Something went wrong (${res.status}). Please try again.`);
+      P.setD(j as Desk); toast("Photo added. The post is unlocked on their page."); return true;
+    } catch (e) { toast((e as Error).message); return false; }
   }, [P, toast]);
   // f7's creator APIs answer with one creator, so reload the desk after them.
   const creatorApi = useCallback(async (path: string, body: Record<string, unknown>, done?: string) => {
@@ -554,7 +570,7 @@ function Desk(P: DeskProps) {
           <aside className="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
             {drawer.mode === "fellow" && byId(drawer.id) ? <FellowView f={byId(drawer.id)!} D={D} act={act} creatorApi={creatorApi} setDrawer={setDrawer} nudge={(id) => P.setNudge({ id })} copyPlan={copyPlan} toast={toast} /> : null}
             {drawer.mode === "review" && byId(drawer.id) ? <ReviewView f={byId(drawer.id)!} D={D} act={act} setDrawer={setDrawer} draftId={drawer.draftId} /> : null}
-            {drawer.mode === "post" ? <PostEditor D={D} state={drawer} byId={byId} act={act} creatorApi={creatorApi} setDrawer={setDrawer} postDays={POST_DAYS} /> : null}
+            {drawer.mode === "post" ? <PostEditor D={D} state={drawer} byId={byId} act={act} upload={uploadPhoto} creatorApi={creatorApi} setDrawer={setDrawer} postDays={POST_DAYS} /> : null}
             {drawer.mode === "add-fellow" ? <AddFellow D={D} creatorApi={creatorApi} setDrawer={setDrawer} toast={toast} /> : null}
             {((drawer.mode === "fellow" || drawer.mode === "review") && !byId(drawer.id)) ? <><div className="sheet-head"><span className="crumb">Gone</span><CloseBtn onClick={() => setDrawer(null)} /></div><div className="sheet-body"><div className="empty"><b>That fellow isn't here any more</b></div></div></> : null}
           </aside>
@@ -598,10 +614,9 @@ function WeekChart({ weekly, perWeek, weekNo }: { weekly: Desk["weekly"]; perWee
   );
 }
 
-// The fellow's analytics screenshots for one post. Images come through /api/fellowship-proof with the admin token,
-// so they're fetched here and shown from object URLs (an <img> can't send the token).
-function ProofShots({ value }: { value: string | null }) {
-  const refs = useMemo(() => proofRefs(value), [value]);
+// A fellow's pictures (analytics screenshots, post photos). Images come through /api/fellowship-proof with the admin
+// token, so they're fetched here and shown from object URLs (an <img> can't send the token).
+function useProofImages(refs: string[]) {
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [failed, setFailed] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -620,6 +635,12 @@ function ProofShots({ value }: { value: string | null }) {
     })();
     return () => { on = false; made.forEach((u) => URL.revokeObjectURL(u)); };
   }, [refs]);
+  return { urls, failed };
+}
+
+function ProofShots({ value }: { value: string | null }) {
+  const refs = useMemo(() => proofRefs(value), [value]);
+  const { urls, failed } = useProofImages(refs);
   return (
     <div className="proofs">
       <h3 className="label" style={{ margin: 0 }}>Analytics screenshots{refs.length ? ` (${refs.length})` : ""}</h3>
@@ -633,6 +654,61 @@ function ProofShots({ value }: { value: string | null }) {
         </div>
       ) : <p className="hint">None yet. Fellows upload their analytics screenshots at the end of each week.</p>}
     </div>
+  );
+}
+
+/** A photo as a JPEG for upload: long side at most 2048 px, like the fellow's page sends. */
+async function toJpeg(file: File): Promise<Blob> {
+  const bmp = await createImageBitmap(file).catch(() => { throw new Error("That file isn't a picture the page can read. Try a JPEG or PNG."); });
+  const scale = Math.min(1, 2048 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height); bmp.close();
+  const blob = await new Promise<Blob | null>((r) => c.toBlob(r, "image/jpeg", 0.85));
+  if (!blob) throw new Error("Couldn't read that picture. Try another one.");
+  if (blob.size > 5 * 1024 * 1024) throw new Error("That photo is too big even after shrinking it. Try another one.");
+  return blob;
+}
+
+// The photo that goes up with a post. No post goes up without one (the founder, 3 Nov 2026): the fellow adds their
+// own on their page, and their page keeps the post locked until it has one. When they have none, the team adds one here.
+function PostPhotos({ p, first, act, upload }: {
+  p: Post; first: string; act: (b: Record<string, unknown>, done?: string) => Promise<Desk | null>; upload: ((postId: number, file: File) => Promise<boolean>) | null;
+}) {
+  const key = p.photos.join("|");
+  const refs = useMemo(() => p.photos, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { urls, failed } = useProofImages(refs);
+  const [idea, setIdea] = useState(p.photoIdea ?? "");
+  const [busy, setBusy] = useState(false);
+  const [rm, setRm] = useState<string | null>(null);
+  useEffect(() => setIdea(p.photoIdea ?? ""), [p.photoIdea]);
+  const posted = p.status === "posted";
+  const team = new Set(p.review?.teamPhotos ?? []);
+  const full = p.photos.length >= 4;
+  return (
+    <section className="compose" aria-label="Photo">
+      <div className="sec-h"><h3>Photo</h3><span>{p.photos.length ? `${p.photos.length} added` : posted ? "None" : "Needed before it can go up"}</span></div>
+      {!posted && !p.photos.length ? <p className={`note ${p.photoHelpAt ? "note-bad" : "note-warn"}`}><Icon id="alert" /><span>{p.photoHelpAt
+        ? <><b>{first} has no photo for this</b> (said so {fmt(istDay(p.photoHelpAt))}). Add one below and their page unlocks the post.</>
+        : <>{first} can't copy or post this until it has a photo. They add their own on their page.</>}</span></p> : null}
+      {p.photos.length ? <div className="proof-grid">{p.photos.map((r, i) => (
+        <figure key={r} className="photo-fig">
+          {urls[r] ? <a href={urls[r]} target="_blank" rel="noopener noreferrer"><img src={urls[r]} alt={`Photo ${i + 1} for this post`} /></a> : <span className="proof-wait">{failed[r] ?? "Loading…"}</span>}
+          <figcaption>{team.has(r) ? "Added by the team" : `${first}'s photo`}
+            {posted ? null : rm === r
+              ? <span className="inline-confirm">Remove it?<button className="btn btn-primary btn-sm" type="button" disabled={busy} onClick={async () => { setBusy(true); await act({ intent: "photo-remove", id: p.id, ref: r }, "Photo removed."); setBusy(false); setRm(null); }}>Remove</button><button className="btn btn-quiet btn-sm" type="button" onClick={() => setRm(null)}>Keep</button></span>
+              : <button className="btn btn-quiet btn-sm" type="button" onClick={() => setRm(r)}><Icon id="trash" />Remove</button>}
+          </figcaption>
+        </figure>))}</div> : null}
+      {posted ? (p.photoIdea ? <p className="hint">Photo idea: {p.photoIdea}</p> : null) : <>
+        <div className="field"><label htmlFor={`pi-${p.id}`}>Photo idea, shown to {first}</label>
+          <div className="photo-idea-row"><input className="input" id={`pi-${p.id}`} value={idea} maxLength={500} onChange={(e) => setIdea(e.target.value)} placeholder="For example: a photo of you with your team at the hackathon" />
+            <button className="btn btn-line btn-sm" type="button" disabled={busy || idea.trim() === (p.photoIdea ?? "")} onClick={async () => { setBusy(true); await act({ intent: "photo-idea", id: p.id, photoIdea: idea.trim() }, "Photo idea saved."); setBusy(false); }}>Save</button></div></div>
+        {upload ? <label className="btn btn-line btn-sm photo-add" aria-disabled={full || busy}>
+          <input type="file" accept="image/*" className="sr" disabled={full || busy} onChange={async (e) => { const file = e.target.files?.[0]; e.target.value = ""; if (!file) return; setBusy(true); await upload(p.id, file); setBusy(false); }} />
+          <Icon id="plus" />{busy ? "Working…" : full ? "4 photos is the most" : `Add a photo for ${first}`}</label> : null}
+      </>}
+    </section>
   );
 }
 
@@ -869,16 +945,17 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
   const [body, setBody] = useState(d.body);
   const [kind, setKind] = useState<Kind>(d.kind);
   const [due, setDue] = useState(d.due);
+  const [photoIdea, setPhotoIdea] = useState(d.photoIdea);
   const [busy, setBusy] = useState(false);
   const [back, setBack] = useState<string | null>(null);
   const [confirmRm, setConfirmRm] = useState(false);
   // Take the server's newer copy (Claude revised it) unless the team is mid-edit.
   const seen = useRef(d.updatedAt);
-  const dirty = title.trim() !== d.title || body.trim() !== d.body.trim() || kind !== d.kind || due !== d.due;
+  const dirty = title.trim() !== d.title || body.trim() !== d.body.trim() || kind !== d.kind || due !== d.due || photoIdea.trim() !== d.photoIdea;
   useEffect(() => {
-    if (d.updatedAt !== seen.current) { seen.current = d.updatedAt; if (!dirty) { setTitle(d.title); setBody(d.body); setKind(d.kind); setDue(d.due); } }
+    if (d.updatedAt !== seen.current) { seen.current = d.updatedAt; if (!dirty) { setTitle(d.title); setBody(d.body); setKind(d.kind); setDue(d.due); setPhotoIdea(d.photoIdea); } }
   }, [d.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
-  const edits = { title: title.trim(), body: body.trim(), kind, due };
+  const edits = { title: title.trim(), body: body.trim(), kind, due, photoIdea: photoIdea.trim() };
   const run = async (b: Record<string, unknown>, done: string) => { setBusy(true); const r = await act({ id: d.id, ...b }, done); setBusy(false); return r; };
   const byClaude = d.versions.filter((v) => v.by === "claude").length;
   const lastV = d.versions[d.versions.length - 1];
@@ -899,6 +976,9 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
         <button className="btn btn-outline btn-sm" type="button" style={{ background: "var(--card)" }} onClick={() => setBody(`In partnership with Studojo\n\n${body.trim()}`)}>Add the line</button></div> : null}
       <div className="text-meta"><span className={`cnt${body.trim().length > POST_MAX ? " over" : ""}`}>{num(body.trim().length)} / 3,000 characters</span>{dirty ? <span className="dirty">Unsaved edits</span> : null}</div>
       {d.angle ? <p className="why-line"><b>Why this post: </b>{d.angle}</p> : null}
+      <div className="field"><label htmlFor={`dpi-${d.id}`}>Photo idea, shown to {f.first} with the post</label>
+        <input className="input" id={`dpi-${d.id}`} value={photoIdea} maxLength={500} onChange={(e) => setPhotoIdea(e.target.value)} placeholder="Which of their own photos to post with it" />
+        {!photoIdea.trim() ? <p className="hint">No photo idea yet. {f.first} can still add any photo, but can't post without one.</p> : null}</div>
       {d.feedback.length ? <ul className="thread" aria-label="Feedback so far">{d.feedback.map((x) => <li key={x.id}><b>{x.by ? x.by.split("@")[0] : "Team"}, {fmt(istDay(x.t))}:</b> {x.text}{x.resolvedAt ? <><br /><b>Claude, {fmt(istDay(x.resolvedAt))}:</b> {x.reply || "Revised"}</> : null}</li>)}</ul> : null}
       {back !== null ? (
         <div className="backbox">
@@ -921,8 +1001,9 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
 }
 
 // ---------------------------------------------------------------- post editor (team-written posts and approved ones)
-function PostEditor({ D, state, byId, act, creatorApi, setDrawer, postDays }: {
+function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDays }: {
   D: Desk; state: Extract<DrawerState, { mode: "post" }>; byId: (id: number) => Fellow | null; act: (b: Record<string, unknown>, done?: string) => Promise<Desk | null>;
+  upload: (postId: number, file: File) => Promise<boolean>;
   creatorApi: (p: string, b: Record<string, unknown>, d?: string) => Promise<unknown>; setDrawer: (d: DrawerState | null) => void; postDays: number[];
 }) {
   const [fid, setFid] = useState<number | null>(state.id);
@@ -960,6 +1041,7 @@ function PostEditor({ D, state, byId, act, creatorApi, setDrawer, postDays }: {
           <VerdictPill v={existing.verdict} /></div>
         {existing.insight ? <p className="note note-ok"><Icon id="chart" /><span><b>Claude: </b>{existing.insight}</span></p> : existing.impressions != null ? <p className="hint">Claude hasn't written its note on this one yet.</p> : null}
         <ProofShots value={existing.screenshot} />
+        <PostPhotos p={existing} first={f!.first} act={act} upload={null} />
         <p className="post-text">{existing.body}</p>
         {r && r.editedByTeam ? <details className="more"><summary>What Claude wrote before the team's edits</summary><p className="post-text" style={{ marginTop: 8 }}>{r.claudeBody}</p></details> : null}
         <form className="compose" onSubmit={async (e) => { e.preventDefault(); setBusy(true); await act({ intent: "record", id: existing.id, url, ...nums }, "Numbers saved"); setBusy(false); }}>
@@ -1021,6 +1103,7 @@ function PostEditor({ D, state, byId, act, creatorApi, setDrawer, postDays }: {
           <button className="btn btn-quiet" type="button" onClick={backTo}>Cancel</button>
         </div>
       </form>
+      {existing ? <PostPhotos p={existing} first={f!.first} act={act} upload={upload} /> : null}
       {existing ? (
         <section className="compose" aria-label="More">
           <div className="sec-h"><h3>More</h3><span>{existing.copiedAt ? `${f!.first} copied it ${fmt(istDay(existing.copiedAt))}` : "Not copied yet"}</span></div>
