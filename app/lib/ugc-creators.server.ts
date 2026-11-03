@@ -144,6 +144,11 @@ async function createTables() {
   // of those follow-up questions names the story it answers.
   await db.execute(sql`ALTER TABLE ugc_creator_stories ADD COLUMN IF NOT EXISTS coach JSONB`);
   await db.execute(sql`ALTER TABLE ugc_creator_stories ADD COLUMN IF NOT EXISTS reply_to INTEGER`);
+  // Since 3 Nov 2026 fellows upload each post's LinkedIn analytics export (an .xlsx) instead of
+  // screenshots (the founder: "scrap the screenshot idea"). studojo.com stores the files (refs, as
+  // photos are) and the parsed latest one: metrics, demographics, the post's date and link.
+  await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS analytics_url TEXT`);
+  await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS analytics JSONB`);
   // Posts a fellow wrote before the fellowship, so Claude never repeats them.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_creator_earlier_posts (
