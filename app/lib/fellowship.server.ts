@@ -158,12 +158,23 @@ async function earlierPostsOf(id: number, ex: Exec = db) {
 }
 async function storiesOf(id: number | null, ex: Exec = db) {
   const q = id == null
-    ? sql`SELECT id, creator_id, prompt, text, spoken, created_at FROM ugc_creator_stories ORDER BY created_at DESC`
-    : sql`SELECT id, creator_id, prompt, text, spoken, created_at FROM ugc_creator_stories WHERE creator_id = ${id} ORDER BY created_at DESC`;
+    ? sql`SELECT id, creator_id, prompt, text, spoken, created_at, coach, reply_to FROM ugc_creator_stories ORDER BY created_at DESC`
+    : sql`SELECT id, creator_id, prompt, text, spoken, created_at, coach, reply_to FROM ugc_creator_stories WHERE creator_id = ${id} ORDER BY created_at DESC`;
   return (await ex.execute(q)).rows.map((r) => {
     const x = r as Record<string, unknown>;
-    return { id: Number(x.id), creatorId: Number(x.creator_id), prompt: (x.prompt as string) ?? null, text: String(x.text), spoken: !!x.spoken, createdAt: iso(x.created_at) ?? "" };
+    return {
+      id: Number(x.id), creatorId: Number(x.creator_id), prompt: (x.prompt as string) ?? null, text: String(x.text), spoken: !!x.spoken, createdAt: iso(x.created_at) ?? "",
+      readBack: readBackOf(x.coach), replyTo: x.reply_to == null ? null : Number(x.reply_to),
+    };
   });
+}
+/** The page's read-back of a talk (written by studojo.com), as Claude needs it: what can become a post and what to leave out. */
+function readBackOf(v: unknown): { covers: number[]; usable: string[]; leaveOut: string[] } | null {
+  if (!v || typeof v !== "object") return null;
+  const c = v as Record<string, unknown>;
+  if (!Array.isArray(c.useful)) return null; // still being read, or not read
+  const lines = (a: unknown) => (Array.isArray(a) ? a.filter((t): t is string => typeof t === "string") : []);
+  return { covers: Array.isArray(c.parts) ? c.parts.map(Number).filter(Number.isInteger) : [], usable: lines(c.useful), leaveOut: lines(c.skip) };
 }
 async function latestConnections(ex: Exec = db) {
   const rows = (await ex.execute(sql`
@@ -904,7 +915,11 @@ export function storyPages<T extends { text: string }>(stories: T[]): T[][] {
   }
   return pages;
 }
-const agentStory = (s: Story) => ({ id: s.id, asked: s.prompt, said: s.text, spoken: s.spoken, on: istDate(s.createdAt) });
+const agentStory = (s: Story) => ({
+  id: s.id, asked: s.prompt, said: s.text, spoken: s.spoken, on: istDate(s.createdAt),
+  ...(s.replyTo ? { answers: s.replyTo } : {}),
+  ...(s.readBack ? { readBack: s.readBack } : {}),
+});
 
 /** One page of a fellow's stories in full, newest first (page 1 is the one in their context). */
 export async function agentStories(id: number, page: number) {
@@ -938,6 +953,7 @@ export async function agentFellow(id: number) {
       `posts holds their newest ${RECENT_POSTS} posts in full and olderPosts the rest, one line each. earlierPosts and olderEarlierPosts work the same way.`,
       "When you save drafts, the admin panel checks them for repeats against all of their posts, so you don't have to.",
       "Every draft needs photoIdea: one sentence on which of the fellow's own photos to post with it. No post goes up without a photo.",
+      "A story's readBack is their page's quick read of one talk (covers lists the saved parts it read): usable is what can become a post, leaveOut is what to skip. answers names the story a follow-up answer belongs to. What they said wins over the readBack.",
     ],
     fellow: { id: f.id, name: f.name, firstName: f.first, college: f.college, field: f.field, cohort: f.cohort, paused: f.status === "paused", linkedin: f.linkedin, joined: f.joined, connectionsAtJoin: f.connectionsAtJoin },
     application,
