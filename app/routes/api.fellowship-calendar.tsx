@@ -11,9 +11,11 @@ import {
   recordPost,
   releasePost,
   removeDraft,
+  removePhoto,
   saveDraft,
   sendBack,
   setNotes,
+  setPhotoIdea,
   setPlaybook,
 } from "~/lib/fellowship.server";
 
@@ -21,7 +23,8 @@ import {
 // or one fellow's stories and earlier posts with ?fellow=<id>. POST is the
 // review flow: approve, save, send back or remove Claude's drafts, approve all
 // of a fellow's drafts, block an approved post (and release it), record a post the fellow
-// reported directly, and the notes and lessons Claude reads. Every POST answers
+// reported directly, change what photo fits a post or remove one of its photos,
+// and the notes and lessons Claude reads. Every POST answers
 // with the fresh desk. Adding fellows and hand-written posts go through
 // /api/ugc-creators.
 
@@ -54,6 +57,8 @@ export async function action({ request }: Route.ActionArgs) {
       case "block": if (!id) break; await blockPost(id, body.reason, by); break;
       case "release": if (!id) break; await releasePost(id, by); break;
       case "record": if (!id) break; await recordPost(id, body); break;
+      case "photo-idea": if (!id) break; await setPhotoIdea(id, body.photoIdea); break;
+      case "photo-remove": if (!id) break; await removePhoto(id, body.ref); break;
       case "notes": if (!id) break; await setNotes(id, body); break;
       case "nudged": if (!id) break; await markNudged(id); break;
       case "playbook": await setPlaybook(body.text, by); break;

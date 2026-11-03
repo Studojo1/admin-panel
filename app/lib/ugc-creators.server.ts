@@ -130,6 +130,15 @@ async function createTables() {
   // network. These fill the last two stages of the applicants' pipeline.
   await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS intern_at TIMESTAMPTZ`);
   await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS referred_at TIMESTAMPTZ`);
+  // 3 Nov 2026, the founder: no post goes up without a photo. Claude suggests
+  // one with every draft (photo_idea, carried onto the post when it's approved).
+  // photo_url holds a JSON array of "fellow-proof/<creatorId>/<postId>/photo/
+  // <uploadMs>-<12 hex>.jpg", added by the fellow on their page or by the team
+  // here. photo_help_at is when the fellow said they have no photo for it.
+  await db.execute(sql`ALTER TABLE ugc_creator_drafts ADD COLUMN IF NOT EXISTS photo_idea TEXT`);
+  await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS photo_idea TEXT`);
+  await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS photo_url TEXT`);
+  await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS photo_help_at TIMESTAMPTZ`);
   // Posts a fellow wrote before the fellowship, so Claude never repeats them.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_creator_earlier_posts (

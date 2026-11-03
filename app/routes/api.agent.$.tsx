@@ -8,6 +8,7 @@ import {
   agentDraft,
   agentResults,
   agentRoster,
+  agentStories,
   appendTeamNotes,
   isRefused,
   programmeRules,
@@ -41,14 +42,21 @@ const parts = (params: Route.LoaderArgs["params"]) => String(params["*"] ?? "").
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   if (!keyOk(request)) return denied();
-  const [what, a] = parts(params);
+  const [what, a, b, c] = parts(params);
   if (!what) {
     await ensureCreatorTables();
     const n = (await db.execute(sql`SELECT COUNT(*)::int AS n FROM ugc_creators WHERE status <> 'removed'`)).rows[0] as { n: number };
     return json({ ok: true, today: istDate(), fellows: Number(n.n) });
   }
   if (what === "fellows" && !a) return json(await agentRoster());
-  if (what === "fellows" && a) {
+  // One page of a fellow's stories in full: their context lists which page each older story is on.
+  if (what === "fellows" && a && b === "stories") {
+    const id = idOf(a), page = c ? idOf(c) : 1;
+    if (!page) return json({ error: "Pages are numbered from 1: /api/agent/fellows/<id>/stories/<page>." }, 400);
+    const data = id ? await agentStories(id, page) : null;
+    return data ? json(data) : json({ error: "No fellow with that id. GET /api/agent/fellows lists them." }, 404);
+  }
+  if (what === "fellows" && a && !b) {
     const id = idOf(a);
     const data = id ? await agentFellow(id) : null;
     return data ? json(data) : json({ error: "No fellow with that id. GET /api/agent/fellows lists them." }, 404);

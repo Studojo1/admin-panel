@@ -1,5 +1,5 @@
 import db from "~/lib/db.server";
-import { proofRefs } from "~/lib/fellow-proof.server";
+import { deletePhoto, isPhotoRef, newPhotoRef, PHOTOS_PER_POST, proofRefs, putPhoto } from "~/lib/fellow-proof.server";
 import { sql } from "drizzle-orm";
 import {
   HIRING_PIPELINE,
@@ -22,6 +22,8 @@ import {
 // shifts with the server's time zone. Timestamps go out as ISO strings.
 
 export const POST_MAX = 3000; // LinkedIn's limit for one post
+const PHOTO_IDEA_MIN = 12;
+const PHOTO_IDEA_MAX = 500;
 const PARTNERSHIP = /in partnership with studojo|#partnership|#ad\b|#sponsored|paid partnership/i;
 const SAME_POST = 0.5; // share of three-word runs that makes a post a repeat
 const REPEAT_WINDOW_DAYS = 60;
@@ -36,9 +38,11 @@ export interface Review {
   draftedAt: string; approvedAt: string; approvedBy: string | null; batch: string | null; angle: string;
   claudeTitle: string; claudeBody: string; editedByTeam: boolean; feedback: Feedback[]; versions: Version[];
   blocked?: Block | null; blocks?: Block[];
+  /** Photos the team added because the fellow had none (refs in photo_url). */
+  teamPhotos?: string[];
 }
 export interface Draft {
-  id: number; creatorId: number; title: string; body: string; kind: Kind; due: string; angle: string;
+  id: number; creatorId: number; title: string; body: string; kind: Kind; due: string; angle: string; photoIdea: string;
   status: "review" | "changes"; batch: string | null; feedback: Feedback[]; versions: Version[]; createdAt: string; updatedAt: string;
 }
 export interface Post {
@@ -46,6 +50,8 @@ export interface Post {
   copiedAt: string | null; ownLine: string | null; postedAt: string | null; url: string | null;
   impressions: number | null; reactions: number | null; comments: number | null; screenshot: string | null; metricsAt: string | null;
   review: Review | null; insight: string | null; insightAt: string | null; createdAt: string; createdBy: string | null;
+  /** What photo fits the post, the photos added to it (refs), and when the fellow said they have none. */
+  photoIdea: string | null; photos: string[]; photoHelpAt: string | null;
 }
 export interface Fellow {
   id: number; name: string; first: string; slug: string | null; link: string | null; applicationId: number | null;
@@ -55,7 +61,7 @@ export interface Fellow {
   /** Admin-only: taken on as a Growth intern / referred to someone hiring (set on the applicant profile). */
   internAt: string | null; referredAt: string | null;
 }
-export interface PostInput { title?: unknown; body?: unknown; kind?: unknown; due?: unknown; angle?: unknown }
+export interface PostInput { title?: unknown; body?: unknown; kind?: unknown; due?: unknown; angle?: unknown; photoIdea?: unknown }
 
 // Timestamps arrive as text from this app's db ("2026-10-29 08:47:00.12+00") or as Date objects; send ISO either way.
 const iso = (v: unknown): string | null => {
@@ -102,12 +108,13 @@ function toPost(r: Record<string, unknown>): Post {
     reactions: r.reactions == null ? null : Number(r.reactions), comments: r.comments == null ? null : Number(r.comments),
     screenshot: (r.screenshot_url as string) ?? null, metricsAt: iso(r.metrics_at), review: jsonOf<Review | null>(r.review, null),
     insight: (r.insight as string) ?? null, insightAt: iso(r.insight_at), createdAt: iso(r.created_at) ?? "", createdBy: (r.created_by as string) ?? null,
+    photoIdea: (r.photo_idea as string) || null, photos: proofRefs((r.photo_url as string) ?? null).filter(isPhotoRef), photoHelpAt: iso(r.photo_help_at),
   };
 }
 function toDraft(r: Record<string, unknown>): Draft {
   return {
     id: Number(r.id), creatorId: Number(r.creator_id), title: String(r.title), body: String(r.body), kind: r.kind === "studojo" ? "studojo" : "personal",
-    due: String(r.due), angle: String(r.angle ?? ""), status: r.status === "changes" ? "changes" : "review", batch: (r.batch as string) ?? null,
+    due: String(r.due), angle: String(r.angle ?? ""), photoIdea: String(r.photo_idea ?? ""), status: r.status === "changes" ? "changes" : "review", batch: (r.batch as string) ?? null,
     feedback: jsonOf<Feedback[]>(r.feedback, []), versions: jsonOf<Version[]>(r.versions, []), createdAt: iso(r.created_at) ?? "", updatedAt: iso(r.updated_at) ?? "",
   };
 }
@@ -115,8 +122,9 @@ function toDraft(r: Record<string, unknown>): Draft {
 const FELLOW_COLS = sql`id, application_id, slug, full_name, email, whatsapp, linkedin_url, college, field, cohort, status,
   connections_at_join, to_char(joined_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS joined_day, learnings, team_notes, nudged_at, intern_at, referred_at`;
 const POST_COLS = sql`id, creator_id, title, body, kind, to_char(due_date, 'YYYY-MM-DD') AS due, status, copied_at, own_line, posted_at,
-  post_url, impressions, reactions, comments, screenshot_url, metrics_at, review, insight, insight_at, created_at, created_by`;
-const DRAFT_COLS = sql`id, creator_id, title, body, kind, to_char(due_date, 'YYYY-MM-DD') AS due, angle, status, batch, feedback, versions, created_at, updated_at`;
+  post_url, impressions, reactions, comments, screenshot_url, metrics_at, review, insight, insight_at, created_at, created_by,
+  photo_idea, photo_url, photo_help_at`;
+const DRAFT_COLS = sql`id, creator_id, title, body, kind, to_char(due_date, 'YYYY-MM-DD') AS due, angle, photo_idea, status, batch, feedback, versions, created_at, updated_at`;
 
 /** How many of a fellow's weekly posts are Studojo posts, when the team has set it (ugc_programme.rules.studojoPerWeek). */
 const studojoPerWeek = (rules: object): number | null => {
@@ -200,7 +208,7 @@ export interface CheckOptions { skipId?: string; extra?: { title: string; body: 
  * them. Ids in `own` are "p<id>" for posts, "d<id>" for drafts, "e<id>" for
  * earlier posts.
  */
-export function problemWith(x: { title: string; body: string; kind: string; due: string }, ctx: CheckContext, o: CheckOptions = {}): string | null {
+export function problemWith(x: { title: string; body: string; kind: string; due: string; photoIdea?: string }, ctx: CheckContext, o: CheckOptions = {}): string | null {
   const name = x.title ? `"${x.title}"` : "A post";
   if (x.title.length < 2) return "Every post needs a short title.";
   if (x.body.length < (o.strict ? 80 : 20)) return `${name}: the post text is missing or too short.`;
@@ -214,6 +222,10 @@ export function problemWith(x: { title: string; body: string; kind: string; due:
   const taken = ctx.own.some((p) => p.id !== o.skipId && p.due === x.due) || extra.some((p) => p.due === x.due);
   if (taken) return `${name}: ${ctx.fellow.name} already has a post due on ${x.due}. One post a day.`;
   if (o.strict) {
+    // No post goes up without a photo (the founder, 3 Nov 2026), so Claude says which of the fellow's own photos fits.
+    if ((x.photoIdea ?? "").length < PHOTO_IDEA_MIN) {
+      return `${name}: add "photoIdea", one sentence on which of their own photos to post with it (for example "a photo of you and your team at the hackathon"). Fellows can't post without a photo.`;
+    }
     const mine = runs(x.body);
     for (const p of extra) if (overlap(mine, runs(p.body)) >= SAME_POST) return `${name} repeats too much of another post in this batch ("${p.title}"). Write it fresh.`;
     for (const p of ctx.own) if (p.id !== o.skipId && overlap(mine, runs(p.body)) >= SAME_POST) return `${name} repeats too much of their post "${p.title || "from before the dashboard"}". Write it fresh.`;
@@ -250,7 +262,7 @@ async function checkContext(fellowId: number, ex: Exec): Promise<CheckContext | 
 }
 
 function readInput(x: PostInput) {
-  return { title: str(x.title, 140), body: str(x.body, POST_MAX + 500), kind: String(x.kind ?? ""), due: String(x.due ?? ""), angle: str(x.angle, 800) };
+  return { title: str(x.title, 140), body: str(x.body, POST_MAX + 500), kind: String(x.kind ?? ""), due: String(x.due ?? ""), angle: str(x.angle, 800), photoIdea: str(x.photoIdea, PHOTO_IDEA_MAX) };
 }
 class Refused extends Error { constructor(msg: string, public status = 400) { super(msg); } }
 export const isRefused = (e: unknown): e is Refused => e instanceof Refused;
@@ -301,8 +313,8 @@ export async function addDrafts(fellowId: number, posts: PostInput[], batch: unk
     for (const x of made) {
       const versions: Version[] = [{ t, by: "claude", title: x.title, body: x.body, note: "First draft" }];
       const r = (await tx.execute(sql`
-        INSERT INTO ugc_creator_drafts (creator_id, title, body, kind, due_date, angle, status, batch, feedback, versions)
-        VALUES (${fellowId}, ${x.title}, ${x.body}, ${x.kind}, ${x.due}::date, ${x.angle}, 'review', ${str(batch, 60) || null}, '[]'::jsonb, ${JSON.stringify(versions)}::jsonb)
+        INSERT INTO ugc_creator_drafts (creator_id, title, body, kind, due_date, angle, photo_idea, status, batch, feedback, versions)
+        VALUES (${fellowId}, ${x.title}, ${x.body}, ${x.kind}, ${x.due}::date, ${x.angle}, ${x.photoIdea}, 'review', ${str(batch, 60) || null}, '[]'::jsonb, ${JSON.stringify(versions)}::jsonb)
         RETURNING id
       `)).rows[0] as { id: number };
       ids.push(Number(r.id));
@@ -318,7 +330,7 @@ export async function reviseDraft(draftId: number, input: PostInput & { note?: u
   return forFellow(owner, async (tx) => {
     const d = await loadDraft(draftId, tx);
     if (!d) throw new Refused("That draft isn't waiting for review any more: it was approved or removed.", 404);
-    const x = readInput({ title: input.title ?? d.title, body: input.body ?? d.body, kind: input.kind ?? d.kind, due: input.due ?? d.due, angle: input.angle ?? d.angle });
+    const x = readInput({ title: input.title ?? d.title, body: input.body ?? d.body, kind: input.kind ?? d.kind, due: input.due ?? d.due, angle: input.angle ?? d.angle, photoIdea: input.photoIdea ?? d.photoIdea });
     const ctx = (await checkContext(owner, tx))!;
     const err = problemWith(x, ctx, { skipId: `d${d.id}`, allowPast: x.due === d.due, strict: true });
     if (err) throw new Refused(err);
@@ -327,7 +339,7 @@ export async function reviseDraft(draftId: number, input: PostInput & { note?: u
     if (x.title !== d.title || x.body !== d.body) versions.push({ t: nowIso(), by: "claude", title: x.title, body: x.body, note });
     const feedback = d.feedback.map((f) => (f.resolvedAt ? f : { ...f, resolvedAt: nowIso(), reply: note }));
     await tx.execute(sql`
-      UPDATE ugc_creator_drafts SET title = ${x.title}, body = ${x.body}, kind = ${x.kind}, due_date = ${x.due}::date, angle = ${x.angle},
+      UPDATE ugc_creator_drafts SET title = ${x.title}, body = ${x.body}, kind = ${x.kind}, due_date = ${x.due}::date, angle = ${x.angle}, photo_idea = ${x.photoIdea},
         status = 'review', feedback = ${JSON.stringify(feedback)}::jsonb, versions = ${JSON.stringify(versions)}::jsonb, updated_at = NOW()
       WHERE id = ${draftId}
     `);
@@ -340,14 +352,14 @@ export async function reviseDraft(draftId: number, input: PostInput & { note?: u
 // ---------------------------------------------------------------------------
 
 async function teamEdit(tx: Exec, d: Draft, input: PostInput, by: string, opts: { forApproval?: boolean } = {}) {
-  const x = readInput({ title: input.title ?? d.title, body: input.body ?? d.body, kind: input.kind ?? d.kind, due: input.due ?? d.due, angle: d.angle });
+  const x = readInput({ title: input.title ?? d.title, body: input.body ?? d.body, kind: input.kind ?? d.kind, due: input.due ?? d.due, angle: d.angle, photoIdea: input.photoIdea ?? d.photoIdea });
   if (opts.forApproval && x.due < istDate()) throw new Refused(`Its due date (${x.due}) has passed. Pick a new date, then approve.`);
   const ctx = (await checkContext(d.creatorId, tx))!;
   const err = problemWith(x, ctx, { skipId: `d${d.id}`, allowPast: x.due === d.due && !opts.forApproval });
   if (err) throw new Refused(err);
   const versions = [...d.versions];
   if (x.title !== d.title || x.body !== d.body) versions.push({ t: nowIso(), by: "team", title: x.title, body: x.body, note: `Edited by ${by}` });
-  return { ...d, title: x.title, body: x.body, kind: x.kind as Kind, due: x.due, versions };
+  return { ...d, title: x.title, body: x.body, kind: x.kind as Kind, due: x.due, photoIdea: x.photoIdea, versions };
 }
 
 export async function saveDraft(draftId: number, input: PostInput, by: string) {
@@ -358,7 +370,7 @@ export async function saveDraft(draftId: number, input: PostInput, by: string) {
     if (!d) throw new Refused("That draft is gone: it was approved or removed. Refresh the page.", 404);
     const n = await teamEdit(tx, d, input, by);
     await tx.execute(sql`
-      UPDATE ugc_creator_drafts SET title = ${n.title}, body = ${n.body}, kind = ${n.kind}, due_date = ${n.due}::date,
+      UPDATE ugc_creator_drafts SET title = ${n.title}, body = ${n.body}, kind = ${n.kind}, due_date = ${n.due}::date, photo_idea = ${n.photoIdea},
         versions = ${JSON.stringify(n.versions)}::jsonb, updated_at = NOW() WHERE id = ${draftId}
     `);
   });
@@ -375,7 +387,7 @@ export async function sendBack(draftId: number, input: PostInput & { feedback?: 
     const n = await teamEdit(tx, d, input, by);
     const feedback = [...d.feedback, { id: newId(), t: nowIso(), text, by }];
     await tx.execute(sql`
-      UPDATE ugc_creator_drafts SET title = ${n.title}, body = ${n.body}, kind = ${n.kind}, due_date = ${n.due}::date, status = 'changes',
+      UPDATE ugc_creator_drafts SET title = ${n.title}, body = ${n.body}, kind = ${n.kind}, due_date = ${n.due}::date, photo_idea = ${n.photoIdea}, status = 'changes',
         versions = ${JSON.stringify(n.versions)}::jsonb, feedback = ${JSON.stringify(feedback)}::jsonb, updated_at = NOW() WHERE id = ${draftId}
     `);
   });
@@ -389,8 +401,8 @@ async function approveIn(tx: Exec, d: Draft, by: string) {
     feedback: d.feedback, versions: d.versions,
   };
   await tx.execute(sql`
-    INSERT INTO ugc_creator_posts (creator_id, title, body, kind, due_date, status, created_by, review)
-    VALUES (${d.creatorId}, ${d.title}, ${d.body}, ${d.kind}, ${d.due}::date, 'ready', ${by}, ${JSON.stringify(review)}::jsonb)
+    INSERT INTO ugc_creator_posts (creator_id, title, body, kind, due_date, status, created_by, review, photo_idea)
+    VALUES (${d.creatorId}, ${d.title}, ${d.body}, ${d.kind}, ${d.due}::date, 'ready', ${by}, ${JSON.stringify(review)}::jsonb, ${d.photoIdea || null})
   `);
   await tx.execute(sql`DELETE FROM ugc_creator_drafts WHERE id = ${d.id}`);
 }
@@ -484,6 +496,65 @@ export async function recordPost(postId: number, b: { posted?: unknown; url?: un
     WHERE id = ${postId} RETURNING id
   `);
   if (!r.rows.length) throw new Refused("That post is gone. Refresh the page.", 404);
+}
+
+// Photos. No post goes up without one (the founder, 3 Nov 2026): the fellow adds
+// their own on their page, and when they have none the team adds one here. The
+// fellow's page locks Copy and Post on LinkedIn until a post has a photo.
+
+const NOT_FOR_POSTED = "It's already up on LinkedIn, so its photos stay as they are.";
+
+/** The team changes what photo fits an approved post. */
+export async function setPhotoIdea(postId: number, text: unknown) {
+  const idea = str(text, PHOTO_IDEA_MAX);
+  const r = await db.execute(sql`UPDATE ugc_creator_posts SET photo_idea = ${idea || null}, updated_at = NOW() WHERE id = ${postId} AND status <> 'posted' RETURNING id`);
+  if (!r.rows.length) throw new Refused("That post is gone or already up. Refresh the page.", 404);
+}
+
+/** The team adds a photo (a JPEG the page has already re-encoded) to a post that isn't up yet. */
+export async function addTeamPhoto(postId: number, jpeg: Uint8Array) {
+  if (jpeg.length < 4 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg[2] !== 0xff) throw new Refused("That file isn't a picture the page can use.", 415);
+  const owner = await postOwner(postId);
+  if (owner == null) throw new Refused("That post is gone. Refresh the page.", 404);
+  const check = (p: Post | null) => {
+    if (!p) throw new Refused("That post is gone. Refresh the page.", 404);
+    if (p.status === "posted") throw new Refused(NOT_FOR_POSTED);
+    if (p.photos.length >= PHOTOS_PER_POST) throw new Refused(`This post has ${PHOTOS_PER_POST} photos, the most it can have. Remove one first.`);
+  };
+  check(await loadPost(postId, db)); // refuse early, before anything is stored
+  const ref = newPhotoRef(owner, postId);
+  await putPhoto(ref, jpeg);
+  try {
+    await forFellow(owner, async (tx) => {
+      const p = await loadPost(postId, tx);
+      check(p);
+      const review = { ...(p!.review ?? {}), teamPhotos: [...(p!.review?.teamPhotos ?? []), ref] };
+      await tx.execute(sql`
+        UPDATE ugc_creator_posts SET photo_url = ${JSON.stringify([...p!.photos, ref])}, photo_help_at = NULL,
+          review = ${JSON.stringify(review)}::jsonb, updated_at = NOW()
+        WHERE id = ${postId}
+      `);
+    });
+  } catch (e) {
+    await deletePhoto(ref).catch(() => {});
+    throw e;
+  }
+}
+
+/** The team removes a photo (the fellow's or the team's) from a post that isn't up yet. */
+export async function removePhoto(postId: number, ref: unknown) {
+  if (!isPhotoRef(ref)) throw new Refused("That photo isn't on this post.", 404);
+  const owner = await postOwner(postId);
+  if (owner == null) throw new Refused("That post is gone. Refresh the page.", 404);
+  await forFellow(owner, async (tx) => {
+    const p = await loadPost(postId, tx);
+    if (!p) throw new Refused("That post is gone. Refresh the page.", 404);
+    if (p.status === "posted") throw new Refused(NOT_FOR_POSTED);
+    if (!p.photos.includes(ref)) throw new Refused("That photo isn't on this post.", 404);
+    const rest = p.photos.filter((x) => x !== ref);
+    await tx.execute(sql`UPDATE ugc_creator_posts SET photo_url = ${rest.length ? JSON.stringify(rest) : null}, updated_at = NOW() WHERE id = ${postId}`);
+  });
+  await deletePhoto(ref);
 }
 
 export async function setNotes(fellowId: number, b: { teamNotes?: unknown; learnings?: unknown }) {
@@ -691,6 +762,9 @@ export async function programmeDashboard() {
       posted: posts.filter(isPosted).length,
       awaitingNumbers: posts.filter((p) => isPosted(p) && p.impressions == null).length,
       withScreenshots: posts.filter((p) => isPosted(p) && proofRefs(p.screenshot).length > 0).length,
+      // Approved posts the fellow can't put up yet because they have no photo, and those where they asked the team for one.
+      needPhoto: posts.filter((p) => p.status === "ready" && !p.photos.length).length,
+      askedForPhoto: posts.filter((p) => p.status === "ready" && !p.photos.length && p.photoHelpAt).length,
       measured: posts.filter(measured).length,
     },
     weekly, kinds,
@@ -766,17 +840,82 @@ function agentPost(p: Post, own: Post[], all: Post[]) {
     postedOn: p.postedAt ? istDate(p.postedAt) : null, url: p.url, fellowsOwnLine: p.ownLine,
     numbers: p.impressions != null ? { impressions: p.impressions, reactions: p.reactions, comments: p.comments, reportedOn: p.metricsAt ? istDate(p.metricsAt) : null } : null,
     verdict: verdictOf(p, own, all), insight: p.insight,
+    photoIdea: p.photoIdea,
+    photos: { added: p.photos.length, byTeam: p.photos.filter((x) => p.review?.teamPhotos?.includes(x)).length, fellowHadNone: !!p.photoHelpAt || p.photos.some((x) => p.review?.teamPhotos?.includes(x)) },
     // What the team changed before approving: the best signal for how to write the next one.
     whatClaudeWrote: !r ? "written by the team" : r.editedByTeam ? { title: r.claudeTitle, body: r.claudeBody } : "approved exactly as Claude wrote it",
     feedbackGiven: r ? r.feedback.map((f) => f.text) : [],
   };
 }
 export const agentDraft = (d: Draft) => ({
-  id: d.id, title: d.title, body: d.body, kind: d.kind, due: d.due, angle: d.angle,
+  id: d.id, title: d.title, body: d.body, kind: d.kind, due: d.due, angle: d.angle, photoIdea: d.photoIdea,
   status: d.status === "changes" ? "sent back with feedback" : "waiting for review", feedback: d.feedback, versions: d.versions.length,
 });
 
-/** One fellow's full context: the only student data Claude sees while writing for them. */
+// One fellow's context is capped, so it stays readable however much they tell us:
+// a fellow can talk to their page for hours (30 stories a day, up to 8,000
+// characters each), and over twelve weeks their posts pile up too. Claude gets
+// the newest stories in full up to STORY_BUDGET characters and can open the
+// rest page by page; the newest posts in full and the rest as one line each.
+// The repeat check on drafts still compares against everything (checkContext).
+const STORY_BUDGET = 30_000;
+const OLDER_LISTED = 60;
+const RECENT_POSTS = 12;
+const RECENT_EARLIER = 10;
+// The longest text sent as one string. Longer text goes as a list of lines,
+// because file readers cut very long lines and a spoken story has no breaks.
+const LINE = 1_500;
+
+type Story = Awaited<ReturnType<typeof storiesOf>>[number];
+
+/** Long text as a list of lines of at most LINE characters, split at line breaks, then sentence ends, then spaces. */
+export function asLines(text: string): string | string[] {
+  if (text.length <= LINE) return text;
+  const out: string[] = [];
+  for (const line of text.split("\n")) {
+    let rest = line;
+    while (rest.length > LINE) {
+      const head = rest.slice(0, LINE);
+      const cut = Math.max(head.lastIndexOf(". "), head.lastIndexOf("? "), head.lastIndexOf("! "));
+      const at = cut > LINE / 3 ? cut + 1 : head.lastIndexOf(" ") > LINE / 3 ? head.lastIndexOf(" ") : LINE;
+      out.push(rest.slice(0, at).trim());
+      rest = rest.slice(at).trimStart();
+    }
+    out.push(rest);
+  }
+  return out;
+}
+/** Every string in a value, long ones as lists of lines. */
+function readable(v: unknown): unknown {
+  if (typeof v === "string") return asLines(v);
+  if (Array.isArray(v)) return v.map(readable);
+  if (v && typeof v === "object" && !(v instanceof Date)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, readable(x)]));
+  return v;
+}
+
+/** Stories (newest first) in pages of at most STORY_BUDGET characters; a page always holds at least one story. */
+export function storyPages<T extends { text: string }>(stories: T[]): T[][] {
+  const pages: T[][] = [];
+  let size = 0;
+  for (const s of stories) {
+    if (!pages.length || (pages[pages.length - 1].length && size + s.text.length > STORY_BUDGET)) { pages.push([]); size = 0; }
+    pages[pages.length - 1].push(s);
+    size += s.text.length;
+  }
+  return pages;
+}
+const agentStory = (s: Story) => ({ id: s.id, asked: s.prompt, said: s.text, spoken: s.spoken, on: istDate(s.createdAt) });
+
+/** One page of a fellow's stories in full, newest first (page 1 is the one in their context). */
+export async function agentStories(id: number, page: number) {
+  await ensureCreatorTables();
+  const f = await fellow(id);
+  if (!f || f.status === "removed") return null;
+  const pages = storyPages(await storiesOf(id));
+  return readable({ fellow: { id: f.id, name: f.name }, page, pages: pages.length, stories: (pages[page - 1] ?? []).map(agentStory) });
+}
+
+/** One fellow's context: the only student data Claude sees while writing for them. */
 export async function agentFellow(id: number) {
   await ensureCreatorTables();
   const f = await fellow(id);
@@ -786,15 +925,41 @@ export async function agentFellow(id: number) {
     postsOf(id), postsOf(null), draftsOf(id), storiesOf(id), earlierPostsOf(id), programmeRules(), playbook(), applicationOf(f.applicationId),
   ]);
   const usual = (k?: Kind) => median(all.filter((p) => measured(p) && (!k || p.kind === k)).map(imp));
-  return {
+  const pages = storyPages(stories);
+  const older = pages.slice(1).flatMap((ss, i) => ss.map((s) => ({ s, page: i + 2 })));
+  const recentPosts = own.slice(-RECENT_POSTS), olderPosts = own.slice(0, -RECENT_POSTS);
+  const recentEarlier = earlier.slice(-RECENT_EARLIER), olderEarlier = earlier.slice(0, -RECENT_EARLIER);
+  return readable({
     today,
+    howToRead: [
+      "This file is capped so it stays readable however much the fellow tells us.",
+      `Text longer than ${LINE.toLocaleString("en-US")} characters comes as a list of lines: read them in order as one text.`,
+      `stories holds their newest stories in full. olderStories lists the rest with the page each is on: ./dash GET /fellows/${f.id}/stories/<page> reads a page in full. Open older pages when you need more material.`,
+      `posts holds their newest ${RECENT_POSTS} posts in full and olderPosts the rest, one line each. earlierPosts and olderEarlierPosts work the same way.`,
+      "When you save drafts, the admin panel checks them for repeats against all of their posts, so you don't have to.",
+      "Every draft needs photoIdea: one sentence on which of the fellow's own photos to post with it. No post goes up without a photo.",
+    ],
     fellow: { id: f.id, name: f.name, firstName: f.first, college: f.college, field: f.field, cohort: f.cohort, paused: f.status === "paused", linkedin: f.linkedin, joined: f.joined, connectionsAtJoin: f.connectionsAtJoin },
     application,
     teamNotes: f.teamNotes,
     learnings: f.learnings,
-    stories: stories.map((s) => ({ asked: s.prompt, said: s.text, spoken: s.spoken, on: istDate(s.createdAt) })),
-    earlierPosts: earlier,
-    posts: own.map((p) => agentPost(p, own, all)),
+    stories: (pages[0] ?? []).map(agentStory),
+    olderStories: {
+      count: older.length,
+      pages: Math.max(0, pages.length - 1),
+      list: older.slice(0, OLDER_LISTED).map(({ s, page }) => ({ id: s.id, page, on: istDate(s.createdAt), asked: s.prompt, opening: s.text.slice(0, 160) + (s.text.length > 160 ? "…" : "") })),
+      notListed: Math.max(0, older.length - OLDER_LISTED),
+    },
+    earlierPosts: recentEarlier,
+    olderEarlierPosts: {
+      count: olderEarlier.length,
+      list: olderEarlier.slice(-OLDER_LISTED).map((e) => ({ id: e.id, title: e.title, postedOn: e.posted_on, impressions: e.impressions, opening: e.body.slice(0, 120) + (e.body.length > 120 ? "…" : "") })),
+    },
+    posts: recentPosts.map((p) => agentPost(p, own, all)),
+    olderPosts: olderPosts.map((p) => ({
+      id: p.id, title: p.title, kind: p.kind, due: p.due, status: p.status, impressions: p.impressions,
+      verdict: verdictOf(p, own, all)?.level ?? null, insight: p.insight ? p.insight.slice(0, 300) : null,
+    })),
     drafts: ds.map(agentDraft),
     takenDays: [...own.map((p) => p.due), ...ds.map((d) => d.due)].filter((d) => d >= today).sort(),
     programme: {
@@ -802,7 +967,7 @@ export async function agentFellow(id: number) {
       postsWithNumbers: all.filter(measured).length, usualImpressions: usual(), usualStudojoPost: usual("studojo"), usualPersonalPost: usual("personal"),
     },
     playbook: pb.text,
-  };
+  });
 }
 
 export async function agentFeedback() {
