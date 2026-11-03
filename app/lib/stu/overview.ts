@@ -433,6 +433,8 @@ export function alertsFromData(d: StuData, f: Filters, refs: Refs): Alert[] {
 export function journeyLabel(step: string): { label: string; phase: string } {
   for (const s of [...ANON_STEPS, ...USER_STEPS]) if ((s.journey as readonly string[]).includes(step)) return { label: s.label, phase: s.phase };
   if (step === "call_failed") return { label: "Call failed", phase: "Call" };
+  if (step === "page_view") return { label: "Viewed", phase: "Arrive" };
+  if (step === "page_engaged") return { label: "Stayed on a page", phase: "Arrive" };
   if (step === "call_ended") return { label: "Call ended", phase: "Call" };
   return { label: step, phase: "" };
 }

@@ -108,6 +108,10 @@ export interface WireUser {
   via: "call" | "typed" | null;
   /** first test payment, epoch ms */
   testPaid: number | null;
+  /** SITE-TRACK (3 Nov 2026): the device their journey rows carry (mobile, tablet, desktop), else their visitor's */
+  device?: string | null;
+  /** the in-app browser they came through (instagram, facebook, linkedin, whatsapp, other, none) */
+  inapp?: string | null;
 }
 
 export interface WireVisitor {
@@ -116,6 +120,7 @@ export interface WireVisitor {
   u: number;
   ch: string;
   device: string | null;
+  inapp?: string | null;
   city: string | null;
   /** step key -> IST days on which the visitor did it */
   days: Partial<Record<string, string[]>>;
@@ -155,6 +160,12 @@ export interface StuData {
   journeyLiveStart?: number | null;
   /** RESET: the time the pages count from (sinceReset), epoch ms */
   countFrom?: number;
+  /**
+   * REAL-VISITORS (4 Nov 2026): the first page_view, epoch ms. From here a visitor counts only with a page_view (the
+   * site's script ran in a browser); before it, the old count (visited_home, a server row, crawlers included). Null:
+   * no page_view in this log, so every visitor number is the old count.
+   */
+  pageViewStart?: number | null;
   /** per step: the truth table exists here */
   truthOn: Record<string, boolean>;
   users: WireUser[];
@@ -245,6 +256,7 @@ export function stepSource(d: StuData, key: string): string {
   if (!def) return "";
   const log = d.journeyLive ? "journey log" : "journey log (not live yet)";
   if (key === "signed_up") return def.truth ?? "";
+  if (key === "visited_home") return visitSource(d);
   if (def.truth && d.truthOn[key]) return `${def.truth}; time: earlier of it and the ${log}`;
   if (def.truth) return `${log} (table missing here: ${def.truth})`;
   return def.anon ? `${log}, browser beacon by visitor id` : log;
@@ -290,6 +302,8 @@ export interface Cell {
   visitors?: string[];
   /** not available in this environment yet */
   na?: boolean;
+  /** REAL-VISITORS: counts days before the first page_view, so crawlers are in it (the old count) */
+  old?: boolean;
 }
 
 const uniq = (xs: number[]) => [...new Set(xs)];
@@ -424,6 +438,21 @@ function actCell(d: StuData, kinds: string[], days: Set<string>, scope: Set<numb
   return { ...c, na };
 }
 
+/** REAL-VISITORS: the range reaches back before the first page_view (or there is none), so the visitor count there is the old one. */
+export function oldVisitCount(d: StuData, days: Iterable<string>): boolean {
+  if (d.pageViewStart == null) return true;
+  const first = istDay(d.pageViewStart);
+  for (const x of days) if (x <= first) return true;
+  return false;
+}
+
+/** Where the visitor count comes from, for the source notes. */
+export function visitSource(d: StuData): string {
+  const log = d.journeyLive ? "journey log" : "journey log (not live yet)";
+  if (d.pageViewStart == null) return `${log}: visited_home, distinct visitor ids. The old count, crawlers included: this log has no page_view yet`;
+  return `${log}: page_view (the site's script ran in a browser), distinct visitor ids; server-only hits (crawlers) are left out. Before ${fmtIst(d.pageViewStart)} the old count (visited_home, crawlers included), marked old`;
+}
+
 function visitorCell(d: StuData, f: Filters, key: string, days: Set<string>): Cell {
   if (!d.journeyLive) return { v: 0, users: [], visitors: [], na: true };
   const ids: string[] = [];
@@ -435,7 +464,9 @@ function visitorCell(d: StuData, f: Filters, key: string, days: Set<string>): Ce
       if (v.u >= 0) users.push(v.u);
     }
   }
-  return { v: ids.length, users: uniq(users), visitors: ids };
+  const out: Cell = { v: ids.length, users: uniq(users), visitors: ids };
+  if (key === "visited_home" && oldVisitCount(d, days)) out.old = true;
+  return out;
 }
 
 type CallPred = (c: WireCall) => boolean;
@@ -484,7 +515,7 @@ const T = (s: string) => () => s;
 const J = (d: StuData) => (d.journeyLive ? "journey log" : "journey log (not live yet)");
 
 export const DAILY_METRICS: DailyMetricDef[] = [
-  { key: "visitors", label: "Visitors", group: "Arrive", source: (d) => `${J(d)}: visited_home, distinct visitor ids`, cell: (d, f, days) => visitorCell(d, f, "visited_home", days) },
+  { key: "visitors", label: "Visitors", group: "Arrive", source: (d) => visitSource(d), cell: (d, f, days) => visitorCell(d, f, "visited_home", days) },
   { key: "stu_opens", label: "Stu opens", group: "Arrive", source: (d) => `${J(d)}: clicked_join, distinct visitor ids`, cell: (d, f, days) => visitorCell(d, f, "clicked_join", days) },
   { key: "saw_signup", label: "Saw sign-up", group: "Arrive", source: (d) => `${J(d)}: saw_signup, distinct visitor ids`, cell: (d, f, days) => visitorCell(d, f, "saw_signup", days) },
   { key: "signups", label: "Sign-ups", group: "Sign up", source: (d) => stepSource(d, "signed_up"), cell: (d, _f, days, s) => firstStepCell(d, "signed_up", days, s) },
@@ -759,7 +790,8 @@ export function dropoffs(d: StuData, f: Filters): { stuck: { key: string; n: str
 export const SOURCE_STEPS = ["signed_up", "call_started", "call_completed", "onboarded", "saw_jobs", "saved_job", "outreach_started", "first_email_sent", "paid"] as const;
 
 export function splitKey(u: WireUser, by: string): string {
-  if (by === "device") return u.touch?.device || "unknown";
+  if (by === "device") return u.device || u.touch?.device || "unknown";
+  if (by === "inapp") return u.inapp || "unknown";
   if (by === "city") return u.touch?.city || "unknown";
   if (by === "campaign") return u.touch?.campaign || "(none)";
   if (by === "source") return [u.touch?.source || "(none)", u.touch?.medium || ""].filter(Boolean).join(" / ");

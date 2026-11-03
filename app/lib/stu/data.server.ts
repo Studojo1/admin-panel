@@ -160,7 +160,7 @@ async function load(q: Q): Promise<StuData> {
       id: r.id, email: r.email ?? "", name: r.name ?? "",
       internal: internalReason({ id: r.id, email: r.email, role: r.role }, tests),
       created, joined: existing ? first : created, existing,
-      ch: "not_captured", touch: null, t: {}, j: {}, via: null, testPaid: null,
+      ch: "not_captured", touch: null, t: {}, j: {}, via: null, testPaid: null, device: null, inapp: null,
     });
   }
   const U = (id: unknown) => (typeof id === "string" ? idx.get(id) ?? -1 : -1);
@@ -273,6 +273,7 @@ async function load(q: Q): Promise<StuData> {
   const envs: { env: string; n: number }[] = [];
   let journeyStart: number | null = null;
   let journeyLiveStart: number | null = null;
+  let pageViewStart: number | null = null;
   const userNames = USER_STEPS.flatMap((s) => s.journey);
   const actKinds: Record<string, string> = {};
   for (const n of STEPS.find((s) => s.key === "opened_desk")!.journey) actKinds[n] = "desk";
@@ -318,13 +319,19 @@ async function load(q: Q): Promise<StuData> {
       if (i >= 0) fails.push([i, Number(r.at), String(r.reason || "unknown").slice(0, 60)]);
     }
     // Visitors before sign-in: one row a visitor, step and IST day.
+    // REAL-VISITORS (owner, 4 Nov 2026: "the crawlers should not be in our visitors"): from the first page_view
+    // (SITE-TRACK, the browser's own beacon) a visit is a page_view; visited_home is a server row any crawler makes,
+    // so it counts only before then (the old count, model.ts oldVisitCount).
+    const pv = (await q(`SELECT ${ms("min(at)")} AS at FROM ${J} WHERE step = 'page_view'`))[0]?.at;
+    pageViewStart = pv == null ? null : Number(pv);
+    const serverHitsAfter = pageViewStart == null ? "" : ` AND NOT (step = 'visited_home' AND at >= to_timestamp(${pageViewStart / 1000}))`;
     const anonNames = ANON_STEPS.flatMap((s) => s.journey);
     const vmap = new Map<string, WireVisitor>();
     for (const r of await q(`
       SELECT visitor_id, step, ${day("at")} AS day, ${ms("min(at)")} AS at FROM ${J}
-       WHERE visitor_id IS NOT NULL AND step = ANY(${lit(anonNames)})
+       WHERE visitor_id IS NOT NULL AND step = ANY(${lit([...anonNames, "page_view"])})${serverHitsAfter}
        GROUP BY 1, 2, 3 LIMIT 300000`)) {
-      const key = JOURNEY_NAME_TO_STEP[r.step];
+      const key = r.step === "page_view" ? "visited_home" : JOURNEY_NAME_TO_STEP[r.step];
       if (!key) continue;
       let v = vmap.get(r.visitor_id);
       if (!v) vmap.set(r.visitor_id, (v = { id: r.visitor_id, u: -1, ch: "not_captured", device: null, city: null, days: {}, first: {} }));
@@ -344,12 +351,36 @@ async function load(q: Q): Promise<StuData> {
       v.device = t?.device ?? null;
       v.city = t?.city ?? null;
     }
+    // SITE-TRACK: device and in-app browser ride in props on every row the site writes (the source has no device).
+    const deviceOf = new Map<string, { device: string | null; inapp: string | null }>();
+    for (const r of await q(`
+      SELECT DISTINCT ON (visitor_id) visitor_id, left(props->>'device', 20) AS device, left(props->>'inapp', 20) AS inapp FROM ${J}
+       WHERE visitor_id IS NOT NULL AND props ? 'device'
+       ORDER BY visitor_id, at LIMIT 300000`)) {
+      deviceOf.set(r.visitor_id, { device: r.device || null, inapp: r.inapp || null });
+      const v = vmap.get(r.visitor_id);
+      if (!v) continue;
+      v.device = r.device || v.device;
+      v.inapp = r.inapp || null;
+    }
     const links = [`SELECT DISTINCT visitor_id, user_id FROM ${J} WHERE visitor_id IS NOT NULL AND user_id IS NOT NULL`];
     if (src && hasCol("career_user_source", "visitor_id")) links.push(`SELECT visitor_id, user_id FROM ${T("career_user_source")} WHERE visitor_id IS NOT NULL AND user_id IS NOT NULL`);
     for (const r of await q(`${links.join(" UNION ")} LIMIT 300000`)) {
       const v = vmap.get(r.visitor_id);
       const i = U(r.user_id);
       if (v && i >= 0) v.u = i;
+      // A person's device: their visitor's, unless their own rows carry one (read below).
+      const dv = deviceOf.get(r.visitor_id);
+      if (i >= 0 && dv && !users[i].device) Object.assign(users[i], dv);
+    }
+    for (const r of await q(`
+      SELECT DISTINCT ON (user_id) user_id, left(props->>'device', 20) AS device, left(props->>'inapp', 20) AS inapp FROM ${J}
+       WHERE user_id IS NOT NULL AND props ? 'device'
+       ORDER BY user_id, at LIMIT 100000`)) {
+      const i = U(r.user_id);
+      if (i < 0 || !r.device) continue;
+      users[i].device = r.device;
+      users[i].inapp = r.inapp || users[i].inapp || null;
     }
     visitors.push(...vmap.values());
 
@@ -480,6 +511,7 @@ async function load(q: Q): Promise<StuData> {
     sourceLive: src,
     journeyStart,
     journeyLiveStart,
+    pageViewStart,
     truthOn,
     users,
     visitors,
