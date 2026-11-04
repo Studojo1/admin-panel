@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   STEPS, USER_STEPS, DAILY_METRICS, istDay, stepAt, cohortOf, funnel, sinceReset, countFrom, dailyTable, retention, ratios, dropoffs, sources,
-  activity, activeCell, splitKey, visitSource, oldVisitCount,
+  activity, activeCell, splitKey, visitSource, oldVisitCount, furthestStep,
 } from "../app/lib/stu/model.ts";
 
 const ms = (iso) => Date.parse(iso);
@@ -26,12 +26,50 @@ test("IST day boundaries: 18:29 UTC is still the same IST day, 18:30 UTC is the 
   assert.equal(istDay(ms("2026-11-01T18:30:00Z")), "2026-11-02");
 });
 
-test("the step list is one constant in plan order, with 4b after 4", () => {
-  const ns = STEPS.map((s) => s.n);
-  assert.deepEqual(ns.slice(0, 5), ["1", "2", "3", "4", "4b"]);
-  assert.equal(ns.at(-1), "23");
+test("STEP-ORDER: the steps are the product's real order, numbered 1 to 24 with no letters", () => {
+  assert.deepEqual(STEPS.map((s) => s.n), STEPS.map((_, i) => String(i + 1)));
   assert.equal(new Set(STEPS.map((s) => s.key)).size, STEPS.length);
   assert.ok(STEPS.every((s) => /^[a-z_]+$/.test(s.key)));
+  assert.deepEqual(USER_STEPS.map((s) => s.key), [
+    "signed_up", "reached_stu", "verified_phone", "whatsapp_linked",
+    "call_started", "resume_in_call", "first_question", "call_completed", "onboarded",
+    "opened_desk", "saw_jobs", "opened_job", "saw_plans", "chatted", "saved_job", "apply_click",
+    "outreach_started", "mailbox_connected", "first_email_sent", "first_reply", "paid",
+  ]);
+  // A phase is one run of steps, never split.
+  const runs = STEPS.map((s) => s.phase).filter((p, i, a) => i === 0 || a[i - 1] !== p);
+  assert.deepEqual(runs, ["Arrive", "Sign up", "Call", "Use", "Outreach", "Pay"]);
+});
+
+test("STEP-ORDER: someone who verified their phone on WhatsApp and never called stops before the call", () => {
+  // Signed in, the screen before the call loaded, the WhatsApp code sent (verified and linked by one message), no call.
+  const t0 = ms("2026-11-01T07:23:00Z");
+  const u = user({ t: { verified_phone: t0 + 51e3, whatsapp_linked: t0 + 51e3 }, j: { reached_stu: t0 + 1e3 } });
+  const d = data([u]);
+  const far = USER_STEPS[furthestStep(d, u)];
+  assert.equal(far.key, "whatsapp_linked");
+  assert.ok(Number(far.n) < Number(USER_STEPS.find((s) => s.key === "call_started").n), "WhatsApp linked is before the call");
+  const stuck = Object.fromEntries(dropoffs(d, F).stuck.map((s) => [s.key, s.cell.v]));
+  assert.equal(stuck.whatsapp_linked, 1);
+  assert.equal(stuck.onboarded, 0);
+});
+
+test("STEP-ORDER: a typical person's times read top to bottom", () => {
+  // A made-up person with the gaps prod showed (2 to 4 Nov 2026), in seconds after sign-in. Written out by hand, not
+  // from STEPS, so a wrong order in STEPS fails here.
+  const secs = {
+    reached_stu: 1, verified_phone: 50, whatsapp_linked: 50.2, call_started: 120, resume_in_call: 132, first_question: 135,
+    call_completed: 720, onboarded: 790, opened_desk: 792, saw_jobs: 802, opened_job: 837, saw_plans: 873, chatted: 1230,
+    saved_job: 1590, apply_click: 1620, outreach_started: 1600 + 60, mailbox_connected: 1800, first_email_sent: 2400,
+    first_reply: 90000, paid: 95000,
+  };
+  const t0 = ms("2026-11-01T06:00:00Z");
+  const at = Object.fromEntries(Object.entries(secs).map(([k, s]) => [k, t0 + s * 1000]));
+  const u = user({ t: at, j: at });
+  const d = data([u]);
+  const times = USER_STEPS.map((s) => stepAt(d, u, s.key));
+  assert.deepEqual(times, [...times].sort((a, b) => a - b));
+  assert.equal(USER_STEPS[furthestStep(d, u)].key, "paid");
 });
 
 test("a step with a table counts only who the table holds, at the earlier time", () => {

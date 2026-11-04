@@ -14,32 +14,46 @@
 // who did every earlier gate step. Branch steps (phone, chat, WhatsApp, plans)
 // and steps with no history before the journey log went live are not gates, so
 // one missing beacon never empties the funnel below it.
+//
+// STEP-ORDER (the owner, 4 Nov 2026: "this whole thing has to be a proper hierarchy ... how is your step number 5
+// happening before your step number 4?"): the list is the order people really go through the product, numbered 1 to 24
+// with no letters, so a person's times read top to bottom and "furthest step" means how far they got. From
+// career-agent main and every prod person's journey since 2 Nov:
+// - Sign up: Google sign-in, then /start loads (reached_stu), then its phone step before the call. One tap sends
+//   "LINK <code>" on WhatsApp: the number is verified and, with "Send my matches and updates on WhatsApp" ticked (the
+//   default), WhatsApp is linked by the same message (12 of 12 links so far). Verified without a link: the box
+//   unticked, or WhatsApp not open to them (2 of 11).
+// - Call: the call opens on the resume a few seconds before Stu's first question (7 of 8).
+// - Onboarded (career_profiles.onboarded_at) lands before the desk opens; the desk only opens for someone set up.
+// - Use: jobs, a job opened, then the plans (shown by the desk a few seconds later), then chat with Stu. Nobody can
+//   chat before the call: a WhatsApp message before it only gets the link back to the call (CALL-FIRST).
+// These numbers are the dashboard's; career-agent's docs/tracking-steps.md keeps its own. The journey names link them.
 
 export const STEPS = [
   { key: "visited_home", n: "1", label: "Visited", phase: "Arrive", anon: true, journey: ["visited_home"], truth: null },
   { key: "clicked_join", n: "2", label: "Opened Stu", phase: "Arrive", anon: true, journey: ["clicked_join"], truth: null },
   { key: "saw_signup", n: "3", label: "Saw sign-up", phase: "Arrive", anon: true, journey: ["signup_started", "saw_signup"], truth: null },
   { key: "signed_up", n: "4", label: "Signed up (Google)", phase: "Sign up", gate: true, journey: ["signed_up"], truth: 'public."user".created_at (first Stu activity for an older account)' },
-  { key: "verified_phone", n: "4b", label: "Verified phone", phase: "Sign up", journey: ["phone_verified", "verified_phone"], truth: "career_phones.verified_at" },
   { key: "reached_stu", n: "5", label: "Reached Stu", phase: "Sign up", journey: ["reached_stu"], truth: null },
-  { key: "call_started", n: "6", label: "Call started", phase: "Call", gate: true, journey: ["call_started"], truth: "career_voice_calls.started_at (onboarding, returning, build calls)" },
-  { key: "first_question", n: "7", label: "First question asked", phase: "Call", journey: ["first_question"], truth: "career_voice_calls.timeline mic_open" },
-  { key: "resume_in_call", n: "8", label: "Resume in call", phase: "Call", journey: ["resume_in_call"], truth: "career_voice_calls.resume (onboarding calls), timeline phase reading" },
-  { key: "call_completed", n: "9", label: "Call completed", phase: "Call", gate: true, journey: ["call_completed"], truth: "career_voice_calls status ready or finished" },
-  { key: "onboarded", n: "10", label: "Onboarded", phase: "Call", gate: true, journey: ["onboarded"], truth: "career_profiles.onboarded_at" },
-  { key: "opened_desk", n: "11", label: "Opened desk", phase: "Use", journey: ["desk_opened", "opened_desk"], truth: null },
-  { key: "saw_jobs", n: "12", label: "Saw jobs", phase: "Use", gate: true, journey: ["saw_jobs"], truth: "career_job_views.viewed_at (first view)" },
-  { key: "opened_job", n: "13", label: "Opened a job", phase: "Use", journey: ["job_opened", "opened_job"], truth: null },
-  { key: "saved_job", n: "14", label: "Saved a job", phase: "Use", journey: ["job_saved", "saved_job"], truth: "career_matches state saved or applied" },
-  { key: "apply_click", n: "15", label: "Apply click", phase: "Use", journey: ["apply_clicked", "apply_click"], truth: null },
-  { key: "chatted", n: "16", label: "Chatted with Stu", phase: "Use", journey: ["chatted"], truth: "career_messages, career_channel_messages, desk and interview calls (after onboarding)" },
-  { key: "whatsapp_linked", n: "17", label: "WhatsApp linked", phase: "Use", journey: ["whatsapp_linked"], truth: "career_channel_links (whatsapp, imessage)" },
-  { key: "outreach_started", n: "18", label: "Outreach started", phase: "Outreach", journey: ["outreach_started"], truth: "career_outreach find run (find_at), career_campaigns not draft" },
-  { key: "mailbox_connected", n: "19", label: "Mailbox connected", phase: "Outreach", journey: ["mailbox_connected"], truth: "career_mail_accounts.verified_at (not test inboxes)" },
-  { key: "first_email_sent", n: "20", label: "First email sent", phase: "Outreach", journey: ["first_email_sent", "email_sent"], truth: "career_emails sent, not dry run" },
-  { key: "first_reply", n: "21", label: "First reply", phase: "Outreach", journey: ["first_reply"], truth: "career_sequences.replied_at (not bounce, not dry run)" },
-  { key: "saw_plans", n: "22", label: "Saw plans", phase: "Pay", journey: ["saw_plans"], truth: null },
-  { key: "paid", n: "23", label: "Paid (real)", phase: "Pay", journey: ["paid"], truth: "career_credit_orders paid (not test), career_plans not test" },
+  { key: "verified_phone", n: "6", label: "Verified phone", phase: "Sign up", journey: ["phone_verified", "verified_phone"], truth: "career_phones.verified_at" },
+  { key: "whatsapp_linked", n: "7", label: "WhatsApp linked", phase: "Sign up", journey: ["whatsapp_linked"], truth: "career_channel_links (whatsapp, imessage)" },
+  { key: "call_started", n: "8", label: "Call started", phase: "Call", gate: true, journey: ["call_started"], truth: "career_voice_calls.started_at (onboarding, returning, build calls)" },
+  { key: "resume_in_call", n: "9", label: "Resume in call", phase: "Call", journey: ["resume_in_call"], truth: "career_voice_calls.resume (onboarding calls), timeline phase reading" },
+  { key: "first_question", n: "10", label: "First question asked", phase: "Call", journey: ["first_question"], truth: "career_voice_calls.timeline mic_open" },
+  { key: "call_completed", n: "11", label: "Call completed", phase: "Call", gate: true, journey: ["call_completed"], truth: "career_voice_calls status ready or finished" },
+  { key: "onboarded", n: "12", label: "Onboarded", phase: "Call", gate: true, journey: ["onboarded"], truth: "career_profiles.onboarded_at" },
+  { key: "opened_desk", n: "13", label: "Opened desk", phase: "Use", journey: ["desk_opened", "opened_desk"], truth: null },
+  { key: "saw_jobs", n: "14", label: "Saw jobs", phase: "Use", gate: true, journey: ["saw_jobs"], truth: "career_job_views.viewed_at (first view)" },
+  { key: "opened_job", n: "15", label: "Opened a job", phase: "Use", journey: ["job_opened", "opened_job"], truth: null },
+  { key: "saw_plans", n: "16", label: "Saw plans", phase: "Use", journey: ["saw_plans"], truth: null },
+  { key: "chatted", n: "17", label: "Chatted with Stu", phase: "Use", journey: ["chatted"], truth: "career_messages, career_channel_messages, desk and interview calls (after onboarding)" },
+  { key: "saved_job", n: "18", label: "Saved a job", phase: "Use", journey: ["job_saved", "saved_job"], truth: "career_matches state saved or applied" },
+  { key: "apply_click", n: "19", label: "Apply click", phase: "Use", journey: ["apply_clicked", "apply_click"], truth: null },
+  { key: "outreach_started", n: "20", label: "Outreach started", phase: "Outreach", journey: ["outreach_started"], truth: "career_outreach find run (find_at), career_campaigns not draft" },
+  { key: "mailbox_connected", n: "21", label: "Mailbox connected", phase: "Outreach", journey: ["mailbox_connected"], truth: "career_mail_accounts.verified_at (not test inboxes)" },
+  { key: "first_email_sent", n: "22", label: "First email sent", phase: "Outreach", journey: ["first_email_sent", "email_sent"], truth: "career_emails sent, not dry run" },
+  { key: "first_reply", n: "23", label: "First reply", phase: "Outreach", journey: ["first_reply"], truth: "career_sequences.replied_at (not bounce, not dry run)" },
+  { key: "paid", n: "24", label: "Paid (real)", phase: "Pay", journey: ["paid"], truth: "career_credit_orders paid (not test), career_plans not test" },
 ] as const satisfies readonly StepDef[];
 
 /**
@@ -519,8 +533,9 @@ export const DAILY_METRICS: DailyMetricDef[] = [
   { key: "stu_opens", label: "Stu opens", group: "Arrive", source: (d) => `${J(d)}: clicked_join, distinct visitor ids`, cell: (d, f, days) => visitorCell(d, f, "clicked_join", days) },
   { key: "saw_signup", label: "Saw sign-up", group: "Arrive", source: (d) => `${J(d)}: saw_signup, distinct visitor ids`, cell: (d, f, days) => visitorCell(d, f, "saw_signup", days) },
   { key: "signups", label: "Sign-ups", group: "Sign up", source: (d) => stepSource(d, "signed_up"), cell: (d, _f, days, s) => firstStepCell(d, "signed_up", days, s) },
-  { key: "phone", label: "Phone verified", group: "Sign up", source: (d) => stepSource(d, "verified_phone"), cell: (d, _f, days, s) => firstStepCell(d, "verified_phone", days, s) },
   { key: "reached", label: "Reached Stu", group: "Sign up", source: (d) => stepSource(d, "reached_stu"), cell: (d, _f, days, s) => firstStepCell(d, "reached_stu", days, s) },
+  { key: "phone", label: "Phone verified", group: "Sign up", source: (d) => stepSource(d, "verified_phone"), cell: (d, _f, days, s) => firstStepCell(d, "verified_phone", days, s) },
+  { key: "wa_linked", label: "WhatsApp linked", group: "Sign up", source: (d) => stepSource(d, "whatsapp_linked"), cell: (d, _f, days, s) => firstStepCell(d, "whatsapp_linked", days, s) },
   { key: "calls_started", label: "Calls started", group: "Call", source: T("career_voice_calls.started_at, onboarding, returning and build calls (each call)"), cell: (d, _f, days, s) => callCell(d, days, s, NON_DESK, (c) => c[5]) },
   { key: "calls_completed", label: "Calls completed", group: "Call", source: T("career_voice_calls status ready or finished, by end time (each call)"), cell: (d, _f, days, s) => callCell(d, days, s, (c) => NON_DESK(c) && c[10] === 1, (c) => c[6] ?? c[5]) },
   { key: "calls_failed", label: "Calls failed", group: "Call", source: (d) => `career_voice_calls status failed, plus ${J(d)} call_failed (mic denied, network, error)`, cell: (d, _f, days, s) => both(callCell(d, days, s, (c) => c[2] === "failed", (c) => c[4]), failCell(d, days, s)) },
@@ -548,7 +563,6 @@ export const DAILY_METRICS: DailyMetricDef[] = [
   { key: "apply_clicks", label: "Apply clicks", group: "Use", source: (d) => `${J(d)}: apply_click (each)`, cell: (d, _f, days, s) => actCell(d, ["apply"], days, s, "sum", !d.journeyLive) },
   { key: "chats", label: "Chat messages to Stu", group: "Use", source: T("career_messages (desk chat), career_channel_messages in (WhatsApp), desk and interview calls"), cell: (d, _f, days, s) => actCell(d, ["chat_desk", "chat_wa", "chat_call"], days, s, "sum") },
   { key: "chatters", label: "People who chatted", group: "Use", source: T("same tables, distinct people a day"), cell: (d, _f, days, s) => actCell(d, ["chat_desk", "chat_wa", "chat_call"], days, s, "users") },
-  { key: "wa_linked", label: "WhatsApp linked", group: "Use", source: (d) => stepSource(d, "whatsapp_linked"), cell: (d, _f, days, s) => firstStepCell(d, "whatsapp_linked", days, s) },
   { key: "digest_sent", label: "Digests sent", group: "Use", source: T("career_daily_sends whatsapp picks, sent_at"), cell: (d, _f, days, s) => actCell(d, ["digest_sent"], days, s, "sum") },
   { key: "digest_read", label: "Digests read", group: "Use", source: T("career_daily_sends whatsapp picks, read_at"), cell: (d, _f, days, s) => actCell(d, ["digest_read"], days, s, "sum") },
   { key: "digest_tapped", label: "Digests tapped", group: "Use", source: T("career_daily_sends whatsapp picks, tapped_at"), cell: (d, _f, days, s) => actCell(d, ["digest_tapped"], days, s, "sum") },
@@ -645,7 +659,7 @@ export function funnel(d: StuData, f: Filters, nested: boolean): { rows: FunnelR
     if (s.key === "paid") {
       const tp = pool.filter((i) => d.users[i].testPaid != null);
       rows.push({
-        key: "paid_test", n: "23", label: "Paid (test payments)", gate: false, test: true,
+        key: "paid_test", n: s.n, label: "Paid (test payments)", gate: false, test: true,
         cell: cellOf(tp), pctPrev: null, pctSignups: pct(tp.length, cohort.length), medianFromPrev: null,
         source: "career_credit_orders test, career_plans source test, career_outreach_credits test_purchase",
       });
