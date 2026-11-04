@@ -97,6 +97,10 @@ jobs:
           # Optional refs: the page says "key not set" until app-secrets has them.
           secret_ref_optional LEADSFORGE_API_KEY leadsforge-api-key
           secret_ref_optional APOLLO_API_KEY apollo-api-key
+          # /recordings plays the session recordings career-agent keeps in Azure Blob (the same storage account).
+          # Optional refs: the list shows without them, the player says the storage is not set.
+          secret_ref_optional AZURE_STORAGE_ACCOUNT_NAME azure-storage-account-name
+          secret_ref_optional AZURE_STORAGE_ACCOUNT_KEY azure-storage-account-key
           secret_audit
 
       - name: Two replicas across nodes, with a PDB
