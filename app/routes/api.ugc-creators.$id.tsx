@@ -3,7 +3,6 @@ import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 import {
-  HIRING_PIPELINE,
   MILESTONES,
   creatorStats,
   ensureCreatorTables,
@@ -73,10 +72,8 @@ async function detail(id: number) {
     stories,
     connections,
     stats,
-    milestones: [
-      ...MILESTONES.map((m) => ({ ...m, reached: stats.completedWeeks >= m.weeks })),
-      { ...HIRING_PIPELINE, weeks: null, reached: false },
-    ],
+    // The 12-week milestone is the hiring opportunity (4 Nov 2026), so no separate hiring step is listed.
+    milestones: MILESTONES.map((m) => ({ ...m, reached: stats.completedWeeks >= m.weeks })),
   };
 }
 
