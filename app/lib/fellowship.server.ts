@@ -817,12 +817,57 @@ export async function programmeDashboard() {
   };
 }
 
-/** One fellow's stories and earlier posts, for their drawer. */
+/** One fellow's stories, earlier posts and weekly LinkedIn analytics, for their drawer. */
 export async function fellowExtras(id: number) {
   await ensureCreatorTables();
   const f = await fellow(id);
   const app = f ? await applicationOf(f.applicationId) : null;
-  return { stories: await storiesOf(id), earlierPosts: await earlierPostsOf(id), applicationNotes: String(app?.team_notes ?? "") };
+  return { stories: await storiesOf(id), earlierPosts: await earlierPostsOf(id), applicationNotes: String(app?.team_notes ?? ""), weeks: await weeklyAnalyticsOf(id, 8) };
+}
+
+// ---------------------------------------------------------------------------
+// Weekly LinkedIn analytics: one row per upload (studojo.com parses it), newest per period kept.
+
+type Num = Record<string, number>;
+export interface AnalyticsWeek {
+  id: number; file: string; uploadedAt: string; periodStart: string | null; periodEnd: string | null;
+  totals: Num;
+  daily: Record<string, string | number>[];
+  posts: { url: string | null; publishedOn: string | null; impressions: number | null; engagements: number | null; postId: number | null }[];
+  demographics: Record<string, { value: string; pct: number }[]>;
+}
+const numbersOf = (v: unknown): Num => Object.fromEntries(Object.entries((v && typeof v === "object" ? v : {}) as Record<string, unknown>).filter(([, n]) => typeof n === "number" && Number.isFinite(n))) as Num;
+const numOrNull = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+function weekOfRow(r: Record<string, unknown>): AnalyticsWeek | null {
+  const d = jsonOf<Record<string, unknown> | null>(r.data, null);
+  if (!d || typeof d !== "object" || !isAnalyticsRef(r.file_url)) return null;
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") as Record<string, unknown>[] : []);
+  const demographics: AnalyticsWeek["demographics"] = {};
+  for (const [k, rows] of Object.entries((d.demographics as Record<string, unknown>) ?? {})) {
+    demographics[k] = list(rows).filter((x) => typeof x.value === "string" && typeof x.pct === "number").map((x) => ({ value: x.value as string, pct: x.pct as number }));
+  }
+  return {
+    id: Number(r.id), file: String(r.file_url), uploadedAt: iso(r.uploaded_at) ?? "",
+    periodStart: (r.period_start as string) ?? null, periodEnd: (r.period_end as string) ?? null,
+    totals: numbersOf(d.totals),
+    daily: list(d.daily).filter((x) => typeof x.date === "string").map((x) => ({ ...numbersOf(x), date: x.date as string })),
+    posts: list(d.posts).map((x) => ({
+      url: typeof x.url === "string" ? x.url : null, publishedOn: typeof x.publishedOn === "string" ? x.publishedOn : null,
+      impressions: numOrNull(x.impressions), engagements: numOrNull(x.engagements), postId: numOrNull(x.postId),
+    })),
+    demographics,
+  };
+}
+/** A fellow's newest uploads, one per period (the newest upload wins when a week is uploaded twice), newest week first. */
+async function weeklyAnalyticsOf(id: number, limit: number, ex: Exec = db): Promise<AnalyticsWeek[]> {
+  const rows = (await ex.execute(sql`
+    SELECT DISTINCT ON (COALESCE(period_end::text, id::text)) id, file_url, to_char(period_start, 'YYYY-MM-DD') AS period_start,
+      to_char(period_end, 'YYYY-MM-DD') AS period_end, data, uploaded_at
+    FROM ugc_creator_analytics WHERE creator_id = ${id}
+    ORDER BY COALESCE(period_end::text, id::text), uploaded_at DESC
+  `)).rows as Record<string, unknown>[];
+  return rows.map(weekOfRow).filter((w): w is AnalyticsWeek => !!w)
+    .sort((a, b) => String(b.periodEnd ?? b.uploadedAt).localeCompare(String(a.periodEnd ?? a.uploadedAt))).slice(0, limit);
 }
 
 // ---------------------------------------------------------------------------
@@ -963,8 +1008,8 @@ export async function agentFellow(id: number) {
   const f = await fellow(id);
   if (!f || f.status === "removed") return null;
   const today = istDate();
-  const [own, all, ds, stories, earlier, rules, pb, application] = await Promise.all([
-    postsOf(id), postsOf(null), draftsOf(id), storiesOf(id), earlierPostsOf(id), programmeRules(), playbook(), applicationOf(f.applicationId),
+  const [own, all, ds, stories, earlier, rules, pb, application, weeks] = await Promise.all([
+    postsOf(id), postsOf(null), draftsOf(id), storiesOf(id), earlierPostsOf(id), programmeRules(), playbook(), applicationOf(f.applicationId), weeklyAnalyticsOf(id, 4),
   ]);
   const usual = (k?: Kind) => median(all.filter((p) => measured(p) && (!k || p.kind === k)).map(imp));
   const pages = storyPages(stories);
@@ -978,6 +1023,7 @@ export async function agentFellow(id: number) {
       `Text longer than ${LINE.toLocaleString("en-US")} characters comes as a list of lines: read them in order as one text.`,
       `stories holds their newest stories in full. olderStories lists the rest with the page each is on: ./dash GET /fellows/${f.id}/stories/<page> reads a page in full. Open older pages when you need more material.`,
       `posts holds their newest ${RECENT_POSTS} posts in full and olderPosts the rest, one line each. earlierPosts and olderEarlierPosts work the same way.`,
+      "weeklyAnalytics is their last 4 weekly LinkedIn exports, newest first: what their whole account did that week, day by day, and each post in it (ourPostId links it to posts).",
       "When you save drafts, the admin panel checks them for repeats against all of their posts, so you don't have to.",
       "Every draft needs photoIdea: one sentence on which of the fellow's own photos to post with it. No post goes up without a photo.",
       "A story's readBack is their page's quick read of one talk (covers lists the saved parts it read): usable is what can become a post, leaveOut is what to skip. answers names the story a follow-up answer belongs to. What they said wins over the readBack.",
@@ -993,6 +1039,14 @@ export async function agentFellow(id: number) {
       list: older.slice(0, OLDER_LISTED).map(({ s, page }) => ({ id: s.id, page, on: istDate(s.createdAt), asked: s.prompt, opening: s.text.slice(0, 160) + (s.text.length > 160 ? "…" : "") })),
       notListed: Math.max(0, older.length - OLDER_LISTED),
     },
+    // Their weekly LinkedIn exports, newest first: account totals, day by day, every post in the file
+    // (ourPostId when it's one of theirs here) and who saw their content (top 5 of each kind).
+    weeklyAnalytics: weeks.map((w) => ({
+      period: `${w.periodStart ?? "?"} to ${w.periodEnd ?? "?"}`, uploadedOn: w.uploadedAt ? istDate(w.uploadedAt) : null,
+      totals: w.totals, daily: w.daily,
+      posts: w.posts.map((p) => ({ ourPostId: p.postId, publishedOn: p.publishedOn, impressions: p.impressions, engagements: p.engagements, url: p.url })),
+      whoSaw: Object.fromEntries(Object.entries(w.demographics).map(([k, rows]) => [k, rows.slice(0, 5).map((r) => `${r.value} ${Math.round(r.pct * 1000) / 10}%`)])),
+    })),
     earlierPosts: recentEarlier,
     olderEarlierPosts: {
       count: olderEarlier.length,
