@@ -14,6 +14,7 @@ import {
 import { Chart } from "react-chartjs-2";
 import { AdminHeader, StatCard } from "~/components";
 import { CARD, DrillModal } from "~/components/stu/ui";
+import { VisitorsSummary } from "~/components/stu/visitors-summary";
 import {
   type Drill, type Env, type SectionState, Card, KIT_CSS, N, PALETTE, Seg, crosshair, dayLabel, drillPeople, istTime, useSections,
 } from "~/components/stu/overview-kit";
@@ -64,6 +65,7 @@ const PAGES = [
   { to: "/ratios", label: "Ratios", note: "The headline conversions" },
   { to: "/usage", label: "Usage", note: "Engagement, power users, calls, live feed", fresh: true },
   { to: "/auditor", label: "Auditor", note: "Everything that failed, with who and why", fresh: true },
+  { to: "/visitors", label: "Visitors", note: "Real people, crawlers, sources and drop-offs", fresh: true },
 ];
 
 const SERIES = { signups: "#10b981", onboarded: "#f59e0b", active: "#ec4899", paid: "#a855f7" };
@@ -200,6 +202,11 @@ export default function StuOverview() {
         )}
 
         <div id="kpis" className="scroll-mt-28"><Headline s={S("kpis")} drill={openDrill} range={range} today={today} end={end} /></div>
+
+        {/* VISITORS (4 Nov 2026): real visitors against crawlers and bots, top sources, the biggest drop-off; tables on /visitors. */}
+        <div id="visitors" className="mt-6 scroll-mt-28">
+          <VisitorsSummary start={start} end={end} internal={internal} enabled={Boolean(isAuthorized)} href={`/visitors?${new URLSearchParams({ range, start, end, ...(internal ? { internal: "1" } : {}) })}`} />
+        </div>
 
         <div className="mt-6"><Insights s={S("insights")} drill={openDrill} qs={qs} /></div>
 
