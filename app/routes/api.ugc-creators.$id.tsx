@@ -16,7 +16,6 @@ import {
 // are never changed here.
 
 const KINDS = ["personal", "studojo"] as const;
-const PARTNERSHIP_LABEL = /in partnership with studojo|#partnership|#ad\b|#sponsored|paid partnership/i;
 const unauthorized = () => Response.json({ error: "Unauthorized" }, { status: 401 });
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\r\n?/g, "\n").trim().slice(0, max) : "");
 
@@ -41,11 +40,7 @@ function postFields(body: Record<string, unknown>) {
   if (postBody.length < 20) return { error: "The post text is too short." };
   if (!kind) return { error: "Pick whether it's their story or a Studojo post." };
   if (!dueDate) return { error: "Pick a due date." };
-  // The creator gets free Studojo access, so a post about Studojo is an
-  // endorsement and has to say so (ASCI influencer rules, CCPA guidelines).
-  if (kind === "studojo" && !PARTNERSHIP_LABEL.test(postBody)) {
-    return { error: 'Studojo posts must say they\'re a partnership. Add a line like "In partnership with Studojo".' };
-  }
+  // The partnership line on Studojo posts is optional (the team's decision, 4 Nov 2026).
   return { title, body: postBody, kind, dueDate };
 }
 
