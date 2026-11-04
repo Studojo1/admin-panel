@@ -214,6 +214,15 @@ async function createTables() {
     WHERE id = 1 AND rules->'postsPerWeek' = '3'::jsonb AND rules->'postingDays' = '["Tue", "Thu", "Sat"]'::jsonb
       AND NOT rules ? 'studojoPerWeek'
   `);
+  // 4 Nov 2026: the founder dropped the 2-week certificate and made the 12-week milestone a hiring opportunity
+  // for top performers (which replaces the separate hiring step). Applied once, only while the row still has
+  // the 2-week milestone, so a later edit is never overwritten.
+  await db.execute(sql`
+    UPDATE ugc_programme
+    SET rules = jsonb_set(rules, '{milestones}', ${JSON.stringify(PROGRAMME_RULES.milestones)}::jsonb) || '{"hiringPipeline": null}'::jsonb,
+        updated_at = NOW(), updated_by = 'founder, 4 Nov 2026'
+    WHERE id = 1 AND rules->'milestones' @> '[{"id": "trial"}]'::jsonb
+  `);
 }
 
 /** 32 url-safe characters, kept for API use. */
@@ -291,16 +300,11 @@ export interface PostRow {
   updated_at: string;
 }
 
+// The founder (4 Nov 2026): no 2-week certificate, and the 12-week milestone is a hiring opportunity for top performers.
 export const MILESTONES = [
-  { id: "trial", weeks: 2, name: "2-week certificate", detail: "A certificate for completing the 2-week trial." },
-  {
-    id: "month",
-    weeks: 4,
-    name: "1-month intern certificate",
-    detail: "Top performers are invited to continue. They earn a 1-month certificate as an intern and get first preference when Studojo is hiring.",
-  },
+  { id: "month", weeks: 4, name: "1-month intern certificate", detail: "A certificate for your first month as a Growth Fellowship intern." },
   { id: "outreach", weeks: 8, name: "The new outreach tool", detail: "Exclusive access to Studojo's new outreach tool." },
-  { id: "long", weeks: 12, name: "3-month certificate", detail: "For ongoing participation in the programme." },
+  { id: "long", weeks: 12, name: "Hiring opportunity for top performers", detail: "Top performers are considered for roles at Studojo or referred to people hiring in our network." },
 ] as const;
 
 export const HIRING_PIPELINE = {
@@ -328,7 +332,8 @@ export const PROGRAMME_RULES = {
   weeks:
     "Weeks run Monday to Sunday, India time. A week is complete when it has posts and every one is posted. Posts the team has blocked don't count.",
   milestones: MILESTONES.map((m) => ({ id: m.id, weeks: m.weeks, name: m.name, detail: m.detail })),
-  hiringPipeline: HIRING_PIPELINE,
+  // The 12-week milestone is now the hiring opportunity, so there is no separate hiring step.
+  hiringPipeline: null,
 };
 
 export interface CreatorStats {
