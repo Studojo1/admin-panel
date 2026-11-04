@@ -185,6 +185,16 @@ test("crawlers: hits by bot family and path group; our audit bot only with inter
   assert.equal(none.crawlers.recorded, false);
 });
 
+test("a visitor with no page_view who began sign-up or became an account is a person, not a likely bot", () => {
+  const r = buildReport(input({
+    rows: [row("p", "visited_home"), row("p", "signup_started"), row("q", "visited_home"), row("b", "visited_home")],
+    people: { q: { internal: false, joined: null, steps: {} } },
+  }));
+  assert.equal(r.summary.likelyBots, 1);
+  assert.equal(r.summary.noPageView, 2);
+  assert.equal(r.summary.real, 0, "real still needs a page_view, as the Overview's tile counts it");
+});
+
 test("before the site sent page_view, a visited_home is neither real nor a bot", () => {
   const rows = [row("old", "visited_home", { at: T("09:00") }), row("new", "visited_home", { at: T("11:00") }), row("p", "page_view", { at: T("11:05") })];
   const r = buildReport(input({ rows, pageViewStart: T("10:00") }));

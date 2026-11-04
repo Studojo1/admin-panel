@@ -5,7 +5,7 @@
 // the IST window and ROW_CAP + 1 rows (one over the cap says "capped").
 import { sql, type SQL } from "drizzle-orm";
 import db from "~/lib/db.server";
-import { internalReason, testUsers } from "./data.server";
+import { internalReason, stuData, testUsers } from "./data.server";
 import {
   type AuditReport, type AuditRow, ROW_CAP, auditWindow, autopayWords, buildWords, callEndWords, callFailedWords, fmtSecs, inr,
   mailWords, maskNumber, orderWords, runWords, ticketWords, toolWords, waWords,
@@ -123,6 +123,7 @@ async function load(start: string, end: string, internal: boolean): Promise<Audi
              CASE WHEN jsonb_typeof(c.timeline) = 'array' THEN jsonb_array_length(c.timeline) END AS events,
              CASE WHEN jsonb_typeof(c.timeline) = 'array' AND jsonb_array_length(c.timeline) > 0 THEN left((c.timeline -> -1)::text, 120) END AS last_event,
              CASE WHEN jsonb_typeof(c.turns) = 'array' THEN jsonb_array_length(c.turns) END AS turns,
+             (jsonb_typeof(c.timeline) = 'array' AND c.timeline @> '[["dropped"]]'::jsonb) AS dropped,
              ${sql.raw(carried)} AS carried_to
         FROM ${T("career_voice_calls")} c
        WHERE ${inWindow("c.created_at")}
@@ -152,7 +153,7 @@ async function load(start: string, end: string, internal: boolean): Promise<Audi
       }
       drafts.push({
         id: `call:${r.id}`, group: "call_end", kind: "call_unfinished", code: String(r.error || r.status), at: Number(r.at), user: r.user_id ?? null,
-        reason: `${callEndWords(String(r.status), r.error ?? null)}${r.mode !== "onboarding" ? ` (${r.mode} call)` : ""}`,
+        reason: `${callEndWords(String(r.status), r.error ?? null, Boolean(r.dropped))}${r.mode !== "onboarding" ? ` (${r.mode} call)` : ""}`,
         level: r.carried_to ? "warn" : "fail", detail,
       });
     }
@@ -391,12 +392,15 @@ async function load(start: string, end: string, internal: boolean): Promise<Audi
     }
   }
   const tests = testUsers();
+  // ADMIN-FIX (5 Nov 2026): the Stu dataset's internal flags add the shared-browser rule (an account on the same
+  // visitor id as a team account), so the Auditor leaves out the same people as every other Stu page.
+  const shared = new Map((await stuData().catch(() => null))?.users.filter((u) => u.internal).map((u) => [u.id, u.internal!]) ?? []);
   const rows: AuditRow[] = [];
   for (const d of drafts) {
     const p = d.user ? people.get(d.user) : undefined;
     const email = p?.email ?? d.email ?? "";
     const name = p?.name ?? d.name ?? "";
-    const why = d.user || email.includes("@") ? internalReason({ id: d.user ?? "", email, role: p?.role ?? null }, tests) : null;
+    const why = (d.user || email.includes("@") ? internalReason({ id: d.user ?? "", email, role: p?.role ?? null }, tests) : null) ?? (d.user ? shared.get(d.user) ?? null : null);
     const internalWhy = why ?? (d.testRow ? "test row" : null);
     if (internalWhy && !internal) continue;
     const { testRow: _t, ...rest } = d;

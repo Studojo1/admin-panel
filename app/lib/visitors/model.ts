@@ -9,7 +9,8 @@
 //   rule the Stu pages use. Most also have that day's visited_home; one without it reloaded a cached page or opened a
 //   page that writes no visited_home, and is still a person (realNoServerRow says how many).
 // - Likely bot: a visited_home in the range and no page_view in it. The server row passed isbot, the browser never
-//   ran the page's script: a headless scraper with a browser's user agent.
+//   ran the page's script: a headless scraper with a browser's user agent. ADMIN-FIX (5 Nov 2026): not when the
+//   visitor id began sign-up or became an account; that is a person whose page_view did not arrive (noPageView).
 // - Declared crawler: a page render whose user agent names a bot (Googlebot, GPTBot, ...). Never in the journey log;
 //   counted by the site in public.site_bot_hits by IST day, bot family and path group (hits, not people).
 // Internal: a visitor whose id is linked to a staff, @studojo.com, test or guest account is left out, the rule of
@@ -95,7 +96,7 @@ export const FUNNEL = [
   { key: "cta", label: "Saw Start", hint: "A Start button was at least half on screen for half a second" },
   { key: "clicked", label: "Clicked Start", hint: "Clicked a Start or join button (clicked_join)" },
   { key: "began", label: "Began sign-up", hint: "Reached the sign-up step (signup_started)" },
-  { key: "signed_up", label: "Signed up", hint: "Joined Stu on or after the first day of the range" },
+  { key: "signed_up", label: "Signed up", hint: "Joined Stu on or after the first day of the range, from a visit that sent a page_view (sign-ups with no tracked visit are on the Overview's Sign-ups)" },
   { key: "reached_stu", label: "Reached Stu", hint: "Opened Stu after signing in, on or after the first day of the range" },
   { key: "call_started", label: "Call started", hint: "From the calls table" },
   { key: "call_completed", label: "Call completed", hint: "From the calls table" },
@@ -266,6 +267,8 @@ export interface VisitorsReport {
     excluded: number;
     /** visitors seen only before the site sent page_view (pageViewStart): neither real nor bot */
     beforeTracking: number;
+    /** visitors with no page_view who began sign-up or became an account: people, so not likely bots (and not real visitors, which need a page_view) */
+    noPageView: number;
     pageViewStart: number | null;
     top: { key: string; label: string; real: number; signedUp: number; pct: number | null }[];
     biggestDrop: { key: DropKey; label: string; n: number; of: number; pct: number | null } | null;
@@ -346,7 +349,7 @@ export function dropOf(flags: Set<string>): DropKey {
   return "bounced";
 }
 
-function visitsOf(input: VisitorsInput): { visits: Visit[]; excluded: number; beforeTracking: number } {
+function visitsOf(input: VisitorsInput): { visits: Visit[]; excluded: number; beforeTracking: number; noPageView: number } {
   const startMs = dayStart(input.start);
   const byV = new Map<string, SiteRow[]>();
   for (const r of input.rows) {
@@ -358,6 +361,7 @@ function visitsOf(input: VisitorsInput): { visits: Visit[]; excluded: number; be
   const visits: Visit[] = [];
   let excluded = 0;
   let beforeTracking = 0;
+  let noPageView = 0;
   const pvStart = input.pageViewStart ?? null;
   for (const [id, list] of byV) {
     list.sort((a, b) => a.at - b.at);
@@ -372,6 +376,10 @@ function visitsOf(input: VisitorsInput): { visits: Visit[]; excluded: number; be
     const real = pvs.length > 0;
     if (!real && pvStart != null && !vhs.some((r) => r.at >= pvStart)) {
       beforeTracking++;
+      continue;
+    }
+    if (!real && (person || list.some((r) => r.step === "signup_started" || r.step === "saw_signup"))) {
+      noPageView++;
       continue;
     }
     const first = real ? pvs[0] : vhs[0];
@@ -425,7 +433,7 @@ function visitsOf(input: VisitorsInput): { visits: Visit[]; excluded: number; be
       noServerRow: real && ![...realDays].some((d) => serverDays.has(d)), lastSection, signedDay,
     });
   }
-  return { visits, excluded, beforeTracking };
+  return { visits, excluded, beforeTracking, noPageView };
 }
 
 function topDetail(xs: string[]): string {
@@ -458,7 +466,7 @@ function dropRow(key: string, label: string, vs: Visit[]): DropRow {
 }
 
 export function buildReport(input: VisitorsInput): VisitorsReport {
-  const { visits, excluded, beforeTracking } = visitsOf(input);
+  const { visits, excluded, beforeTracking, noPageView } = visitsOf(input);
   const real = visits.filter((v) => v.real);
   const bots = visits.filter((v) => !v.real);
 
@@ -556,6 +564,7 @@ export function buildReport(input: VisitorsInput): VisitorsReport {
       realNoServerRow: real.filter((v) => v.noServerRow).length,
       excluded,
       beforeTracking,
+      noPageView,
       pageViewStart: input.pageViewStart ?? null,
       top,
       biggestDrop: bd ? { key: bd, label: DROP_LABEL[bd], n: dropTotal.by[bd], of: dropTotal.total, pct: pct(dropTotal.by[bd], dropTotal.total) } : null,

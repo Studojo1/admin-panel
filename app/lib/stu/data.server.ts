@@ -14,14 +14,19 @@ import { CHANNELS, channelOf } from "~/lib/utm-dictionary";
 import {
   ACTIVITY_EVENTS, ANON_STEPS, EXTRA_EVENTS, JOURNEY_NAME_TO_STEP, STEPS, USER_STEPS,
   type Act, type JourneyStepRow, type StuData, type Touch, type WireCall, type WireFail, type WireUser, type WireVisitor,
-  countFrom, sinceReset,
+  countFrom, markSharedBrowsers, sinceReset,
 } from "./model";
+
+export { SHARED_BROWSER } from "./model";
 
 const S = "career_agent";
 const J = `${S}.career_journey_events`;
 
-/** OUTREACH_BUY_TEST_USERS, as career-agent reads it, plus the known list. */
-const DEFAULT_TEST_USERS = ["jeremy.zac@gmail.com", "studojo@gmail.com", "vivaan.nagpal19@gmail.com"];
+/**
+ * OUTREACH_BUY_TEST_USERS, as career-agent reads it, plus the known list: team accounts that are not admin, ops or
+ * @studojo.com (ADMIN-FIX 5 Nov 2026: the second account of a team member, role user, was counted as a student).
+ */
+const DEFAULT_TEST_USERS = ["jeremy.zac@gmail.com", "studojo@gmail.com", "vivaan.nagpal19@gmail.com", "ayushiladha721@gmail.com"];
 export function testUsers(): string[] {
   const env = (process.env.OUTREACH_BUY_TEST_USERS || "").split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
   return [...new Set([...DEFAULT_TEST_USERS, ...env])];
@@ -41,7 +46,14 @@ const TABLES = [
   "career_job_views", "career_matches", "career_threads", "career_messages", "career_channel_links",
   "career_channel_messages", "career_planner_messages", "career_outreach", "career_campaigns", "career_mail_accounts",
   "career_emails", "career_sequences", "career_daily_sends", "career_plans", "career_credit_orders", "career_outreach_credits",
+  "career_plan_grants", "career_subscriptions",
 ];
+
+/**
+ * ADMIN-FIX (5 Nov 2026): the WhatsApp verification message ("LINK K7M2PQ", sent by one tap at sign-up) is not a chat
+ * with Stu. Only the bare code form, so a real message that starts with "link" still counts.
+ */
+const LINK_CODE = `coalesce(body, '') ~* '^\\s*link\\s+[a-z0-9]{4,12}\\s*$'`;
 
 /** epoch ms of a timestamptz, as a JS number */
 const ms = (x: string) => `(extract(epoch from (${x})) * 1000)::float8`;
@@ -99,7 +111,11 @@ export function channelOfTouch(raw: any): string {
   return channelOf(t.source, t.medium, host);
 }
 
-async function load(q: Q): Promise<StuData> {
+async function load(q: Q, from: number = countFrom(process.env.STU_COUNT_FROM)): Promise<StuData> {
+  // ADMIN-FIX (5 Nov 2026): the journey reads start at the count-from line (sinceReset drops what came before anyway),
+  // so the minute's read stays small as the log grows. The account links and first sources stay whole: a first touch
+  // and a shared browser can be older than the line.
+  const since = `at >= to_timestamp(${from / 1000})`;
   // Which tables and columns this environment has (and this login may read):
   // the career_agent schema can run ahead on one environment, and the journey
   // log is new. A table missing here shows its metrics as not available.
@@ -131,7 +147,7 @@ async function load(q: Q): Promise<StuData> {
   // signed_up is left out: its time is the account's created_at, which for an older account is not its first Stu step.
   // So is career_user_source.signed_up_at, the same account date (the owner, 2 Nov 2026: an old studojo.com account's
   // first time on the platform is a new sign-up that day, on every counter). The row still lists the person.
-  if (journey) pu.push(`SELECT user_id, min(at) FROM ${J} WHERE user_id IS NOT NULL AND step <> ALL(${lit([...ANON_STEPS.flatMap((s) => s.journey), "signed_up"])}) GROUP BY 1`);
+  if (journey) pu.push(`SELECT user_id, min(at) FROM ${J} WHERE user_id IS NOT NULL AND ${since} AND step <> ALL(${lit([...ANON_STEPS.flatMap((s) => s.journey), "signed_up"])}) GROUP BY 1`);
   if (journey) pu.push(`SELECT user_id, NULL::timestamptz FROM ${J} WHERE user_id IS NOT NULL AND step = 'signed_up' GROUP BY 1`);
   if (src) pu.push(`SELECT user_id, NULL::timestamptz FROM ${T("career_user_source")} WHERE user_id IS NOT NULL`);
   const userRows = pu.length
@@ -191,7 +207,7 @@ async function load(q: Q): Promise<StuData> {
   {
     const parts: string[] = [];
     if (has("career_messages") && has("career_threads")) parts.push(`SELECT t.user_id, m.created_at AS at FROM ${T("career_messages")} m JOIN ${T("career_threads")} t ON t.id = m.thread_id WHERE m.role = 'user'`);
-    if (has("career_channel_messages")) parts.push(`SELECT user_id, created_at FROM ${T("career_channel_messages")} WHERE direction = 'in' AND user_id IS NOT NULL`);
+    if (has("career_channel_messages")) parts.push(`SELECT user_id, created_at FROM ${T("career_channel_messages")} WHERE direction = 'in' AND user_id IS NOT NULL AND NOT ${LINK_CODE}`);
     if (has("career_planner_messages")) parts.push(`SELECT user_id, created_at FROM ${T("career_planner_messages")} WHERE role = 'user'`);
     if (has("career_voice_calls") && hasCol("career_voice_calls", "mode")) parts.push(`SELECT user_id, started_at FROM ${T("career_voice_calls")} WHERE started_at IS NOT NULL AND mode IN ('desk', 'interview', 'returning')`);
     if (parts.length && has("career_profiles"))
@@ -232,11 +248,24 @@ async function load(q: Q): Promise<StuData> {
   if (has("career_emails")) truth.first_email_sent = `SELECT e.user_id, ${ms("min(coalesce(e.sent_at, e.created_at))")} AS at FROM ${emailFrom} WHERE e.status = 'sent' AND NOT (${emailDry}) GROUP BY 1`;
   const seqDry = hasCol("career_sequences", "dry_run") ? "coalesce(dry_run, false)" : "false";
   if (has("career_sequences")) truth.first_reply = `SELECT user_id, ${ms("min(replied_at)")} AS at FROM ${T("career_sequences")} WHERE replied_at IS NOT NULL AND reply_how IS DISTINCT FROM 'bounce' AND NOT ${seqDry} GROUP BY 1`;
+  // ADMIN-FIX (5 Nov 2026): paid means money came in. An order counts with amount less refunds above zero (a free
+  // coupon order is not a payment); a plan row only when it is not a test or a staff grant; and each autopay charge
+  // (career-agent writes one career_plan_grants row per charge, source autopay, revoked when refunded), at the
+  // subscription's amount, unless a credit order already holds that payment id.
   const refunded = hasCol("career_credit_orders", "refunded_paise") ? "coalesce(refunded_paise, 0)" : "0";
+  const money = `(amount_paise - ${refunded}) > 0`;
+  const PLAN_NOT_PAID = lit(["test", "grant"]);
+  const autopayOn = hasCol("career_plan_grants", "subscription_id") && hasCol("career_subscriptions", "razorpay_subscription_id") && hasCol("career_subscriptions", "test");
+  const notAnOrder = hasCol("career_credit_orders", "razorpay_payment_id")
+    ? ` AND NOT EXISTS (SELECT 1 FROM ${T("career_credit_orders")} o WHERE o.razorpay_payment_id = g.payment_id)`
+    : "";
+  const charges = (test: boolean) => `${T("career_plan_grants")} g JOIN ${T("career_subscriptions")} s ON s.razorpay_subscription_id = g.subscription_id
+       WHERE g.source = 'autopay' AND g.payment_id IS NOT NULL AND g.revoked_at IS NULL AND ${test ? "" : "NOT "}s.test${notAnOrder}`;
   {
     const parts: string[] = [];
-    if (has("career_credit_orders")) parts.push(`SELECT user_id, coalesce(paid_at, created_at) AS at FROM ${T("career_credit_orders")} WHERE status IN ('paid', 'refunded') AND NOT test`);
-    if (has("career_plans")) parts.push(`SELECT user_id, updated_at FROM ${T("career_plans")} WHERE plan <> 'free' AND source <> 'test'`);
+    if (has("career_credit_orders")) parts.push(`SELECT user_id, coalesce(paid_at, created_at) AS at FROM ${T("career_credit_orders")} WHERE status IN ('paid', 'refunded') AND NOT test AND ${money}`);
+    if (has("career_plans")) parts.push(`SELECT user_id, updated_at FROM ${T("career_plans")} WHERE plan <> 'free' AND source <> ALL(${PLAN_NOT_PAID})`);
+    if (autopayOn) parts.push(`SELECT g.user_id, g.created_at FROM ${charges(false)}`);
     if (parts.length) truth.paid = `SELECT user_id, ${ms("min(at)")} AS at FROM (${parts.join(" UNION ALL ")}) x GROUP BY 1`;
   }
   const truthOn: Record<string, boolean> = {};
@@ -256,6 +285,7 @@ async function load(q: Q): Promise<StuData> {
     if (has("career_credit_orders")) parts.push(`SELECT user_id, coalesce(paid_at, created_at) AS at FROM ${T("career_credit_orders")} WHERE status IN ('paid', 'refunded') AND test`);
     if (has("career_plans")) parts.push(`SELECT user_id, updated_at FROM ${T("career_plans")} WHERE plan <> 'free' AND source = 'test'`);
     if (has("career_outreach_credits")) parts.push(`SELECT user_id, created_at FROM ${T("career_outreach_credits")} WHERE reason = 'test_purchase'`);
+    if (autopayOn) parts.push(`SELECT g.user_id, g.created_at FROM ${charges(true)}`);
     if (parts.length)
       for (const r of await q(`SELECT user_id, ${ms("min(at)")} AS at FROM (${parts.join(" UNION ALL ")}) x GROUP BY 1`)) {
         const i = U(r.user_id);
@@ -283,7 +313,7 @@ async function load(q: Q): Promise<StuData> {
   if (journey) {
     for (const r of await q(`
       SELECT user_id, step, ${ms("min(at)")} AS at FROM ${J}
-       WHERE user_id IS NOT NULL AND step = ANY(${lit(userNames)})
+       WHERE user_id IS NOT NULL AND step = ANY(${lit(userNames)}) AND ${since}
          AND coalesce(props->>'test', '') NOT IN ('true', '1') AND coalesce(props->>'dry_run', '') NOT IN ('true', '1')
        GROUP BY 1, 2`)) {
       const i = U(r.user_id);
@@ -295,7 +325,7 @@ async function load(q: Q): Promise<StuData> {
     }
     for (const r of await q(`
       SELECT step, user_id, ${day("at")} AS day, count(*)::int AS n FROM ${J}
-       WHERE user_id IS NOT NULL AND step = ANY(${lit(Object.keys(actKinds))})
+       WHERE user_id IS NOT NULL AND step = ANY(${lit(Object.keys(actKinds))}) AND ${since}
        GROUP BY 1, 2, 3 LIMIT 500000`)) {
       const i = U(r.user_id);
       if (i >= 0) act.push([actKinds[r.step], i, r.day, Number(r.n), 0]);
@@ -306,30 +336,31 @@ async function load(q: Q): Promise<StuData> {
     // the product tables show.
     for (const r of await q(`
       SELECT user_id, step, ${day("at")} AS day, left(coalesce(props->>'feature', ''), 30) AS feature, count(*)::int AS n FROM ${J}
-       WHERE user_id IS NOT NULL AND step = ANY(${lit(ACTIVITY_EVENTS)})
+       WHERE user_id IS NOT NULL AND step = ANY(${lit(ACTIVITY_EVENTS)}) AND ${since}
        GROUP BY 1, 2, 3, 4 LIMIT 500000`)) {
       const i = U(r.user_id);
       if (i >= 0) act.push([r.step === "active_day" ? "active_day" : `f:${r.feature || "other"}`, i, r.day, Number(r.n), 0]);
     }
     for (const r of await q(`
       SELECT user_id, ${ms("at")} AS at, coalesce(props->>'reason', props->>'error', '') AS reason FROM ${J}
-       WHERE user_id IS NOT NULL AND step = ANY(${lit(EXTRA_EVENTS.call_failed)})
+       WHERE user_id IS NOT NULL AND step = ANY(${lit(EXTRA_EVENTS.call_failed)}) AND ${since}
        ORDER BY at DESC LIMIT 50000`)) {
       const i = U(r.user_id);
       if (i >= 0) fails.push([i, Number(r.at), String(r.reason || "unknown").slice(0, 60)]);
     }
     // Visitors before sign-in: one row a visitor, step and IST day.
-    // REAL-VISITORS (owner, 4 Nov 2026: "the crawlers should not be in our visitors"): from the first page_view
-    // (SITE-TRACK, the browser's own beacon) a visit is a page_view; visited_home is a server row any crawler makes,
-    // so it counts only before then (the old count, model.ts oldVisitCount).
+    // REAL-VISITORS (owner, 4 Nov 2026: "the crawlers should not be in our visitors"): a visit is a page_view
+    // (SITE-TRACK, the browser's own beacon); visited_home is a server row any crawler makes. ADMIN-FIX (5 Nov 2026):
+    // once the log has a page_view, visited_home never counts, before it either (one visitor number everywhere,
+    // tracked from the first page_view). Only a log with no page_view at all falls back to it (the old count).
     const pv = (await q(`SELECT ${ms("min(at)")} AS at FROM ${J} WHERE step = 'page_view'`))[0]?.at;
     pageViewStart = pv == null ? null : Number(pv);
-    const serverHitsAfter = pageViewStart == null ? "" : ` AND NOT (step = 'visited_home' AND at >= to_timestamp(${pageViewStart / 1000}))`;
+    const serverHitsAfter = pageViewStart == null ? "" : ` AND step <> 'visited_home'`;
     const anonNames = ANON_STEPS.flatMap((s) => s.journey);
     const vmap = new Map<string, WireVisitor>();
     for (const r of await q(`
       SELECT visitor_id, step, ${day("at")} AS day, ${ms("min(at)")} AS at FROM ${J}
-       WHERE visitor_id IS NOT NULL AND step = ANY(${lit([...anonNames, "page_view"])})${serverHitsAfter}
+       WHERE visitor_id IS NOT NULL AND step = ANY(${lit([...anonNames, "page_view"])}) AND ${since}${serverHitsAfter}
        GROUP BY 1, 2, 3 LIMIT 300000`)) {
       const key = r.step === "page_view" ? "visited_home" : JOURNEY_NAME_TO_STEP[r.step];
       if (!key) continue;
@@ -355,7 +386,7 @@ async function load(q: Q): Promise<StuData> {
     const deviceOf = new Map<string, { device: string | null; inapp: string | null }>();
     for (const r of await q(`
       SELECT DISTINCT ON (visitor_id) visitor_id, left(props->>'device', 20) AS device, left(props->>'inapp', 20) AS inapp FROM ${J}
-       WHERE visitor_id IS NOT NULL AND props ? 'device'
+       WHERE visitor_id IS NOT NULL AND props ? 'device' AND ${since}
        ORDER BY visitor_id, at LIMIT 300000`)) {
       deviceOf.set(r.visitor_id, { device: r.device || null, inapp: r.inapp || null });
       const v = vmap.get(r.visitor_id);
@@ -365,17 +396,20 @@ async function load(q: Q): Promise<StuData> {
     }
     const links = [`SELECT DISTINCT visitor_id, user_id FROM ${J} WHERE visitor_id IS NOT NULL AND user_id IS NOT NULL`];
     if (src && hasCol("career_user_source", "visitor_id")) links.push(`SELECT visitor_id, user_id FROM ${T("career_user_source")} WHERE visitor_id IS NOT NULL AND user_id IS NOT NULL`);
+    const browsers = new Map<string, number[]>();
     for (const r of await q(`${links.join(" UNION ")} LIMIT 300000`)) {
       const v = vmap.get(r.visitor_id);
       const i = U(r.user_id);
       if (v && i >= 0) v.u = i;
+      if (i >= 0) (browsers.get(r.visitor_id) ?? browsers.set(r.visitor_id, []).get(r.visitor_id)!).push(i);
       // A person's device: their visitor's, unless their own rows carry one (read below).
       const dv = deviceOf.get(r.visitor_id);
       if (i >= 0 && dv && !users[i].device) Object.assign(users[i], dv);
     }
+    markSharedBrowsers(users, browsers.values());
     for (const r of await q(`
       SELECT DISTINCT ON (user_id) user_id, left(props->>'device', 20) AS device, left(props->>'inapp', 20) AS inapp FROM ${J}
-       WHERE user_id IS NOT NULL AND props ? 'device'
+       WHERE user_id IS NOT NULL AND props ? 'device' AND ${since}
        ORDER BY user_id, at LIMIT 100000`)) {
       const i = U(r.user_id);
       if (i < 0 || !r.device) continue;
@@ -388,7 +422,7 @@ async function load(q: Q): Promise<StuData> {
       SELECT coalesce(env, '(none)') AS env, step, count(*)::int AS events, count(DISTINCT user_id)::int AS users,
              count(DISTINCT visitor_id)::int AS visitors, ${ms("min(at)")} AS first, ${ms("max(at)")} AS last,
              ${ms("min(at) FILTER (WHERE coalesce(props->>'backfill', '') NOT IN ('true', '1'))")} AS first_live
-        FROM ${J} GROUP BY 1, 2`)) {
+        FROM ${J} WHERE ${since} GROUP BY 1, 2`)) {
       const row = journeySteps.find((x) => x.step === r.step);
       if (row) {
         row.events += r.events;
@@ -465,8 +499,11 @@ async function load(q: Q): Promise<StuData> {
     perDay.push(["chat_desk", `SELECT t.user_id, ${day("m.created_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_messages")} m JOIN ${T("career_threads")} t ON t.id = m.thread_id WHERE m.role = 'user' GROUP BY 1, 2`]);
   if (has("career_planner_messages"))
     perDay.push(["chat_desk", `SELECT user_id, ${day("created_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_planner_messages")} WHERE role = 'user' GROUP BY 1, 2`]);
-  if (has("career_channel_messages"))
-    perDay.push(["chat_wa", `SELECT user_id, ${day("created_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_channel_messages")} WHERE direction = 'in' AND user_id IS NOT NULL GROUP BY 1, 2`]);
+  if (has("career_channel_messages")) {
+    perDay.push(["chat_wa", `SELECT user_id, ${day("created_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_channel_messages")} WHERE direction = 'in' AND user_id IS NOT NULL AND NOT ${LINK_CODE} GROUP BY 1, 2`]);
+    // The verification code: activity on WhatsApp that day, not a chat.
+    perDay.push(["wa_link", `SELECT user_id, ${day("created_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_channel_messages")} WHERE direction = 'in' AND user_id IS NOT NULL AND ${LINK_CODE} GROUP BY 1, 2`]);
+  }
   if (has("career_voice_calls") && hasCol("career_voice_calls", "mode"))
     perDay.push(["chat_call", `SELECT user_id, ${day("started_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_voice_calls")} WHERE started_at IS NOT NULL AND mode IN ('desk', 'interview', 'returning') GROUP BY 1, 2`]);
   if (has("career_job_views"))
@@ -488,12 +525,16 @@ async function load(q: Q): Promise<StuData> {
       perDay.push([kind, `SELECT user_id, ${day(c)} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_daily_sends")} WHERE channel = 'whatsapp' AND kind = 'picks' AND ${c} IS NOT NULL GROUP BY 1, 2`]);
   }
   if (has("career_credit_orders")) {
-    perDay.push(["pay", `SELECT user_id, ${day("coalesce(paid_at, created_at)")} AS day, count(*)::int AS n, sum(amount_paise - ${refunded})::float8 AS amt FROM ${T("career_credit_orders")} WHERE status IN ('paid', 'refunded') AND NOT test GROUP BY 1, 2`]);
+    perDay.push(["pay", `SELECT user_id, ${day("coalesce(paid_at, created_at)")} AS day, count(*)::int AS n, sum(amount_paise - ${refunded})::float8 AS amt FROM ${T("career_credit_orders")} WHERE status IN ('paid', 'refunded') AND NOT test AND ${money} GROUP BY 1, 2`]);
     perDay.push(["pay_test", `SELECT user_id, ${day("coalesce(paid_at, created_at)")} AS day, count(*)::int AS n, sum(amount_paise)::float8 AS amt FROM ${T("career_credit_orders")} WHERE status IN ('paid', 'refunded') AND test GROUP BY 1, 2`]);
   }
   if (has("career_plans")) {
-    perDay.push(["pay", `SELECT user_id, ${day("updated_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_plans")} WHERE plan <> 'free' AND source <> 'test' GROUP BY 1, 2`]);
+    perDay.push(["pay", `SELECT user_id, ${day("updated_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_plans")} WHERE plan <> 'free' AND source <> ALL(${PLAN_NOT_PAID}) GROUP BY 1, 2`]);
     perDay.push(["pay_test", `SELECT user_id, ${day("updated_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_plans")} WHERE plan <> 'free' AND source = 'test' GROUP BY 1, 2`]);
+  }
+  if (autopayOn) {
+    perDay.push(["pay", `SELECT g.user_id, ${day("g.created_at")} AS day, count(*)::int AS n, sum(s.amount_paise)::float8 AS amt FROM ${charges(false)} GROUP BY 1, 2`]);
+    perDay.push(["pay_test", `SELECT g.user_id, ${day("g.created_at")} AS day, count(*)::int AS n, sum(s.amount_paise)::float8 AS amt FROM ${charges(true)} GROUP BY 1, 2`]);
   }
   if (has("career_outreach_credits"))
     perDay.push(["pay_test", `SELECT user_id, ${day("created_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_outreach_credits")} WHERE reason = 'test_purchase' GROUP BY 1, 2`]);
@@ -536,14 +577,20 @@ async function readOnly<T>(fn: (q: Q) => Promise<T>): Promise<T> {
   );
 }
 
-let cache: { at: number; data: Promise<StuData> } | null = null;
+let cache: { minute: number; data: Promise<StuData> } | null = null;
 const TTL_MS = 60_000;
 
-/** The Stu dataset from the reset on (model.ts sinceReset), at most a minute old (fresh: read now). */
+/**
+ * The Stu dataset from the reset on (model.ts sinceReset), read at most once per clock minute (fresh: read now).
+ * ADMIN-FIX (5 Nov 2026): the copy turns over on the minute, not a minute after this pod's last read, so the two pods'
+ * copies are from the same minute and two refreshes agree.
+ */
 export function stuData(fresh = false): Promise<StuData> {
-  if (!fresh && cache && Date.now() - cache.at < TTL_MS) return cache.data;
-  const data = readOnly(load).then((d) => sinceReset(d, countFrom(process.env.STU_COUNT_FROM)));
-  cache = { at: Date.now(), data };
+  const minute = Math.floor(Date.now() / TTL_MS);
+  if (!fresh && cache && cache.minute === minute) return cache.data;
+  const from = countFrom(process.env.STU_COUNT_FROM);
+  const data = readOnly((q) => load(q, from)).then((d) => sinceReset(d, from));
+  cache = { minute, data };
   data.catch(() => {
     if (cache?.data === data) cache = null;
   });

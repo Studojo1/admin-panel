@@ -131,7 +131,7 @@ export default function StuLayout() {
 
         {data && (
           <p className="mb-3 text-xs text-neutral-500">
-            Days are IST. Read {fmtIst(Date.parse(data.generatedAt))}.{data.countFrom ? ` Counting from ${fmtIst(data.countFrom)} (the reset).` : ""} {filters.internal ? "Internal accounts included" : "Excluded: staff (admin, ops), @studojo.com, the test accounts, guests"}.
+            Days are IST. Read {fmtIst(Date.parse(data.generatedAt))}.{data.countFrom ? ` Counting from ${fmtIst(data.countFrom)} (the reset).` : ""} {filters.internal ? "Internal accounts included" : "Excluded: staff (admin, ops), @studojo.com, the test accounts, guests, and any account that shares a browser with one of them"}.
             Every number opens the people behind it.
           </p>
         )}

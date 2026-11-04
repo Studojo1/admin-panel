@@ -29,7 +29,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!(await tablesExist())) {
     return Response.json({
       tickets: [],
-      stats: { total: 0, open: 0, high_open: 0, in_progress: 0, resolved_7d: 0 },
+      stats: { total: 0, open: 0, high_open: 0, in_progress: 0, in_progress_stale: 0, resolved_7d: 0 },
     });
   }
 
@@ -77,6 +77,8 @@ export async function loader({ request }: Route.LoaderArgs) {
         COUNT(*) FILTER (WHERE status = 'open') AS open,
         COUNT(*) FILTER (WHERE status = 'open' AND priority = 'high') AS high_open,
         COUNT(*) FILTER (WHERE status = 'in_progress') AS in_progress,
+        -- ADMIN-FIX (5 Nov 2026): in progress with no change for over a week, for the Overview's banner.
+        COUNT(*) FILTER (WHERE status = 'in_progress' AND updated_at < NOW() - INTERVAL '7 days') AS in_progress_stale,
         COUNT(*) FILTER (WHERE status = 'resolved' AND closed_at > NOW() - INTERVAL '7 days') AS resolved_7d
       FROM tickets
     `),

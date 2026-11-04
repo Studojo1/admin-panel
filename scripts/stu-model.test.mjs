@@ -6,7 +6,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   STEPS, USER_STEPS, DAILY_METRICS, istDay, stepAt, cohortOf, funnel, sinceReset, countFrom, dailyTable, retention, ratios, dropoffs, sources,
-  activity, activeCell, splitKey, visitSource, oldVisitCount, furthestStep,
+  activity, activeCell, splitKey, visitSource, oldVisitCount, furthestStep, visitorsTrackedFrom, funnelBasis, paidLive, liveDays,
+  markSharedBrowsers, SHARED_BROWSER, signupSourceText, capPct,
 } from "../app/lib/stu/model.ts";
 
 const ms = (iso) => Date.parse(iso);
@@ -190,7 +191,7 @@ test("reset: nothing before the line counts; an earlier person who comes back jo
   });
   const r = sinceReset(d, line);
   assert.deepEqual(r.users.map((u) => u.id), ["back", "new"], "the person with nothing after the line is gone");
-  assert.equal(r.users[0].joined, ms("2026-11-03T00:00:00+05:30"), "a comeback joins at their first time after the line (the desk day's start here)");
+  assert.equal(r.users[0].joined, ms("2026-11-03T08:00:00Z"), "a comeback joins at their first exact time after the line, not 00:00 of a day row on that day");
   assert.deepEqual(Object.keys(r.users[0].t), ["saw_jobs"], "their earlier call is dropped");
   assert.deepEqual(r.act, [["desk", 0, "2026-11-03", 1, 0]], "activity days before the line go, the rest is renumbered");
   assert.deepEqual(r.calls.map((c) => c[0]), [1], "calls before the line go, the rest point at the new indexes");
@@ -201,24 +202,145 @@ test("reset: nothing before the line counts; an earlier person who comes back jo
   assert.equal(countFrom("2026-11-05T00:00:00Z"), ms("2026-11-05T00:00:00Z"));
 });
 
-test("real visitors: after the first page_view a visitor counts only by page_view days; earlier days are the old count", () => {
-  // The loader (data.server.ts) folds page_view days into visited_home and drops server-only hits after the line;
-  // the model marks any range that reaches back before it as the old count.
+test("real visitors: one number, page_view only, tracked from the first page_view; days before it are not tracked", () => {
+  // The loader (data.server.ts) folds page_view days into visited_home and, once the log has a page_view, reads no
+  // visited_home (a server row crawlers write) at all. A range reaching the first page_view's day says from when.
   const start = ms("2026-11-03T21:58:00+05:30");
   const visitors = [
     { id: "real", u: -1, ch: "direct", device: "mobile", inapp: "instagram", city: null, days: { visited_home: ["2026-11-04"] }, first: { visited_home: ms("2026-11-04T00:04:00+05:30") } },
-    { id: "before", u: -1, ch: "direct", device: null, city: null, days: { visited_home: ["2026-11-03"] }, first: { visited_home: ms("2026-11-03T10:00:00+05:30") } },
+    { id: "late", u: -1, ch: "direct", device: null, city: null, days: { visited_home: ["2026-11-03"] }, first: { visited_home: ms("2026-11-03T22:10:00+05:30") } },
   ];
   const d = data([], { visitors, pageViewStart: start });
   const cell = (s, e) => dailyTable(d, { ...F, start: s, end: e }, 1).rows.find((r) => r.def.key === "visitors").total;
   assert.equal(cell("2026-11-04", "2026-11-04").v, 1);
-  assert.equal(cell("2026-11-04", "2026-11-04").old, undefined, "a day after the line is the real count");
-  assert.equal(cell("2026-11-03", "2026-11-03").old, true, "the day the line falls on still holds old rows");
-  assert.equal(cell("2026-11-03", "2026-11-04").old, true, "a range reaching back is marked");
-  assert.equal(oldVisitCount(data([], { pageViewStart: null }), ["2026-11-10"]), true, "no page_view in the log: every count is the old one");
+  assert.equal(cell("2026-11-04", "2026-11-04").trackedFrom, undefined, "a day after the first page_view needs no note");
+  assert.equal(cell("2026-11-03", "2026-11-03").v, 1, "the first page_view's day counts from then");
+  assert.equal(cell("2026-11-03", "2026-11-03").trackedFrom, start);
+  assert.equal(cell("2026-11-03", "2026-11-04").v, 2);
+  assert.equal(cell("2026-11-03", "2026-11-04").trackedFrom, start, "a range reaching back says from when");
+  assert.equal(cell("2026-11-03", "2026-11-04").old, undefined, "never the crawler count again");
+  assert.equal(cell("2026-11-02", "2026-11-02").na, true, "a day before tracking began is not tracked, not zero");
+  assert.equal(visitorsTrackedFrom(d, ["2026-11-05"]), null);
+  assert.equal(oldVisitCount(data([], { pageViewStart: null })), true, "no page_view in the log: every count is the old one");
+  assert.equal(oldVisitCount(d), false);
   assert.match(visitSource(d), /page_view/);
-  assert.match(visitSource(d), /crawlers/);
+  assert.match(visitSource(d), /tracked from/);
   assert.match(visitSource(data([])), /old count/);
+});
+
+test("reset: a day row only gives the join time when nothing exact is known, or its day is earlier", () => {
+  const line = ms("2026-11-03T00:00:00+05:30");
+  const users = [
+    // Active before the line; after it, a day row on 4 Nov and an exact step at 15:34 that day.
+    user({ id: "same", joined: ms("2026-10-20T10:00:00Z"), t: { verified_phone: ms("2026-11-04T15:34:00+05:30") } }),
+    // A day row on 3 Nov, the first exact time on 4 Nov: they were here on 3 Nov.
+    user({ id: "earlier", joined: ms("2026-10-20T10:00:00Z"), t: { saw_jobs: ms("2026-11-04T09:00:00+05:30") } }),
+    // Only a day row.
+    user({ id: "day", joined: ms("2026-10-20T10:00:00Z") }),
+  ];
+  const d = data(users, { act: [["chat_wa", 0, "2026-11-04", 1, 0], ["email", 1, "2026-11-03", 1, 0], ["chat_desk", 2, "2026-11-04", 3, 0]] });
+  const r = sinceReset(d, line);
+  const joined = Object.fromEntries(r.users.map((u) => [u.id, u.joined]));
+  assert.equal(joined.same, ms("2026-11-04T15:34:00+05:30"), "not 4 Nov 00:00");
+  assert.equal(joined.earlier, ms("2026-11-03T00:00:00+05:30"), "the earlier day row keeps the right day");
+  assert.equal(joined.day, ms("2026-11-04T00:00:00+05:30"), "only the date is known");
+});
+
+test("funnel: a step's % is of the last gate step above it, never over 100", () => {
+  const t0 = ms("2026-11-01T05:00:00Z");
+  // Five sign-ups, four called, two completed and onboarded, both saw jobs; one of them started outreach, none clicked apply.
+  const people = [0, 1, 2, 3, 4].map((k) => user({
+    id: `p${k}`,
+    t: {
+      ...(k < 4 ? { call_started: t0 + 60e3 } : {}),
+      ...(k < 2 ? { call_completed: t0 + 600e3, onboarded: t0 + 660e3, saw_jobs: t0 + 700e3 } : {}),
+      ...(k === 0 ? { outreach_started: t0 + 900e3 } : {}),
+    },
+  }));
+  const rows = Object.fromEntries(funnel(data(people), F, true).rows.map((r) => [r.key, r]));
+  assert.equal(rows.call_started.pctPrev, 80);
+  assert.equal(rows.call_started.fromKey, "signed_up");
+  assert.equal(rows.call_completed.pctPrev, 50);
+  assert.equal(rows.outreach_started.pctPrev, 50, "outreach is of Saw jobs (the last gate), not of Apply click (0)");
+  assert.equal(rows.outreach_started.fromKey, "saw_jobs");
+  assert.ok(Object.values(rows).every((r) => r.pctPrev == null || r.pctPrev <= 100));
+  assert.equal(capPct(600), 100);
+  assert.equal(capPct(null), null);
+});
+
+test("funnel basis: visitor steps chain, sign-ups are of the last of them, a beacon gap is no base and no drop", () => {
+  const bar = (key, v, over = {}) => ({ key, anon: false, gate: false, untracked: false, cell: { v, users: [] }, fromKey: null, pctPrev: null, ...over });
+  const bars = [
+    bar("visited_home", 268, { anon: true }), bar("clicked_join", 73, { anon: true }), bar("saw_signup", 7, { anon: true }),
+    bar("signed_up", 40, { gate: true }), bar("call_started", 19, { gate: true }), bar("onboarded", 13, { gate: true }),
+    bar("saw_jobs", 10, { gate: true }), bar("apply_click", 2), bar("outreach_started", 8), bar("paid", 0),
+  ];
+  const drop = funnelBasis(bars, false);
+  const by = Object.fromEntries(bars.map((b) => [b.key, b]));
+  assert.equal(by.saw_signup.gap, true, "7 saw sign-up but 40 signed up: the beacon misses people");
+  assert.equal(by.signed_up.fromKey, "clicked_join", "sign-ups are of Opened Stu, not of the gap");
+  assert.equal(by.signed_up.pctPrev, 54.8);
+  assert.equal(by.outreach_started.fromKey, "saw_jobs");
+  assert.equal(by.outreach_started.pctPrev, 80, "not 400% of Apply click");
+  assert.equal(by.paid.fromKey, "saw_jobs");
+  assert.equal(drop, "clicked_join", "Visited to Opened Stu, 27.2%, with Paid left out before the first real payment");
+  by.paid.cell.v = 0;
+  assert.equal(funnelBasis(bars, true), "paid", "once someone has paid, Paid at 0% is the drop");
+  // Never over 100%: more sign-ups than tracked visitors.
+  const few = [bar("visited_home", 3, { anon: true }), bar("signed_up", 5, { gate: true })];
+  funnelBasis(few, false);
+  assert.equal(few[0].gap, true);
+  assert.equal(few[1].pctPrev, null, "no tracked visitor base at all");
+  const ok = [bar("visited_home", 10, { anon: true }), bar("signed_up", 12, { gate: true })];
+  ok[0].cell.v = 12;
+  funnelBasis(ok, false);
+  assert.equal(ok[1].pctPrev, 100);
+});
+
+test("paid: someone outside the team paid for real", () => {
+  const t = ms("2026-11-04T15:56:00Z");
+  assert.equal(paidLive(data([user({ t: { paid: t } })])), true);
+  assert.equal(paidLive(data([user({ internal: "staff (admin)", t: { paid: t } })])), false, "a team payment is not the first real one");
+  assert.equal(paidLive(data([user({})])), false);
+});
+
+test("shared browser: an account on the same visitor id as a team account is internal, along the chain", () => {
+  const us = [{ internal: "staff (admin)" }, { internal: null }, { internal: null }, { internal: null }];
+  // visitor A: 0 and 1; visitor B: 1 and 2; visitor C: 3 alone.
+  assert.equal(markSharedBrowsers(us, [[0, 1], [1, 2], [3]]), 2);
+  assert.deepEqual(us.map((u) => u.internal), ["staff (admin)", SHARED_BROWSER, SHARED_BROWSER, null]);
+  const alone = [{ internal: null }, { internal: null }];
+  assert.equal(markSharedBrowsers(alone, [[0, 1]]), 0, "two students on one browser stay students");
+});
+
+test("activity: the WhatsApp LINK code is activity on WhatsApp, not a chat with Stu", () => {
+  const d = data([user({ id: "a" })], { act: [["wa_link", 0, "2026-11-01", 1, 0]] });
+  const row = (key) => dailyTable(d, F, 1).rows.find((r) => r.def.key === key).total.v;
+  assert.equal(row("chats"), 0);
+  assert.equal(row("chatters"), 0);
+  assert.equal(row("active"), 1);
+  assert.deepEqual([...activity(d).days.get(0).get("2026-11-01")], ["whatsapp"]);
+});
+
+test("retention: coming back is any activity, as Active students counts it", () => {
+  const d = data([user({ id: "a" })], { act: [["email", 0, "2026-11-02", 1, 0]] });
+  const [row] = retention(d, F, false);
+  assert.equal(row.d.d1.back.v, 1, "an email on day 1 without opening the desk is coming back");
+});
+
+test("stickiness and days: only days on or after the count-from line", () => {
+  const rows = ["2026-10-30", "2026-11-02", "2026-11-03", "2026-11-04"].map((day) => ({ day }));
+  assert.deepEqual(liveDays(rows, ms("2026-11-03T00:00:00+05:30")).map((x) => x.day), ["2026-11-03", "2026-11-04"]);
+  assert.equal(liveDays(rows, undefined).length, 4);
+});
+
+test("sign-up sources: by channel, mostly only above half, the campaign from the same channel", () => {
+  const mk = (id, ch, campaign) => user({ id, ch, touch: campaign ? { source: "ig", medium: "paid", campaign } : null });
+  const many = data([mk("a", "meta_paid", "c1"), mk("b", "meta_paid", "c1"), mk("c", "meta_paid", "c1"), mk("d", "search", null)]);
+  assert.equal(signupSourceText(many, F, 4, (k) => k.toUpperCase()), ", mostly from META_PAID (3 of 4, all on campaign c1)");
+  const split = data([mk("a", "meta_paid", "c1"), mk("b", "search", null), mk("c", "direct", null), mk("d", "not_captured", null)]);
+  assert.match(signupSourceText(split, F, 4), /^; the top source is (meta_paid|search|direct) \(1 of 4(, all on campaign c1)?\)$/, "no mostly at one in four");
+  assert.equal(signupSourceText(data([mk("a", "not_captured", null)]), F, 1), "", "no source known");
 });
 
 test("device and in-app split: the person's own device first, then the source row's", () => {

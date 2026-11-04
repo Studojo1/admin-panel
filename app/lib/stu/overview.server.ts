@@ -45,7 +45,7 @@ async function feed(d: StuData, f: Filters, refs: Refs): Promise<FeedRow[]> {
   if (!hasJourney(d)) return [];
   // REAL-VISITORS (4 Nov 2026): page_engaged is a browser heartbeat (several a page view), so it stays out; once
   // page_view exists a visit shows as its page_view, and visited_home (a server row, crawlers too) stays out.
-  const serverHits = d.pageViewStart == null ? sql`` : sql` AND NOT (step = 'visited_home' AND at >= to_timestamp(${d.pageViewStart / 1000}))`;
+  const serverHits = d.pageViewStart == null ? sql`` : sql` AND step <> 'visited_home'`;
   const rows = await readOnly((q) =>
     q(sql`SELECT id::text AS id, (extract(epoch from at) * 1000)::float8 AS at, step, user_id, visitor_id, source, left(props->>'path', 80) AS path
             FROM career_agent.career_journey_events
@@ -78,7 +78,9 @@ async function zeroToday(d: StuData, f: Filters): Promise<Alert | null> {
   if (!hasJourney(d)) return null;
   const today = todayIst();
   const yesterday = addDays(today, -1);
-  const names = [...new Set([...STEPS.flatMap((s) => s.journey), ...EXTRA_EVENTS.call_failed, ...d.journeySteps.map((s) => s.step)])];
+  // visited_home is a server row crawlers write too: once page_view exists it is not a step that can go quiet.
+  const names = [...new Set([...STEPS.flatMap((s) => s.journey), ...EXTRA_EVENTS.call_failed, ...d.journeySteps.map((s) => s.step)])]
+    .filter((n) => d.pageViewStart == null || n !== "visited_home");
   // RESET: nothing before the line counts, so a first day after it has no "yesterday".
   const from = new Date(Math.max(Date.parse(`${yesterday}T00:00:00+05:30`), countFrom(process.env.STU_COUNT_FROM))).toISOString();
   const mid = `${today}T00:00:00+05:30`;
@@ -124,7 +126,7 @@ export async function overviewSection(section: OvSection, f: Filters, fresh: boo
     case "kpis": body = kpis(d, f, refs); break;
     case "funnel": body = overviewFunnel(d, f, refs); break;
     case "trends": body = trends(d, f, refs); break;
-    case "sources": body = overviewSources(d, f, refs); break;
+    case "sources": body = overviewSources(d, f, refs, channelName); break;
     case "calls": body = calls(d, f, refs); break;
     case "dropoffs": body = overviewDropoffs(d, f, refs); break;
     case "engagement": body = engagement(d, f, refs); break;

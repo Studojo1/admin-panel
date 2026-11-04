@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getToken } from "~/lib/api";
 import { type Cell, fmtN } from "~/lib/stu/model";
 import type { OvEnvelope, OvSection } from "~/lib/stu/overview";
-import { CARD, type DrillPeople, OldMark } from "./ui";
+import { CARD, CellMark, type DrillPeople } from "./ui";
 
 export type Env = OvEnvelope<any>;
 export interface SectionState { env: Env | null; error: string; loading: boolean }
@@ -120,7 +120,7 @@ export function N({ cell, title, env, drill, fmt, className = "" }: { cell: Cell
   if (cell.na) return <span className={className} style={{ color: "var(--muted)" }} title="Not available here yet">n/a</span>;
   const text = fmt ? fmt(cell.v) : fmtN(cell.v);
   const people = cell.users.length + (cell.visitors?.length ?? 0);
-  const old = cell.old ? <OldMark /> : null;
+  const old = <CellMark cell={cell} />;
   if (!people) return <span className={className}>{text}{old}</span>;
   return (
     <>

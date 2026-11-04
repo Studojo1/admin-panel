@@ -20,8 +20,8 @@ import {
 } from "~/components/stu/overview-kit";
 import { getToken } from "~/lib/api";
 import { useAdminGuard } from "~/lib/auth-guard";
-import { type Cell, addDays, fmtInr, fmtN, pct, todayIst } from "~/lib/stu/model";
-import type { Alert, FunnelBar, Insight, KpiTile, OvSection, SourceRow } from "~/lib/stu/overview";
+import { type Cell, addDays, fmtInr, fmtN, todayIst } from "~/lib/stu/model";
+import { type Alert, type FunnelBar, type Insight, type KpiTile, type OvSection, type SourceRow, funnelBasis } from "~/lib/stu/overview";
 import type { VendorsReport } from "~/lib/vendors/model";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, LineController, Tooltip, Filler);
@@ -49,8 +49,8 @@ const HEADLINE: { key: string; color: "purple" | "green" | "orange" | "pink" | "
 /** The other KPI tiles, kept as one line under the cards. */
 const ALSO = ["visitors", "job_opens", "apply_clicks", "outreach"];
 
-/** The short funnel: one step per stage, visitor to paid. */
-const FUNNEL_STEPS = ["visited_home", "signed_up", "call_started", "onboarded", "saw_jobs", "outreach_started", "paid"];
+/** The short funnel: visitor to Start, then the gate steps, outreach and paid. */
+const FUNNEL_STEPS = ["visited_home", "clicked_join", "signed_up", "call_started", "call_completed", "onboarded", "saw_jobs", "outreach_started", "paid"];
 
 /** Insight links point at Overview anchors; the panels that moved now live on /usage. */
 const OVERVIEW_ANCHORS = new Set(["#kpis", "#funnel", "#sources", "#trends"]);
@@ -107,7 +107,7 @@ export default function StuOverview() {
   const openDrill: Drill = (title, cell, env) => setDrill({ title, cell, env });
 
   // Open support tickets and vendor credits: read as the old Overview and the Vendors page do.
-  const [tickets, setTickets] = useState<{ open: number; high: number } | null>(null);
+  const [tickets, setTickets] = useState<Tickets | null>(null);
   const [vendors, setVendors] = useState<VendorsReport | null>(null);
   useEffect(() => {
     if (!isAuthorized) return;
@@ -117,7 +117,7 @@ export default function StuOverview() {
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       fetch("/api/tickets?status=open", { credentials: "include", headers })
         .then((r) => r.json())
-        .then((d) => live && setTickets({ open: Number(d?.stats?.open) || 0, high: Number(d?.stats?.high_open) || 0 }))
+        .then((d) => live && setTickets({ open: Number(d?.stats?.open) || 0, high: Number(d?.stats?.high_open) || 0, stale: Number(d?.stats?.in_progress_stale) || 0 }))
         .catch(() => live && setTickets(null));
       fetch("/api/vendors", { credentials: "include", headers })
         .then((r) => r.json())
@@ -236,7 +236,7 @@ export default function StuOverview() {
         </div>
 
         <p className="mt-6 text-xs text-neutral-500">
-          {internal ? "Internal accounts included." : "Excluded: staff (admin, ops), @studojo.com, the test accounts, guests."} People counts are the people who joined Stu in the range unless a card says otherwise. Every number opens the people behind it.
+          {internal ? "Internal accounts included." : "Excluded: staff (admin, ops), @studojo.com, the test accounts, guests, and any account that shares a browser with one of them."} People counts are the people who joined Stu in the range unless a card says otherwise. Every number opens the people behind it.
         </p>
       </div>
       {drill && <DrillModal title={drill.title} cell={drill.cell} data={drillPeople(drill.env)} onClose={() => setDrill(null)} />}
@@ -246,12 +246,16 @@ export default function StuOverview() {
 
 // ------------------------------------------------------------ needs action
 
-function Attention({ tickets, alerts, vendors, drill }: { tickets: { open: number; high: number } | null; alerts: SectionState; vendors: VendorsReport | null; drill: Drill }) {
+/** Open tickets, and (ADMIN-FIX 5 Nov 2026) tickets left "in progress" with no change for over a week. */
+interface Tickets { open: number; high: number; stale: number }
+
+function Attention({ tickets, alerts, vendors, drill }: { tickets: Tickets | null; alerts: SectionState; vendors: VendorsReport | null; drill: Drill }) {
   const list = (alerts.env?.body as Alert[] | undefined) ?? [];
   // Vendors: out of credits, a rejected key, or under 7 days left at the current pace.
   const vend = (vendors?.next ?? []).filter((x) => x.level === "critical" || (x.level === "warning" && x.inDays < 7));
   const hasTickets = Boolean(tickets && tickets.open > 0);
-  if (!hasTickets && !list.length && !vend.length) return null;
+  const stale = tickets?.stale ?? 0;
+  if (!hasTickets && !stale && !list.length && !vend.length) return null;
   const row = (level: "critical" | "warning") =>
     level === "critical"
       ? "border-red-700 bg-red-600 text-white shadow-[4px_4px_0px_0px_rgba(127,29,29,1)]"
@@ -269,6 +273,15 @@ function Attention({ tickets, alerts, vendors, drill }: { tickets: { open: numbe
             </span>
           </span>
           <span className="whitespace-nowrap text-sm font-semibold">View tickets →</span>
+        </Link>
+      )}
+      {stale > 0 && (
+        <Link to="/tickets?status=in_progress" className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border-2 px-4 py-2.5 text-sm transition-transform hover:-translate-y-0.5 ${row("warning")}`}>
+          {mark}
+          <span className="min-w-0 flex-1 font-medium">
+            {stale} ticket{stale === 1 ? " has" : "s have"} been "in progress" with no change for over a week. Close the ones that are done.
+          </span>
+          <span className="whitespace-nowrap text-xs font-semibold underline underline-offset-2">In progress →</span>
         </Link>
       )}
       {list.map((a) => (
@@ -303,7 +316,7 @@ function change(cur: number, prev: number | null, inr: boolean | undefined, vs: 
 }
 
 function Headline({ s, drill, range, today, end }: { s: SectionState; drill: Drill; range: RangeKey; today: string; end: string }) {
-  const body = s.env?.body as { tiles: KpiTile[]; testPayments: Cell; prevStart: string; prevEnd: string } | undefined;
+  const body = s.env?.body as { tiles: KpiTile[]; testPayments: Cell; signupsSplit?: { fresh: Cell; existing: Cell }; prevStart: string; prevEnd: string } | undefined;
   const days = body ? Math.round((Date.parse(body.prevEnd) - Date.parse(body.prevStart)) / 86_400_000) + 1 : 1;
   const vs = days === 1 ? (range === "yesterday" || end !== today ? "vs the day before" : "vs yesterday") : `vs the ${days} days before`;
   const tile = (key: string) => body?.tiles.find((x) => x.key === key);
@@ -319,6 +332,7 @@ function Headline({ s, drill, range, today, end }: { s: SectionState; drill: Dri
           const env = s.env;
           const people = t.cell.users.length + (t.cell.visitors?.length ?? 0);
           const test = h.key === "revenue" && body!.testPayments.v > 0 ? body!.testPayments.v : 0;
+          const split = h.key === "signups" && t.cell.v > 0 ? body!.signupsSplit : undefined;
           return (
             <div key={h.key} className={`fade ${k === 0 ? "col-span-2 sm:col-span-1" : ""}`} style={{ opacity: s.loading ? 0.6 : 1 }}>
               <StatCard
@@ -332,6 +346,14 @@ function Headline({ s, drill, range, today, end }: { s: SectionState; drill: Dri
                   <>
                     {t.cell.na ? "not tracked here yet" : change(t.cell.v, t.prev, t.inr, vs)}
                     {test > 0 && <><br />Excludes {test} test payment{test === 1 ? "" : "s"}</>}
+                    {split && (
+                      <>
+                        <br />
+                        <span title="New: a Google account made on or after 3 Nov. Existing: an older studojo.com account, counted on its first Stu day.">
+                          {fmtN(split.fresh.v)} new account{split.fresh.v === 1 ? "" : "s"} + {fmtN(split.existing.v)} existing studojo.com
+                        </span>
+                      </>
+                    )}
                   </>
                 }
               />
@@ -530,28 +552,20 @@ function TrendChart({ trends, usage, kpis, start, end, drill }: { trends: Sectio
 
 function ShortFunnel({ s, drill, qs }: { s: SectionState; drill: Drill; qs: string }) {
   return (
-    <Card title="Funnel" sub="People who joined in range; each step counts those who passed the steps before it. % is of the step above." s={s} minH={230}>
+    <Card title="Funnel" sub="People who joined in range; each step counts those who passed the main steps before it. % is of the main step it follows, never over 100%." s={s} minH={230}>
       {(env) => {
-        const body = env.body as { key: FunnelBar[]; cohort: number };
-        const bars = FUNNEL_STEPS.map((k) => body.key.find((b) => b.key === k)).filter((b): b is FunnelBar => Boolean(b));
-        // % of the shown step above (the nearest tracked one).
-        let prev: FunnelBar | null = null;
-        const rows = bars.map((b, i) => {
-          const from = b.untracked ? null : prev;
-          const p = from && !from.cell.na && !b.cell.na ? pct(b.cell.v, from.cell.v) : null;
-          // A step at zero with people at a later step is a missing beacon, not a drop.
-          const gap = b.cell.v === 0 && bars.slice(i + 1).some((x) => x.cell.v > 0);
-          if (!b.untracked) prev = b;
-          return { b, p, canDrop: p != null && from != null && from.cell.v > 0 && !gap };
-        });
-        const drop = rows.filter((r) => r.canDrop).reduce<(typeof rows)[number] | null>((m, r) => (m == null || r.p! < m.p! ? r : m), null);
-        const dropKey = drop && drop.p! < 100 ? drop.b.key : null;
+        const body = env.body as { key: FunnelBar[]; cohort: number; paidLive?: boolean };
+        // The shown bars, with their % worked out again among themselves (the same rules as the server's, funnelBasis).
+        const bars = FUNNEL_STEPS.map((k) => body.key.find((b) => b.key === k)).filter((b): b is FunnelBar => Boolean(b)).map((b) => ({ ...b }));
+        const dropKey = funnelBasis(bars, Boolean(body.paidLive));
+        const rows = bars.map((b) => ({ b, p: b.pctPrev, from: bars.find((x) => x.key === b.fromKey) ?? null }));
         const max = Math.max(1, ...bars.map((b) => (b.cell.na ? 0 : b.cell.v)));
         return (
           <div>
             <div className="grid grid-cols-[minmax(84px,130px)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 text-sm">
-              {rows.map(({ b, p }) => {
+              {rows.map(({ b, p, from }) => {
                 const isDrop = b.key === dropKey;
+                const of = from ? `${p}% of ${from.label}` : "";
                 return (
                   <div key={b.key} className="contents">
                     <div className="truncate text-neutral-700" title={b.anon ? `${b.label}: visitor ids in range` : b.label}>{b.label}</div>
@@ -564,10 +578,15 @@ function ShortFunnel({ s, drill, qs }: { s: SectionState; drill: Drill; qs: stri
                             <div className={`h-[18px] rounded-r-md border-2 border-neutral-900 ${b.anon ? "bg-purple-200" : "bg-purple-500"}`} style={{ width: `${(b.cell.v / max) * 78}%`, minWidth: 6 }} />
                           )}
                           <span className="ml-2 font-bold text-neutral-950"><N cell={b.cell} env={env} drill={drill} title={`${b.label}, ${b.anon ? "visitor ids in range" : "joined in range"}`} /></span>
+                          {b.outside && b.outside.v > 0 && (
+                            <span className="ml-2 whitespace-nowrap text-[11px] text-neutral-500" title="Onboarded in the range without the call steps above (a typed setup), so not in this bar">
+                              +<N cell={b.outside} env={env} drill={drill} title={`${b.label} without a call`} /> without a call
+                            </span>
+                          )}
                         </>
                       )}
                     </div>
-                    <div className={`tnum whitespace-nowrap text-right text-xs ${isDrop ? "font-bold text-red-600" : "text-neutral-500"}`}>
+                    <div className={`tnum whitespace-nowrap text-right text-xs ${isDrop ? "font-bold text-red-600" : b.gap ? "text-neutral-400" : "text-neutral-500"}`} title={b.gap ? `${of}. Fewer than a later step, so the tracking misses people here: not counted as a drop` : of}>
                       {b.untracked ? "" : p == null ? (b.anon ? "start" : "") : <>{isDrop && <span aria-label="biggest drop">▼ </span>}{p}%</>}
                     </div>
                   </div>
@@ -592,17 +611,18 @@ function ShortFunnel({ s, drill, qs }: { s: SectionState; drill: Drill; qs: stri
 // ------------------------------------------------------------- top sources
 
 function TopSources({ s, drill, qs }: { s: SectionState; drill: Drill; qs: string }) {
-  const [by, setBy] = useState<"source" | "campaign">("source");
+  const [by, setBy] = useState<"channel" | "source" | "campaign">("channel");
   return (
     <Card
       title="Top sources"
-      sub="First touch of the people who joined in range."
+      sub="First touch of the people who joined in range. Channel reads the referrer too, so a Google search is not untagged."
       s={s}
       minH={230}
-      right={<Seg label="Split by" value={by} onChange={setBy} options={[{ v: "source", l: "Source" }, { v: "campaign", l: "Campaign" }]} />}
+      right={<Seg label="Split by" value={by} onChange={setBy} options={[{ v: "channel", l: "Channel" }, { v: "source", l: "utm tag" }, { v: "campaign", l: "Campaign" }]} />}
     >
       {(env) => {
-        const { rows } = (env.body as Record<"source" | "campaign", { rows: SourceRow[]; total: number }>)[by];
+        const split = (env.body as Partial<Record<"channel" | "source" | "campaign", { rows: SourceRow[]; total: number }>>)[by];
+        const rows = split?.rows ?? [];
         if (!rows.length) return <p className="text-sm text-neutral-500">Nobody joined in this range.</p>;
         return (
           <div>
@@ -610,7 +630,7 @@ function TopSources({ s, drill, qs }: { s: SectionState; drill: Drill; qs: strin
               <table className="tnum w-full text-sm">
                 <thead className="text-left text-[11px] font-bold uppercase tracking-wide text-neutral-500">
                   <tr>
-                    <th className="px-1 pb-1.5">{by === "source" ? "Source / medium" : "Campaign"}</th>
+                    <th className="px-1 pb-1.5">{by === "channel" ? "Channel" : by === "source" ? "utm source / medium" : "Campaign"}</th>
                     <th className="px-1 pb-1.5 text-right">Sign-ups</th>
                     <th className="px-1 pb-1.5 text-right">Onboarded</th>
                     <th className="px-1 pb-1.5 text-right">Paid</th>
@@ -620,11 +640,11 @@ function TopSources({ s, drill, qs }: { s: SectionState; drill: Drill; qs: strin
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.key} className="row-hover border-t-2 border-neutral-100">
-                      <td className="max-w-[160px] truncate px-1 py-1.5 font-medium text-neutral-900" title={r.key}>{r.key}{r.other ? <span className="text-neutral-500"> ({r.other})</span> : null}</td>
-                      <td className="px-1 py-1.5 text-right font-bold"><N cell={r.signups} env={env} drill={drill} title={`Sign-ups from ${r.key}`} /></td>
-                      <td className="px-1 py-1.5 text-right"><N cell={r.onboarded} env={env} drill={drill} title={`Onboarded from ${r.key}`} /></td>
-                      <td className="px-1 py-1.5 text-right"><N cell={r.paid} env={env} drill={drill} title={`Paid from ${r.key}`} /></td>
-                      <td className="px-1 py-1.5 text-right"><N cell={r.revenue} env={env} drill={drill} title={`Revenue from ${r.key}`} fmt={fmtInr} /></td>
+                      <td className="max-w-[160px] truncate px-1 py-1.5 font-medium text-neutral-900" title={r.label ?? r.key}>{r.label ?? r.key}{r.other ? <span className="text-neutral-500"> ({r.other})</span> : null}</td>
+                      <td className="px-1 py-1.5 text-right font-bold"><N cell={r.signups} env={env} drill={drill} title={`Sign-ups from ${r.label ?? r.key}`} /></td>
+                      <td className="px-1 py-1.5 text-right"><N cell={r.onboarded} env={env} drill={drill} title={`Onboarded from ${r.label ?? r.key}`} /></td>
+                      <td className="px-1 py-1.5 text-right"><N cell={r.paid} env={env} drill={drill} title={`Paid from ${r.label ?? r.key}`} /></td>
+                      <td className="px-1 py-1.5 text-right"><N cell={r.revenue} env={env} drill={drill} title={`Revenue from ${r.label ?? r.key}`} fmt={fmtInr} /></td>
                     </tr>
                   ))}
                 </tbody>
