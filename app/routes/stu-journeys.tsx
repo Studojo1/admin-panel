@@ -3,7 +3,7 @@
 // people stuck at a step. ?u=<id> opens one person; ?stuck=<step>&cohort=1 (the
 // Overview's drop-off bar) opens the list filtered to that step.
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { CARD, PageTitle, SourceNote, channelLabel, useStu } from "~/components/stu/ui";
 import { fetchUserLog } from "~/lib/stu/client";
 import { USER_STEPS, callOutcome, cohortOf, fmtDur, fmtIst, furthestStep, lastActDay, lastActive, scopeUsers, stepAt } from "~/lib/stu/model";
@@ -61,7 +61,11 @@ export default function StuJourneys() {
                 <tr key={u.id} onClick={() => setOpen(u.id)} className={`cursor-pointer border-t border-neutral-100 hover:bg-violet-50 ${openIdx === i ? "bg-violet-100" : ""}`}>
                   <td className="px-3 py-2">
                     <div className="font-medium">{u.email || u.id}</div>
-                    <div className="text-xs text-neutral-500">{channelLabel(u.ch)}{u.internal ? ` · internal: ${u.internal}` : ""}</div>
+                    <div className="text-xs text-neutral-500">
+                      {channelLabel(u.ch)}{u.internal ? ` · internal: ${u.internal}` : ""}
+                      {" · "}
+                      <Link to={`/recordings?person=${encodeURIComponent(u.id)}`} onClick={(e) => e.stopPropagation()} className="font-semibold text-purple-700 hover:underline">Recordings</Link>
+                    </div>
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-xs">{fmtIst(u.joined)}</td>
                   <td className="px-3 py-2 text-xs">{far >= 0 ? `${USER_STEPS[far].n}. ${USER_STEPS[far].label}` : ""}</td>
@@ -107,7 +111,11 @@ function Timeline({ i, onClose }: { i: number; onClose: () => void }) {
             {u.testPaid ? ` Test payment ${fmtIst(u.testPaid)}.` : ""}
           </div>
         </div>
-        <button onClick={onClose} className="rounded-lg border-2 border-neutral-900 px-2 py-0.5 text-sm">Close</button>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Recordings (5 Nov 2026): this person's session replays, site and platform, last 30 days. */}
+          <Link to={`/recordings?person=${encodeURIComponent(u.id)}`} className="rounded-lg border-2 border-purple-600 px-2 py-0.5 text-sm font-semibold text-purple-700 hover:bg-purple-50">Recordings</Link>
+          <button onClick={onClose} className="rounded-lg border-2 border-neutral-900 px-2 py-0.5 text-sm">Close</button>
+        </div>
       </div>
       <div className="mt-3 rounded-lg bg-neutral-50 p-3 text-xs">
         <div className="font-bold text-neutral-700">Source: {channelLabel(u.ch)}</div>

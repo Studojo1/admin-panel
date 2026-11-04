@@ -31,6 +31,11 @@ export default [
   // Visitors (4 Nov 2026): real visitors, likely bots and crawlers, the funnel per source and the drop-offs; its own range control.
   route("visitors", "routes/visitors.tsx"),
   route("api/visitors", "routes/api.visitors.tsx"),
+  // Recordings (5 Nov 2026): session replays of the website and the platform, kept 30 days; its own range control.
+  route("recordings", "routes/recordings.tsx"),
+  route("api/recordings", "routes/api.recordings.tsx"),
+  route("api/recordings/:id", "routes/api.recordings.$id.tsx"),
+  route("api/recordings/:id/chunk", "routes/api.recordings.$id.chunk.tsx"),
   // Vendors and credits (LeadsForge, Apollo): balances, spend, run-out dates.
   route("vendors", "routes/vendors.tsx"),
   route("api/vendors", "routes/api.vendors.tsx"),
