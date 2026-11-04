@@ -60,7 +60,7 @@ export function VisitorsSummary({ start, end, internal, href, enabled }: { start
                 </span>
               </div>
               <div className="mt-1 text-xs text-neutral-500">
-                {fmtN(s.signedUp)} signed up{s.signupPct != null ? `, ${s.signupPct}% of ${fmtN(s.newVisitors)} new real visitors` : ""}
+                {fmtN(s.signedUp)} signed up after a tracked visit{s.signupPct != null ? `, ${s.signupPct}% of ${fmtN(s.newVisitors)} new real visitors` : ""}
               </div>
             </div>
             <div className="min-w-0">

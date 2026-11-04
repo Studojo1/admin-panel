@@ -173,7 +173,7 @@ export default function Visitors() {
             <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
               <StatCard value={fmtN(s.real)} label="Real visitors" color="purple" title="A page_view in the range: the page's script ran in a browser"
                 note={s.realNoServerRow > 0 ? `${fmtN(s.realNoServerRow)} with no server row that day (cached page)` : "ran the page in a browser"} />
-              <StatCard value={fmtN(s.signedUp)} label="Signed up" color="green" title="Real visitors who joined Stu on or after the first day of the range"
+              <StatCard value={fmtN(s.signedUp)} label="Signed up after a tracked visit" color="green" title="Real visitors who joined Stu on or after the first day of the range. The Overview's Sign-ups also counts people whose visit sent no page_view (before tracking began, or a blocked script)"
                 note={s.signupPct == null ? "no new real visitors" : `${s.signupPct}% of ${fmtN(s.newVisitors)} new real visitors`} />
               <StatCard value={fmtN(s.likelyBots)} label="Likely bots" color="orange" title="visited_home on our server, and the page's script never ran"
                 note="a browser's user agent, no page_view" />
@@ -184,6 +184,11 @@ export default function Visitors() {
             {s.beforeTracking > 0 && s.pageViewStart != null && (
               <p className="rounded-xl border-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 The site sent its first page_view at {istShort(s.pageViewStart)} IST. {fmtN(s.beforeTracking)} visitor{s.beforeTracking === 1 ? "" : "s"} seen only before then cannot be told real or bot, so they are in neither count.
+              </p>
+            )}
+            {(s.noPageView ?? 0) > 0 && (
+              <p className="rounded-xl border-2 border-neutral-300 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+                {fmtN(s.noPageView)} visitor{s.noPageView === 1 ? "" : "s"} with no page_view began sign-up or became an account: people whose page_view did not arrive, so they are not counted as likely bots (and not as real visitors, which need a page_view).
               </p>
             )}
             {data.capped && <p className="text-xs text-amber-700">The range has more journey rows than the page reads at once; the counts stop at the cap. Pick a shorter range.</p>}
@@ -215,7 +220,7 @@ export default function Visitors() {
                 <div className="-mx-1 overflow-x-auto">
                   <table className="tnum w-full text-sm">
                     <thead className="text-left text-[11px] font-bold uppercase tracking-wide text-neutral-500">
-                      <tr><th className="px-1 pb-1.5">Day</th><th className="px-1 pb-1.5 text-right">Real visitors</th><th className="px-1 pb-1.5 text-right">Signed up</th><th className="px-1 pb-1.5 text-right">Likely bots</th><th className="px-1 pb-1.5 text-right">Crawler hits</th></tr>
+                      <tr><th className="px-1 pb-1.5">Day</th><th className="px-1 pb-1.5 text-right">Real visitors</th><th className="px-1 pb-1.5 text-right" title="After a tracked visit">Signed up</th><th className="px-1 pb-1.5 text-right">Likely bots</th><th className="px-1 pb-1.5 text-right">Crawler hits</th></tr>
                     </thead>
                     <tbody>
                       {data.byDay.map((d) => (

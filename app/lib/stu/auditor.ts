@@ -84,7 +84,12 @@ const CALL_END: Record<string, string> = {
   no_resume: "Ended with no resume read",
   no_answers: "Ended with no answers from the student",
 };
-export function callEndWords(status: string, error: string | null): string {
+/**
+ * How an unfinished call ended. ADMIN-FIX (5 Nov 2026): when the connection dropped (the timeline says so), that is
+ * the reason, as the Overview's Calls card names it ("Dropped"); the error then says what it cost.
+ */
+export function callEndWords(status: string, error: string | null, dropped = false): string {
+  if (dropped) return `${CALL_FAILED.dropped}${error === "no_resume" ? ", so no resume was read" : error === "no_answers" ? ", before the answers" : ""}`;
   if (error && CALL_END[error]) return CALL_END[error];
   if (error) return `Ended with an error: ${error}`;
   if (status === "failed") return "The call failed to start";

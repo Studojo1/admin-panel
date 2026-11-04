@@ -53,7 +53,7 @@ export const STEPS = [
   { key: "mailbox_connected", n: "21", label: "Mailbox connected", phase: "Outreach", journey: ["mailbox_connected"], truth: "career_mail_accounts.verified_at (not test inboxes)" },
   { key: "first_email_sent", n: "22", label: "First email sent", phase: "Outreach", journey: ["first_email_sent", "email_sent"], truth: "career_emails sent, not dry run" },
   { key: "first_reply", n: "23", label: "First reply", phase: "Outreach", journey: ["first_reply"], truth: "career_sequences.replied_at (not bounce, not dry run)" },
-  { key: "paid", n: "24", label: "Paid (real)", phase: "Pay", journey: ["paid"], truth: "career_credit_orders paid (not test), career_plans not test" },
+  { key: "paid", n: "24", label: "Paid (real)", phase: "Pay", journey: ["paid"], truth: "money in: career_credit_orders paid less refunds above zero (not test), autopay charges (career_plan_grants autopay, not refunded, subscription not test), career_plans not test or grant" },
 ] as const satisfies readonly StepDef[];
 
 /**
@@ -234,6 +234,32 @@ export function visitorInScope(v: WireVisitor, d: StuData, f: Filters): boolean 
   return f.channel === "all" || ch === f.channel;
 }
 
+/** ADMIN-FIX (5 Nov 2026): the reason given to an account that shares a browser (a visitor id) with an internal one. */
+export const SHARED_BROWSER = "shares a browser with a team account";
+
+/**
+ * ADMIN-FIX (5 Nov 2026): an account that shares a visitor id (one browser) with an internal account is internal too,
+ * and so on along the chain. groups: the account indexes seen on each visitor id. Marks `internal` in place and
+ * returns how many it marked. Pure.
+ */
+export function markSharedBrowsers(users: { internal: string | null }[], groups: Iterable<Iterable<number>>): number {
+  const sets = [...groups].map((g) => [...new Set(g)].filter((i) => i >= 0 && i < users.length)).filter((g) => g.length > 1);
+  let marked = 0;
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const g of sets) {
+      if (!g.some((i) => users[i].internal)) continue;
+      for (const i of g) {
+        if (users[i].internal) continue;
+        users[i].internal = SHARED_BROWSER;
+        marked++;
+        changed = true;
+      }
+    }
+  }
+  return marked;
+}
+
 /** Indexes of in-scope users. */
 export const scopeUsers = (d: StuData, f: Filters): number[] =>
   d.users.map((u, i) => (userInScope(u, f) ? i : -1)).filter((i) => i >= 0);
@@ -316,8 +342,10 @@ export interface Cell {
   visitors?: string[];
   /** not available in this environment yet */
   na?: boolean;
-  /** REAL-VISITORS: counts days before the first page_view, so crawlers are in it (the old count) */
+  /** REAL-VISITORS: this log has no page_view at all, so the visitor count is visited_home, crawlers included (the old count) */
   old?: boolean;
+  /** ADMIN-FIX (5 Nov 2026): the range starts before visitors were tracked; the count is page_view from this time, epoch ms */
+  trackedFrom?: number;
 }
 
 const uniq = (xs: number[]) => [...new Set(xs)];
@@ -348,7 +376,7 @@ export const FEATURE_LABELS: Record<string, string> = {
 
 /** Product-table and journey rows (Act kinds) that show a person used a feature that day. */
 const ACT_FEATURE: Record<string, string> = {
-  desk: "desk", job_view: "jobs", job_open: "job_open", apply: "apply", save: "save", chat_desk: "chat", chat_wa: "whatsapp",
+  desk: "desk", job_view: "jobs", job_open: "job_open", apply: "apply", save: "save", chat_desk: "chat", chat_wa: "whatsapp", wa_link: "whatsapp",
   chat_call: "call", outreach_row: "outreach", email: "email_send", email_test: "email_send", plan_view: "plans", digest_tapped: "whatsapp",
 };
 
@@ -452,23 +480,41 @@ function actCell(d: StuData, kinds: string[], days: Set<string>, scope: Set<numb
   return { ...c, na };
 }
 
-/** REAL-VISITORS: the range reaches back before the first page_view (or there is none), so the visitor count there is the old one. */
-export function oldVisitCount(d: StuData, days: Iterable<string>): boolean {
-  if (d.pageViewStart == null) return true;
-  const first = istDay(d.pageViewStart);
-  for (const x of days) if (x <= first) return true;
-  return false;
+/** REAL-VISITORS: this log has no page_view at all, so every visitor count is the old one (visited_home, crawlers included). */
+export function oldVisitCount(d: StuData, _days?: Iterable<string>): boolean {
+  return d.pageViewStart == null;
 }
+
+/**
+ * ADMIN-FIX (5 Nov 2026): visitors are page_view only, tracked from the first page_view (3 Nov 2026 21:58 IST on
+ * production). A range that reaches that day or earlier counts from then: the time to say so, else null.
+ */
+export function visitorsTrackedFrom(d: StuData, days: Iterable<string>): number | null {
+  if (d.pageViewStart == null) return null;
+  const first = istDay(d.pageViewStart);
+  for (const x of days) if (x <= first) return d.pageViewStart;
+  return null;
+}
+
+/** "3 Nov 21:58": when visitors began to be tracked, for the range notes. */
+export const trackedFromText = (ms: number): string => {
+  const iso = new Date(ms + IST_OFFSET_MS).toISOString();
+  const d = new Date(iso.slice(0, 10) + "T00:00:00Z");
+  return `${d.getUTCDate()} ${d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })} ${iso.slice(11, 16)}`;
+};
 
 /** Where the visitor count comes from, for the source notes. */
 export function visitSource(d: StuData): string {
   const log = d.journeyLive ? "journey log" : "journey log (not live yet)";
   if (d.pageViewStart == null) return `${log}: visited_home, distinct visitor ids. The old count, crawlers included: this log has no page_view yet`;
-  return `${log}: page_view (the site's script ran in a browser), distinct visitor ids; server-only hits (crawlers) are left out. Before ${fmtIst(d.pageViewStart)} the old count (visited_home, crawlers included), marked old`;
+  return `${log}: page_view (the site's script ran in a browser), distinct visitor ids, tracked from ${fmtIst(d.pageViewStart)}; server-only hits (crawlers) are never counted`;
 }
 
 function visitorCell(d: StuData, f: Filters, key: string, days: Set<string>): Cell {
   if (!d.journeyLive) return { v: 0, users: [], visitors: [], na: true };
+  // Visitors are page_view only: days before the first one were not tracked (not zero).
+  const from = key === "visited_home" ? visitorsTrackedFrom(d, days) : null;
+  if (from != null && ![...days].some((x) => x >= istDay(from))) return { v: 0, users: [], visitors: [], na: true };
   const ids: string[] = [];
   const users: number[] = [];
   for (const v of d.visitors) {
@@ -479,7 +525,8 @@ function visitorCell(d: StuData, f: Filters, key: string, days: Set<string>): Ce
     }
   }
   const out: Cell = { v: ids.length, users: uniq(users), visitors: ids };
-  if (key === "visited_home" && oldVisitCount(d, days)) out.old = true;
+  if (key === "visited_home" && oldVisitCount(d)) out.old = true;
+  if (from != null) out.trackedFrom = from;
   return out;
 }
 
@@ -574,9 +621,9 @@ export const DAILY_METRICS: DailyMetricDef[] = [
   { key: "replies", label: "Replies (real)", group: "Outreach", source: T("career_sequences.replied_at, not bounce, not dry run (each)"), cell: (d, _f, days, s) => actCell(d, ["reply"], days, s, "sum") },
   { key: "replies_test", label: "Replies (dry run / test)", group: "Outreach", kind: "test", source: T("career_sequences.replied_at on dry-run sequences"), cell: (d, _f, days, s) => actCell(d, ["reply_test"], days, s, "sum") },
   { key: "plan_views", label: "Plan views", group: "Pay", source: (d) => `${J(d)}: saw_plans (each)`, cell: (d, _f, days, s) => actCell(d, ["plan_view"], days, s, "sum", !d.journeyLive) },
-  { key: "paid_users", label: "Paid users (real)", group: "Pay", source: T("career_credit_orders paid and not test; career_plans jobs and not test"), cell: (d, _f, days, s) => actCell(d, ["pay"], days, s, "users") },
-  { key: "revenue", label: "Revenue (real, INR)", group: "Pay", kind: "inr", source: T("career_credit_orders amount_paise less refunds, paid and not test"), cell: (d, _f, days, s) => actCell(d, ["pay"], days, s, "amount") },
-  { key: "test_payments", label: "Test payments", group: "Pay", kind: "test", source: T("career_credit_orders test, career_plans source test (latest change), career_outreach_credits test_purchase"), cell: (d, _f, days, s) => actCell(d, ["pay_test"], days, s, "sum") },
+  { key: "paid_users", label: "Paid users (real)", group: "Pay", source: T("money in: career_credit_orders paid, not test, less refunds above zero; autopay charges (career_plan_grants autopay, not refunded, subscription not test, not also an order); career_plans jobs, not test or grant"), cell: (d, _f, days, s) => actCell(d, ["pay"], days, s, "users") },
+  { key: "revenue", label: "Revenue (real, INR)", group: "Pay", kind: "inr", source: T("career_credit_orders amount_paise less refunds, paid and not test; plus each autopay charge at its subscription's amount"), cell: (d, _f, days, s) => actCell(d, ["pay"], days, s, "amount") },
+  { key: "test_payments", label: "Test payments", group: "Pay", kind: "test", source: T("career_credit_orders test, test autopay charges, career_plans source test (latest change), career_outreach_credits test_purchase"), cell: (d, _f, days, s) => actCell(d, ["pay_test"], days, s, "sum") },
 ];
 
 export interface DailyColumn {
@@ -613,7 +660,10 @@ export interface FunnelRow {
   label: string;
   gate: boolean;
   cell: Cell;
+  /** % of the last gate step above (fromKey), never over 100 */
   pctPrev: number | null;
+  /** the gate step the % is of */
+  fromKey?: string | null;
   pctSignups: number | null;
   /** median ms from each person's latest earlier step */
   medianFromPrev: number | null;
@@ -626,8 +676,10 @@ export function funnel(d: StuData, f: Filters, nested: boolean): { rows: FunnelR
   const steps = USER_STEPS;
   const rows: FunnelRow[] = [];
   let passed = cohort; // people who did every gate step so far
-  let prevKey: string | null = null;
-  let prevCount = cohort.length;
+  // ADMIN-FIX (5 Nov 2026): a step's % is of the last gate step above it, not of the row above. A branch step
+  // (phone, desk, plans, outreach, paid) does not follow the branch before it, so "% of the row above" went past 100.
+  let gateKey: string | null = null;
+  let gateCount = cohort.length;
   for (const s of steps) {
     const pool = nested ? passed : cohort;
     const did = pool.filter((i) => stepAt(d, d.users[i], s.key) != null);
@@ -651,7 +703,8 @@ export function funnel(d: StuData, f: Filters, nested: boolean): { rows: FunnelR
     rows.push({
       key: s.key, n: s.n, label: s.label, gate: isGate,
       cell: { ...cellOf(did), na },
-      pctPrev: prevKey ? pct(did.length, prevCount) : null,
+      pctPrev: gateKey ? capPct(pct(did.length, gateCount)) : null,
+      fromKey: gateKey,
       pctSignups: pct(did.length, cohort.length),
       medianFromPrev: median(gaps),
       source: stepSource(d, s.key),
@@ -665,10 +718,74 @@ export function funnel(d: StuData, f: Filters, nested: boolean): { rows: FunnelR
       });
     }
     if (isGate && nested) passed = did;
-    prevKey = s.key;
-    prevCount = did.length;
+    if (isGate) {
+      gateKey = s.key;
+      gateCount = did.length;
+    }
   }
   return { rows, cohort };
+}
+
+/** ADMIN-FIX (5 Nov 2026): the rows (IST days) on or after the count-from line; days before it were not counted, they are not zeros. */
+export const liveDays = <T extends { day: string }>(rows: T[], from: number | null | undefined): T[] =>
+  from == null ? rows : rows.filter((x) => x.day >= istDay(from));
+
+/** A funnel % is a share: never over 100 (a step that is not a subset of its base, like sign-ups of visitors). */
+export const capPct = (p: number | null): number | null => (p == null ? null : Math.min(100, p));
+
+/** ADMIN-FIX (5 Nov 2026): someone outside the team has paid for real (Paid joins the "biggest drop" from then). */
+export const paidLive = (d: StuData): boolean => d.users.some((u) => !u.internal && stepAt(d, u, "paid") != null);
+
+/** A funnel bar as funnelBasis reads and sets it (the Overview's FunnelBar adds its labels and the median time). */
+export interface BasisBar {
+  key: string;
+  anon: boolean;
+  gate: boolean;
+  cell: Cell;
+  /** the journey log is live but has never recorded this step (a beacon not wired yet) */
+  untracked: boolean;
+  /** the bar the % (and the time) is measured from */
+  fromKey: string | null;
+  /** % of that bar, never over 100 */
+  pctPrev: number | null;
+  /** fewer people than a later step they come before: the beacon misses people, so it is not a drop */
+  gap?: boolean;
+}
+
+/**
+ * ADMIN-FIX (5 Nov 2026), the % of each funnel bar and the biggest drop, for any list of bars in plan order (the
+ * Overview's short funnel calls it on the bars it shows):
+ * - Before sign-up, a visitor step is % of the visitor step above it, and Signed up is % of the last of them.
+ * - After sign-up, a gate step (signed up, call started, call completed, onboarded, saw jobs) is % of the gate above;
+ *   a branch step (phone, desk, plans, outreach, paid) is % of the last gate above, as it does not follow the branch
+ *   before it.
+ * - Never over 100%. A step with fewer people than the sign-ups below it (a visitor step), or at zero with people
+ *   later, is a beacon gap: not a base and not a drop.
+ * - The biggest drop is the lowest % among the visitor steps and the gates, and Paid once someone has really paid.
+ * Sets fromKey, pctPrev and gap on the bars it is given; returns the key of the biggest drop, or null.
+ */
+export function funnelBasis(bars: BasisBar[], withPaid: boolean): string | null {
+  const signed = bars.find((b) => b.key === "signed_up" && !b.untracked && !b.cell.na);
+  let lastAnon: BasisBar | null = null;
+  let lastGate: BasisBar | null = null;
+  let drop: BasisBar | null = null;
+  bars.forEach((b, k) => {
+    b.fromKey = null;
+    b.pctPrev = null;
+    b.gap = false;
+    if (b.untracked) return;
+    b.gap = (b.cell.v === 0 && bars.slice(k + 1).some((x) => !x.untracked && x.cell.v > 0)) || (b.anon && signed != null && b.cell.v < signed.cell.v);
+    const from = b.anon || b.key === "signed_up" ? lastAnon : lastGate;
+    if (from) {
+      b.fromKey = from.key;
+      b.pctPrev = from.cell.na || b.cell.na ? null : capPct(pct(b.cell.v, from.cell.v));
+    }
+    const candidate = b.anon || b.gate || (b.key === "paid" && withPaid);
+    if (candidate && !b.gap && from && from.cell.v > 0 && b.pctPrev != null && b.pctPrev < 100 && (!drop || b.pctPrev < drop.pctPrev!)) drop = b;
+    if (b.anon && !b.gap) lastAnon = b;
+    if (!b.anon && b.gate) lastGate = b;
+  });
+  return drop ? (drop as BasisBar).key : null;
 }
 
 /** Pre-sign-up steps for the range: visitors are not a cohort, they are counted by visitor id. */
@@ -842,6 +959,25 @@ export function sources(d: StuData, f: Filters, by: string) {
   return { rows, visitors: vis, cohort };
 }
 
+/**
+ * ADMIN-FIX (5 Nov 2026): where the range's sign-ups came from, by channel (the referrer counts, so a Google search is
+ * not "(none)"), with the campaign most of that channel's sign-ups carry. "mostly" only above half.
+ */
+export function signupSourceText(d: StuData, f: Filters, total: number, channelName: (k: string) => string = (k) => k): string {
+  if (total <= 0) return "";
+  const top = sources(d, f, "channel").rows.filter((r) => r.key !== "not_captured")[0];
+  if (!top) return "";
+  const n = top.users.length;
+  const camps = new Map<string, number>();
+  for (const i of top.users) {
+    const c = d.users[i].touch?.campaign;
+    if (c) camps.set(c, (camps.get(c) ?? 0) + 1);
+  }
+  const [camp, cn] = [...camps.entries()].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+  const campText = camp && cn * 2 > n ? `, ${cn === n ? "all" : cn} on campaign ${camp}` : "";
+  return n * 2 > total ? `, mostly from ${channelName(top.key)} (${n} of ${total}${campText})` : `; the top source is ${channelName(top.key)} (${n} of ${total}${campText})`;
+}
+
 // ----------------------------------------------------------------- retention
 
 export interface RetentionRow {
@@ -853,13 +989,15 @@ export interface RetentionRow {
 export const RETENTION_DAYS = [1, 7, 30] as const;
 
 /**
- * Returned to the desk (journey opened_desk) on day N after the IST day they joined; `orLater` counts day N or any later day.
- * Rows are weeks of joining (Monday), or IST days of joining with `by` "day" (the Overview's cohort heatmap).
+ * Came back (any activity, as "Active students" counts it: model.ts activity) on day N after the IST day they joined;
+ * `orLater` counts day N or any later day. ADMIN-FIX (5 Nov 2026): it was desk opens only, so someone who came back
+ * and sent an email without opening the desk read as gone. Rows are weeks of joining (Monday), or IST days of
+ * joining with `by` "day" (the Overview's cohort heatmap).
  */
 export function retention(d: StuData, f: Filters, orLater: boolean, by: "week" | "day" = "week", ns: readonly number[] = RETENTION_DAYS): RetentionRow[] {
   const cohort = cohortOf(d, f);
-  const deskDays = new Map<number, Set<string>>();
-  for (const [k, u, day] of d.act) if (k === "desk") (deskDays.get(u) ?? deskDays.set(u, new Set()).get(u)!).add(day);
+  const backDays = new Map<number, Set<string>>();
+  for (const [u, m] of activity(d).days) backDays.set(u, new Set(m.keys()));
   const today = todayIst();
   const weeks = new Map<string, number[]>();
   for (const i of cohort) {
@@ -873,13 +1011,13 @@ export function retention(d: StuData, f: Filters, orLater: boolean, by: "week" |
       const back = eligible.filter((i) => {
         const j = istDay(d.users[i].joined);
         const target = addDays(j, n);
-        const ds = deskDays.get(i);
+        const ds = backDays.get(i);
         if (!ds) return false;
         if (!orLater) return ds.has(target);
         for (const x of ds) if (x >= target) return true;
         return false;
       });
-      row.d[`d${n}`] = { back: { ...cellOf(back), na: !d.journeyLive }, eligible: cellOf(eligible), value: d.journeyLive ? pct(back.length, eligible.length) : null };
+      row.d[`d${n}`] = { back: cellOf(back), eligible: cellOf(eligible), value: pct(back.length, eligible.length) };
     }
     return row;
   });
@@ -923,21 +1061,32 @@ export function sinceReset(d: StuData, from: number): StuData {
     }))
     .filter((v) => Object.keys(v.first).length > 0 || Object.keys(v.days).length > 0);
   const people = d.users.map((u) => ({ ...u, t: times(u.t), j: times(u.j), testPaid: u.testPaid != null && u.testPaid >= from ? u.testPaid : null }));
-  // Each person's first time from `from` on, from everything that still names them.
-  const first = new Map<number, number>();
-  const seen = (i: number, at: number) => {
-    if (i >= 0 && !(first.get(i)! <= at)) first.set(i, at);
+  // Each person's first time from `from` on, from everything that still names them. ADMIN-FIX (5 Nov 2026): the
+  // first exact time wins; a day-level row (activity counted by IST day) only knows the date, so its 00:00 is used
+  // only when nothing exact exists, or when that day is earlier than the first exact time's day.
+  const exact = new Map<number, number>();
+  const byDay = new Map<number, number>();
+  const seen = (m: Map<number, number>, i: number, at: number) => {
+    if (i >= 0 && !(m.get(i)! <= at)) m.set(i, at);
   };
   people.forEach((u, i) => {
-    if (u.joined >= from) seen(i, u.joined);
-    for (const v of [...Object.values(u.t), ...Object.values(u.j), u.testPaid]) if (v != null) seen(i, v);
+    if (u.joined >= from) seen(exact, i, u.joined);
+    for (const v of [...Object.values(u.t), ...Object.values(u.j), u.testPaid]) if (v != null) seen(exact, i, v);
   });
-  for (const a of act) seen(a[1], Math.max(from, Date.parse(`${a[2]}T00:00:00+05:30`)));
-  for (const c of calls) seen(c[0], c[4]);
-  for (const f of fails) seen(f[0], f[1]);
+  for (const a of act) seen(byDay, a[1], Math.max(from, Date.parse(`${a[2]}T00:00:00+05:30`)));
+  for (const c of calls) seen(exact, c[0], c[4]);
+  for (const f of fails) seen(exact, f[0], f[1]);
   for (const v of visitors) {
     const ts = Object.values(v.first).filter((x): x is number => x != null);
-    if (v.u >= 0) seen(v.u, ts.length ? Math.min(...ts) : from);
+    if (v.u < 0) continue;
+    if (ts.length) seen(exact, v.u, Math.min(...ts));
+    else seen(byDay, v.u, from);
+  }
+  const first = new Map<number, number>();
+  for (const i of new Set([...exact.keys(), ...byDay.keys()])) {
+    const e = exact.get(i);
+    const dd = byDay.get(i);
+    first.set(i, e != null && (dd == null || istDay(dd) >= istDay(e)) ? e : dd!);
   }
   const keep = [...first.keys()].sort((a, b) => a - b);
   const at = new Map(keep.map((old, n) => [old, n]));

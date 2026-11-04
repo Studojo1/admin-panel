@@ -38,6 +38,9 @@ test("call failures in plain words, and an unknown reason still says what came",
   assert.match(callEndWords("ended", "unfinished"), /before the call was finished/);
   assert.match(callEndWords("ended", "something_new"), /something_new/);
   assert.equal(callEndWords("failed", null), "The call failed to start");
+  // ADMIN-FIX (5 Nov 2026): a dropped line is named as the Overview's Calls card names it, with what it cost.
+  assert.equal(callEndWords("ended", "no_resume", true), "The connection dropped during the call, so no resume was read");
+  assert.match(callEndWords("ended", null, true), /^The connection dropped during the call$/);
 });
 
 test("a resume build call counts when it made no resume, never while it is still on", () => {

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { AdminHeader } from "~/components";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
@@ -114,7 +114,12 @@ export default function TicketsList() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState("open");
+  // ?status= picks the first filter (the Overview's "in progress for over a week" link opens in_progress).
+  const [params] = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const s = params.get("status");
+    return s && ["all", "open", "in_progress", "resolved", "wont_fix"].includes(s) ? s : "open";
+  });
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [searchBox, setSearchBox] = useState("");

@@ -1,8 +1,9 @@
-// Stu Retention: who comes back to the desk on day 1, day 7 and day 30 after the
-// IST day they joined, by week of joining. Desk opens come from the journey log.
+// Stu Retention: who comes back on day 1, day 7 and day 30 after the IST day they
+// joined, by week of joining. Coming back is any activity, as "Active students"
+// counts it (ADMIN-FIX 5 Nov 2026: it was desk opens only).
 import { useMemo, useState } from "react";
 import { CARD, Num, PageTitle, SourceNote, useStu } from "~/components/stu/ui";
-import { RETENTION_DAYS, fmtPct, retention } from "~/lib/stu/model";
+import { RETENTION_DAYS, activitySource, fmtPct, retention } from "~/lib/stu/model";
 
 export default function StuRetention() {
   const { data, filters } = useStu();
@@ -50,7 +51,7 @@ export default function StuRetention() {
         </table>
       </div>
       <SourceNote>
-        {data.journeyLive ? "journey log" : "journey log (not live yet)"}: opened_desk, one a person a IST day. Out of: people whose day N has already come. Day 0 is the IST day they joined.
+        Any activity, as Active students counts it ({activitySource(data)}), one a person a IST day. Out of: people whose day N has already come. Day 0 is the IST day they joined.
       </SourceNote>
     </div>
   );

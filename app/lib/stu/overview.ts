@@ -5,9 +5,11 @@
 // groups and shapes; it adds no metric of its own except the median call length
 // and the median time between the funnel bars it shows.
 import {
-  type Cell, type Filters, type StuData, type WireUser, ANON_STEPS, DAILY_METRICS, FEATURES, FEATURE_LABELS, activity, activitySource, fmtInr, istDay, NON_DESK, STEP_BY_KEY, USER_STEPS,
-  addDays, arriveCells, cellOf, cohortOf, dayRange, dropoffs, funnel, median, pct, ratios, retention, sources, stepAt, scopeUsers,
+  type BasisBar, type Cell, type Filters, type StuData, type WireUser, ANON_STEPS, DAILY_METRICS, FEATURES, FEATURE_LABELS, activity, activitySource, fmtInr, istDay, NON_DESK, STEP_BY_KEY, USER_STEPS,
+  addDays, arriveCells, cellOf, cohortOf, dayRange, dropoffs, funnel, funnelBasis, liveDays, median, paidLive, pct, ratios, retention, signupSourceText, sources, stepAt, scopeUsers,
 } from "./model";
+
+export { funnelBasis } from "./model";
 
 export const OV_SECTIONS = ["insights", "usage", "power", "kpis", "funnel", "trends", "sources", "calls", "dropoffs", "engagement", "feed", "alerts"] as const;
 export type OvSection = (typeof OV_SECTIONS)[number];
@@ -93,6 +95,12 @@ export function previousRange(f: Filters): Filters {
   return { ...f, start: addDays(f.start, -n), end: addDays(f.start, -1) };
 }
 
+/** ADMIN-FIX (5 Nov 2026): the range before reaches back past the count-from line, so it has nothing to compare with. */
+export const beforeReset = (d: StuData, pf: Filters): boolean => d.countFrom != null && pf.start < istDay(d.countFrom);
+
+/** An account made before the count-from line (or used first a day or more after it was made): an existing studojo.com account. */
+export const existingAccount = (d: StuData, u: WireUser): boolean => u.existing || (d.countFrom != null && u.created < d.countFrom);
+
 export function kpis(d: StuData, f: Filters, refs: Refs) {
   const scope = new Set(scopeUsers(d, f));
   const days = new Set(dayRange(f.start, f.end));
@@ -103,15 +111,21 @@ export function kpis(d: StuData, f: Filters, refs: Refs) {
     const m = metric(t.metric);
     const cell = refs.cell(m.cell(d, f, days, scope));
     const prev = m.cell(d, pf, prevDays, scope);
+    // No "vs" against a period before the reset, or against a visitor count that was not tracked all of that period.
+    const noPrev = prev.na || prev.old || prev.trackedFrom != null || beforeReset(d, pf);
     return {
       key: t.key, label: t.label, sub: "sub" in t ? t.sub : undefined, inr: "inr" in t ? t.inr : undefined,
-      cell, prev: prev.na ? null : prev.v,
+      cell, prev: noPrev ? null : prev.v,
       spark: sparkDays.map((day) => ({ day, v: m.cell(d, f, new Set([day]), scope).v, inRange: days.has(day) })),
       source: m.source(d),
     };
   });
   const test = refs.cell(metric("test_payments").cell(d, f, days, scope));
-  return { tiles, testPayments: test, prevStart: pf.start, prevEnd: pf.end };
+  // ADMIN-FIX (5 Nov 2026): the sign-ups named, new Google accounts against older studojo.com accounts on their first Stu day.
+  const su = tiles.find((t) => t.key === "signups")!.cell;
+  const existing = su.users.filter((i) => existingAccount(d, d.users[i]));
+  const signupsSplit = { fresh: refs.cell(cellOf(su.users.filter((i) => !existingAccount(d, d.users[i])))), existing: refs.cell(cellOf(existing)) };
+  return { tiles, testPayments: test, signupsSplit, prevStart: pf.start, prevEnd: pf.end };
 }
 
 // ----------------------------------------------------------------------- funnel
@@ -119,22 +133,14 @@ export function kpis(d: StuData, f: Filters, refs: Refs) {
 /** The Overview's short funnel: the nested spine plus the steps the owner reads daily. */
 export const FUNNEL_KEY_STEPS = ["signed_up", "call_started", "call_completed", "onboarded", "saw_jobs", "opened_job", "apply_click", "outreach_started", "paid"];
 
-export interface FunnelBar {
-  key: string;
+export interface FunnelBar extends BasisBar {
   n: string;
   label: string;
   phase: string;
-  anon: boolean;
-  gate: boolean;
-  cell: Cell;
-  /** % of the bar above */
-  pctPrev: number | null;
-  /** median ms from the bar above */
+  /** median ms from the bar it is measured from */
   medianMs: number | null;
-  /** the bar the % and the time are measured from (the nearest tracked bar above) */
-  fromKey: string | null;
-  /** the journey log is live but has never recorded this step (a beacon not wired yet) */
-  untracked: boolean;
+  /** Onboarded: people in the range who onboarded without the call steps above (a typed setup), not in the bar */
+  outside?: Cell;
 }
 
 function visitorGap(d: StuData, f: Filters, a: string, b: string, days: Set<string>): number | null {
@@ -187,44 +193,36 @@ export function overviewFunnel(d: StuData, f: Filters, refs: Refs) {
     fromKey: null, untracked: untracked(s.key),
   }));
   const userRows = nested.rows.filter((r) => !r.test);
-  const build = (keys: string[] | null): FunnelBar[] => {
+  const withPaid = paidLive(d);
+  // Onboarded people the nested bar leaves out: they set up without the call steps above it.
+  const cohort = nested.cohort;
+  const onboardedBar = userRows.find((r) => r.key === "onboarded");
+  const outside = onboardedBar
+    ? refs.cell(cellOf(cohort.filter((i) => stepAt(d, d.users[i], "onboarded") != null && !onboardedBar.cell.users.includes(i))))
+    : undefined;
+  const build = (keys: string[] | null): { bars: FunnelBar[]; drop: string | null } => {
     const rows = keys ? userRows.filter((r) => keys.includes(r.key)) : userRows;
     const bars: FunnelBar[] = [
       ...anonBars.map((b) => ({ ...b })),
       ...rows.map((r) => ({
         key: r.key, n: r.n, label: r.label, phase: STEP_BY_KEY[r.key]?.phase ?? "", anon: false, gate: r.gate,
         cell: refs.cell(r.cell), pctPrev: null, medianMs: null as number | null, fromKey: null, untracked: untracked(r.key),
+        ...(r.key === "onboarded" && outside && outside.v > 0 ? { outside } : {}),
       })),
     ];
-    let a: FunnelBar | null = null;
+    const drop = funnelBasis(bars, withPaid);
     for (const b of bars) {
-      if (b.untracked) continue;
-      if (a) {
-        b.fromKey = a.key;
-        b.pctPrev = a.cell.na || b.cell.na ? null : pct(b.cell.v, a.cell.v);
-        if (b.anon) b.medianMs = visitorGap(d, f, a.key, b.key, days);
-        else if (a.anon) b.medianMs = signupGap(d, b.cell.users);
-        else b.medianMs = userGap(d, b.cell.users, a.key, b.key);
-      }
-      a = b;
+      const a = bars.find((x) => x.key === b.fromKey);
+      if (!a) continue;
+      if (b.anon) b.medianMs = visitorGap(d, f, a.key, b.key, days);
+      else if (a.anon) b.medianMs = signupGap(d, b.cell.users);
+      else b.medianMs = userGap(d, b.cell.users, a.key, b.key);
     }
-    return bars;
-  };
-  const biggestDrop = (bars: FunnelBar[]): string | null => {
-    let best: FunnelBar | null = null;
-    for (let k = 1; k < bars.length; k++) {
-      const b = bars[k];
-      const from = bars.find((x) => x.key === b.fromKey);
-      if (b.untracked || b.pctPrev == null || !from || from.cell.v <= 0) continue;
-      // A step at zero with people at a later step is a beacon gap, not a drop.
-      if (b.cell.v === 0 && bars.slice(k + 1).some((x) => x.cell.v > 0)) continue;
-      if (!best || b.pctPrev < best.pctPrev!) best = b;
-    }
-    return best && best.pctPrev! < 100 ? best.key : null;
+    return { bars, drop };
   };
   const key = build(FUNNEL_KEY_STEPS);
   const all = build(null);
-  return { key, all, dropKey: biggestDrop(key), dropAll: biggestDrop(all), cohort: nested.cohort.length };
+  return { key: key.bars, all: all.bars, dropKey: key.drop, dropAll: all.drop, cohort: cohort.length, paidLive: withPaid };
 }
 
 // ----------------------------------------------------------------------- trends
@@ -251,12 +249,14 @@ export function trends(d: StuData, f: Filters, refs: Refs) {
   });
   for (const s of series) s.na = s.cells.every((c) => c.na);
   const byKey = Object.fromEntries(series.map((s) => [s.key, s.cells.map((c) => c.v)]));
-  // Rates over a trailing 7 days, so one quiet day does not swing the line to zero.
-  const sum = (xs: number[], k: number) => xs.slice(Math.max(0, k - 6), k + 1).reduce((a, b) => a + b, 0);
-  const rates = TREND_RATES.map((r) => ({
-    key: r.key, label: r.label,
-    values: days.map((_, k) => pct(sum(byKey[r.num], k), sum(byKey[r.den], k))),
-  }));
+  // Rates over a trailing 7 days, so one quiet day does not swing the line to zero. A day either series did not
+  // track (visitors before the first page_view) is left out of both sums.
+  const naKey = Object.fromEntries(series.map((s) => [s.key, s.cells.map((c) => Boolean(c.na))]));
+  const sum = (xs: number[], k: number, skip: boolean[]) => xs.slice(Math.max(0, k - 6), k + 1).reduce((a, b, j) => a + (skip[Math.max(0, k - 6) + j] ? 0 : b), 0);
+  const rates = TREND_RATES.map((r) => {
+    const skip = days.map((_, k) => naKey[r.num][k] || naKey[r.den][k]);
+    return { key: r.key, label: r.label, values: days.map((_, k) => pct(sum(byKey[r.num], k, skip), sum(byKey[r.den], k, skip))) };
+  });
   return { days, series, rates };
 }
 
@@ -264,6 +264,8 @@ export function trends(d: StuData, f: Filters, refs: Refs) {
 
 export interface SourceRow {
   key: string;
+  /** the channel's name, for a channel row */
+  label?: string;
   signups: Cell;
   onboarded: Cell;
   paid: Cell;
@@ -271,10 +273,13 @@ export interface SourceRow {
   other?: number;
 }
 
-export function overviewSources(d: StuData, f: Filters, refs: Refs) {
-  const split = (by: "source" | "campaign") => {
+export function overviewSources(d: StuData, f: Filters, refs: Refs, channelName: (k: string) => string = (k) => k) {
+  const split = (by: "channel" | "source" | "campaign") => {
     const s = sources(d, f, by);
-    const rows: SourceRow[] = s.rows.map((r) => ({ key: r.key, signups: cellOf(r.users), onboarded: r.steps.onboarded, paid: r.steps.paid, revenue: r.revenue }));
+    const rows: SourceRow[] = s.rows.map((r) => ({
+      key: r.key, ...(by === "channel" ? { label: channelName(r.key) } : {}),
+      signups: cellOf(r.users), onboarded: r.steps.onboarded, paid: r.steps.paid, revenue: r.revenue,
+    }));
     const top = rows.slice(0, 8);
     const rest = rows.slice(8);
     if (rest.length) {
@@ -287,7 +292,8 @@ export function overviewSources(d: StuData, f: Filters, refs: Refs) {
     for (const r of top) for (const c of [r.signups, r.onboarded, r.paid, r.revenue]) refs.cell(c);
     return { rows: top, total: s.cohort.length };
   };
-  return { source: split("source"), campaign: split("campaign") };
+  // ADMIN-FIX (5 Nov 2026): channels first (they read the referrer, so a Google search is not "(none)"), as /sources.
+  return { channel: split("channel"), source: split("source"), campaign: split("campaign") };
 }
 
 // ------------------------------------------------------------------- call health
@@ -468,7 +474,9 @@ export function usage(d: StuData, f: Filters, refs: Refs) {
     const ret = dau.filter((u) => istDay(d.users[u].joined) < day);
     return { day, dau: refs.cell(cellOf(dau)), wau, mau, stick: pct(dau.length, mau), new: refs.cell(cellOf(isNew)), returning: refs.cell(cellOf(ret)) };
   });
-  const last7 = trend.slice(-7);
+  // ADMIN-FIX (5 Nov 2026): the average is over the days on or after the count-from line only; days before it are not
+  // zeros, they were not counted.
+  const last7 = liveDays(trend.slice(-7), d.countFrom);
   const avgDau = last7.reduce((a, x) => a + x.dau.v, 0) / Math.max(1, last7.length);
   const mau = refs.cell(cellOf(activeBetween(act, addDays(end, -29), end)));
   const wau = refs.cell(cellOf(activeBetween(act, addDays(end, -6), end)));
@@ -487,7 +495,7 @@ export function usage(d: StuData, f: Filters, refs: Refs) {
     return { key: feat, label: FEATURE_LABELS[feat] ?? feat, rep: refs.cell(cellOf(r)), one: refs.cell(cellOf(o)), repPct: pct(r.length, repeaters.length), onePct: pct(o.length, oneTime.length) };
   }).filter((x) => x.rep.v + x.one.v > 0).sort((a, b) => (b.repPct ?? 0) - (a.repPct ?? 0));
   return {
-    dau: trend[trend.length - 1].dau, wau, mau, avgDau: Math.round(avgDau * 10) / 10,
+    dau: trend[trend.length - 1].dau, wau, mau, avgDau: Math.round(avgDau * 10) / 10, avgDays: last7.length, avgFrom: last7[0]?.day ?? end,
     stickiness: mau.v ? Math.round((avgDau / mau.v) * 1000) / 10 : null,
     trend,
     repeat: refs.cell(cellOf(repeat)), cohort: refs.cell(cellOf(cohort)), repeatPct: pct(repeat.length, cohort.length),
@@ -579,6 +587,9 @@ const niceDay = (day: string) => {
   return `${d.getUTCDate()} ${d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })}`;
 };
 
+/** People needed on each side (repeat and one-time users) before a feature gap is an insight. */
+export const FEATURE_MIN = 5;
+
 /** 3 to 6 plain-English observations, by rules, most important first. Every number comes from the functions above. */
 export function insights(d: StuData, f: Filters, refs: Refs, channelName: (k: string) => string = (k) => k): Insight[] {
   const out: Insight[] = [];
@@ -600,10 +611,12 @@ export function insights(d: StuData, f: Filters, refs: Refs, channelName: (k: st
   const su = metric("signups");
   const cur = su.cell(d, f, days, scope);
   const prev = su.cell(d, pf, new Set(dayRange(pf.start, pf.end)), scope).v;
-  const src = sources(d, f, "source").rows.filter((r) => r.key !== "(none)")[0];
-  const camp = sources(d, f, "campaign").rows.filter((r) => r.key !== "(none)")[0];
-  const from = src ? `, mostly from ${src.key}${camp ? ` / ${camp.key}` : ""} (${src.users.length})` : "";
-  if (cur.v === 0 && prev === 0) out.push({ key: "signups", score: 40, text: `No sign-ups ${when}, and none in the period before.`, href: "#kpis" });
+  const from = signupSourceText(d, f, cur.v, channelName);
+  if (beforeReset(d, pf)) {
+    // Nothing was counted before the line, so there is nothing to compare with.
+    if (cur.v === 0) out.push({ key: "signups", score: 40, text: `No sign-ups ${when}.`, href: "#kpis" });
+    else out.push({ key: "signups", score: 55, text: `${cur.v} sign-up${cur.v === 1 ? "" : "s"} ${when}${from}.`, href: "#sources", cell: cur });
+  } else if (cur.v === 0 && prev === 0) out.push({ key: "signups", score: 40, text: `No sign-ups ${when}, and none in the period before.`, href: "#kpis" });
   else if (cur.v === 0) out.push({ key: "signups", score: 75, text: `No sign-ups ${when} (${prev} ${vsText(f).replace("vs ", "")}).`, href: "#kpis" });
   else if (prev === 0) out.push({ key: "signups", score: 60, text: `${cur.v} sign-up${cur.v === 1 ? "" : "s"} ${when}, none ${vsText(f).replace("vs ", "")}${from}.`, href: "#sources", cell: cur });
   else {
@@ -646,12 +659,14 @@ export function insights(d: StuData, f: Filters, refs: Refs, channelName: (k: st
 
   // Stickiness and what repeat users do differently.
   const us = usage(d, f, scratch);
-  if (us.mau.v > 0) out.push({ key: "stick", score: 35, text: `Stickiness is ${us.stickiness}%: ${us.avgDau} active a day on average over the last 7 days, out of ${us.mau.v} active in 30 days.`, href: "#engagement", cell: us.mau });
+  const over = us.avgDays >= 7 ? "over the last 7 days" : `over the ${us.avgDays} day${us.avgDays === 1 ? "" : "s"} since ${niceDay(us.avgFrom)}`;
+  if (us.mau.v > 0) out.push({ key: "stick", score: 35, text: `Stickiness is ${us.stickiness}%: ${us.avgDau} active a day on average ${over}, out of ${us.mau.v} active in 30 days.`, href: "#engagement", cell: us.mau });
+  // ADMIN-FIX (5 Nov 2026): a feature gap needs FEATURE_MIN people on each side, or it is one or two people's habit.
   const gap = us.features
-    .filter((x) => x.repPct != null && x.onePct != null && us.repeaters.v >= 2 && us.oneTime.v >= 2)
+    .filter((x) => x.repPct != null && x.onePct != null && us.repeaters.v >= FEATURE_MIN && us.oneTime.v >= FEATURE_MIN)
     .map((x) => ({ x, g: (x.repPct ?? 0) - (x.onePct ?? 0) }))
     .sort((a, b) => b.g - a.g)[0];
-  if (gap && gap.g >= 20) out.push({ key: "feature", score: 45 + Math.min(15, gap.g / 5), text: `Repeat users lean on ${gap.x.label}: ${gap.x.repPct}% of them used it, against ${gap.x.onePct}% of one-time users.`, href: "#engagement", cell: gap.x.rep });
+  if (gap && gap.g >= 20) out.push({ key: "feature", score: 45 + Math.min(15, gap.g / 5), text: `Repeat users lean on ${gap.x.label}: ${gap.x.repPct}% of them used it (${gap.x.rep.v} of ${us.repeaters.v}), against ${gap.x.onePct}% of one-time users (${gap.x.one.v} of ${us.oneTime.v}).`, href: "#engagement", cell: gap.x.rep });
   else if (us.repeatPct != null && us.cohort.v >= 3) out.push({ key: "repeat", score: 33, text: `${us.repeatPct}% of the people who joined ${when} came back on another day (${us.repeat.v} of ${us.cohort.v}).`, href: "#engagement", cell: us.repeat });
 
   const top = out.sort((a, b) => b.score - a.score).slice(0, 6);

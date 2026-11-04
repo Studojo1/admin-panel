@@ -2,7 +2,7 @@
 // opens the people behind it, the source note and the drill-down list.
 import { Link, useOutletContext } from "react-router";
 import { CHANNELS } from "~/lib/utm-dictionary";
-import { type Cell, type Filters, type StuData, type WireUser, type WireVisitor, fmtIst, fmtN, istDay } from "~/lib/stu/model";
+import { type Cell, type Filters, type StuData, type WireUser, type WireVisitor, fmtIst, fmtN, istDay, trackedFromText } from "~/lib/stu/model";
 
 export interface StuCtx {
   data: StuData;
@@ -25,7 +25,7 @@ export function Num({ cell, title, fmt, className = "" }: { cell: Cell; title: s
   }
   const text = fmt ? fmt(cell.v) : fmtN(cell.v);
   const people = cell.users.length + (cell.visitors?.length ?? 0);
-  const old = cell.old ? <OldMark /> : null;
+  const old = <CellMark cell={cell} />;
   if (!people) return <span className={`tabular-nums ${className}`}>{text}{old}</span>;
   return (
     <>
@@ -42,9 +42,22 @@ export function Num({ cell, title, fmt, className = "" }: { cell: Cell; title: s
   );
 }
 
-/** REAL-VISITORS: a visitor number that reaches back before the first page_view, when crawlers still counted. */
+/** REAL-VISITORS: a visitor number from a log with no page_view at all, so crawlers are in it. */
 export function OldMark() {
-  return <sup className="ml-0.5 text-[9px] font-semibold uppercase text-amber-600" title="Counts days before the first page_view, so crawlers are in it (the old count)">old</sup>;
+  return <sup className="ml-0.5 text-[9px] font-semibold uppercase text-amber-600" title="This log has no page_view yet, so the visitor count is the server's visited_home, crawlers included (the old count)">old</sup>;
+}
+
+/** ADMIN-FIX (5 Nov 2026): a visitor number whose range starts before visitors were tracked counts from that time. */
+export function TrackedMark({ from }: { from: number }) {
+  const at = trackedFromText(from);
+  return <sup className="ml-0.5 whitespace-nowrap text-[9px] font-semibold text-amber-700" title={`Visitors are counted by page_view, which the site has sent since ${at} IST. The range starts before then, so this counts from ${at}.`}>from {at}</sup>;
+}
+
+/** The old or tracked-from mark a cell needs, if any. */
+export function CellMark({ cell }: { cell: Cell }) {
+  if (cell.old) return <OldMark />;
+  if (cell.trackedFrom != null) return <TrackedMark from={cell.trackedFrom} />;
+  return null;
 }
 
 export function SourceNote({ children }: { children: React.ReactNode }) {

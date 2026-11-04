@@ -49,7 +49,7 @@ export default function StuFunnel() {
               <th className="px-4 py-2">Step</th>
               <th className="px-3 py-2 text-right">People</th>
               <th className="px-3 py-2 w-[28%]" />
-              <th className="px-3 py-2 text-right">% of step before</th>
+              <th className="px-3 py-2 text-right" title="Of the last gate step above it (a branch step does not follow the branch before it); never over 100%">% of gate step above</th>
               <th className="px-3 py-2 text-right">% of sign-ups</th>
               <th className="px-3 py-2 text-right" title="For each person, from the latest earlier step they did">Median time from step before</th>
             </tr>
@@ -70,7 +70,7 @@ export default function StuFunnel() {
                     <div className={`h-3 rounded ${r.test ? "bg-amber-400" : "bg-violet-500"}`} style={{ width: `${Math.min(100, r.pctSignups ?? 0)}%` }} />
                   </div>
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">{r.cell.na ? "n/a" : fmtPct(r.pctPrev)}</td>
+                <td className="px-3 py-2 text-right tabular-nums" title={r.fromKey ? `of ${f.rows.find((x) => x.key === r.fromKey)?.label ?? r.fromKey}` : undefined}>{r.cell.na ? "n/a" : fmtPct(r.pctPrev)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{r.cell.na ? "n/a" : fmtPct(r.pctSignups)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-neutral-700">{fmtDur(r.medianFromPrev)}</td>
               </tr>

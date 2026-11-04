@@ -255,7 +255,7 @@ interface EngBody {
 export function Engagement({ s, drill, t }: { s: SectionState; drill: Drill; t: Palette }) {
   const body = s.env?.body as EngBody | undefined;
   return (
-    <Card title="Retention" sub="Return to the desk on day N after the IST day they joined (as the Retention page counts it); people whose day N has not come yet are left out." s={s}>
+    <Card title="Retention" sub="Came back (any activity, as Active students counts it) on day N after the IST day they joined, as the Retention page counts it; people whose day N has not come yet are left out." s={s}>
       {(env) => {
         const b = body!;
         const shade = (v: number | null) => {
