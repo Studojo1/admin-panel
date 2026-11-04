@@ -76,7 +76,7 @@ const kfmt = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + "M"
 const plural = (n: number, one: string, many = one + "s") => `${num(n)} ${n === 1 ? one : many}`;
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 const avClass = (name: string) => "av-" + ((name.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 5) + 1);
-const PARTNERSHIP = /in partnership with studojo|#partnership|#ad\b|#sponsored|paid partnership/i; // same as the server
+const PARTNERSHIP = /in partnership with studojo|#partnership|#ad\b|#sponsored|paid partnership/i; // only to suggest the optional line; nothing requires it
 const POST_MAX = 3000;
 const ago = (iso: string | null) => {
   if (!iso) return "No activity yet";
@@ -1121,7 +1121,7 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
       {d.status === "changes" ? <p className="note note-warn"><Icon id="alert" /><span><b>Waiting for Claude.</b> Sent back {open.length ? fmt(istDay(open[open.length - 1].t)) : ""}. It stays off {f.first}'s page until it's approved.</span></p> : null}
       <input className="input" aria-label="Title" value={title} maxLength={140} onChange={(e) => setTitle(e.target.value)} style={{ fontWeight: 650 }} />
       <textarea className="input dbody" aria-label="Post text" value={body} onChange={(e) => setBody(e.target.value)} />
-      {noLabel ? <div className="note note-bad" role="alert"><Icon id="alert" /><span>Studojo posts must say they're a partnership. It can't be approved without that line.</span>
+      {noLabel ? <div className="note"><span>This Studojo post has no partnership line. That's allowed; add it if you want one.</span>
         <button className="btn btn-outline btn-sm" type="button" style={{ background: "var(--card)" }} onClick={() => setBody(`In partnership with Studojo\n\n${body.trim()}`)}>Add the line</button></div> : null}
       <div className="text-meta"><span className={`cnt${body.trim().length > POST_MAX ? " over" : ""}`}>{num(body.trim().length)} / 3,000 characters</span>{dirty ? <span className="dirty">Unsaved edits</span> : null}</div>
       {d.angle ? <p className="why-line"><b>Why this post: </b>{d.angle}</p> : null}
@@ -1140,7 +1140,7 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
         </div>
       ) : null}
       <div className="actions">
-        <button className="btn btn-primary btn-sm" type="button" disabled={noLabel} onClick={() => run({ intent: "approve", ...edits }, `Approved. It's on ${f.first}'s page for ${dow(due)} ${fmt(due)}.`)}><Icon id="check" />Approve</button>
+        <button className="btn btn-primary btn-sm" type="button" onClick={() => run({ intent: "approve", ...edits }, `Approved. It's on ${f.first}'s page for ${dow(due)} ${fmt(due)}.`)}><Icon id="check" />Approve</button>
         <button className="btn btn-line btn-sm" type="button" disabled={!dirty} onClick={() => run({ intent: "save", ...edits }, "Edits saved. It's still waiting for approval.")}>Save edits</button>
         {back === null ? <button className="btn btn-line btn-sm" type="button" onClick={() => setBack("")}><Icon id="mic" />Give feedback</button> : null}
         {confirmRm
@@ -1212,7 +1212,6 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
     if (!f) return setErr("Choose who this post is for.");
     if (!date) return setErr("Pick a date.");
     if (title.trim().length < 2) return setErr("Give the post a short title.");
-    if (kind === "studojo" && !hasLabel) return setErr(`This is a Studojo post, so it must include the line "${LABEL}". It can't be saved without it.`);
     if (text.trim().length < 20) return setErr("Write the post text.");
     setBusy(true);
     const body = existing ? { intent: "update-post", postId: existing.id, title: title.trim(), body: text.trim(), kind, dueDate: date } : { intent: "add-post", title: title.trim(), body: text.trim(), kind, dueDate: date };
@@ -1246,7 +1245,7 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
         <div className="field"><label htmlFor="pe-text">Post text</label>
           <textarea className="input" id="pe-text" rows={10} maxLength={POST_MAX} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write it the way it will appear on LinkedIn" />
           <div className="text-meta">
-            {kind === "studojo" ? (hasLabel ? <span className="note note-ok" style={{ padding: "4px 10px" }}><Icon id="check" />Includes "{LABEL}"</span> : <span className="cnt">Studojo posts must include "{LABEL}". <button className="btn btn-quiet btn-sm" type="button" onClick={() => setText(`${LABEL}\n\n${text.trim()}`)}>Add the line</button></span>) : <span className="cnt">Their own posts don't need a label.</span>}
+            {kind === "studojo" ? (hasLabel ? <span className="note note-ok" style={{ padding: "4px 10px" }}><Icon id="check" />Includes "{LABEL}"</span> : <span className="cnt">Optional: add "{LABEL}". <button className="btn btn-quiet btn-sm" type="button" onClick={() => setText(`${LABEL}\n\n${text.trim()}`)}>Add the line</button></span>) : <span className="cnt">Their own posts don't need a label.</span>}
             <span className="cnt">{num(text.length)} / 3,000</span></div>
         </div>
         {err ? <div className="note note-bad" role="alert"><Icon id="alert" /><span>{err}</span></div> : null}

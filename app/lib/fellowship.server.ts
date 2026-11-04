@@ -24,7 +24,6 @@ import {
 export const POST_MAX = 3000; // LinkedIn's limit for one post
 const PHOTO_IDEA_MIN = 12;
 const PHOTO_IDEA_MAX = 500;
-const PARTNERSHIP = /in partnership with studojo|#partnership|#ad\b|#sponsored|paid partnership/i;
 const SAME_POST = 0.5; // share of three-word runs that makes a post a repeat
 const REPEAT_WINDOW_DAYS = 60;
 const DAY = 86400000;
@@ -247,8 +246,7 @@ export function problemWith(x: { title: string; body: string; kind: string; due:
   if (x.body.length < (o.strict ? 80 : 20)) return `${name}: the post text is missing or too short.`;
   if (x.body.length > POST_MAX) return `${name} is ${x.body.length} characters. LinkedIn allows ${POST_MAX}.`;
   if (x.kind !== "studojo" && x.kind !== "personal") return `${name}: the type must be "studojo" or "personal".`;
-  // A fellow gets free Studojo access, so a post about Studojo is an endorsement and has to say so.
-  if (x.kind === "studojo" && !PARTNERSHIP.test(x.body)) return `${name}: Studojo posts must say they're a partnership. Add the line "In partnership with Studojo".`;
+  // The partnership line on Studojo posts is optional (the team's decision, 4 Nov 2026).
   if (!isDay(x.due)) return `${name}: the due date must be a date like 2026-11-03.`;
   if (!o.allowPast && x.due < ctx.today) return `${name}: ${x.due} has already passed.`;
   const extra = o.extra ?? [];
@@ -457,9 +455,6 @@ export async function approveAll(fellowId: number, by: string) {
     const today = istDate();
     const ready = (await draftsOf(fellowId, tx)).filter((d) => d.status === "review" && d.due >= today);
     const f = await fellow(fellowId, tx);
-    for (const d of ready) {
-      if (d.kind === "studojo" && !PARTNERSHIP.test(d.body)) throw new Refused(`"${d.title}" is a Studojo post without "In partnership with Studojo". Add the line, then approve.`);
-    }
     for (const d of ready) await approveIn(tx, d, by);
     return { approved: ready.length, name: f?.first ?? "" };
   });
