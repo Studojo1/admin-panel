@@ -105,8 +105,8 @@ test("wiring: routed, every API behind the admin gate, linked from Journeys and 
   assert.match(read("app/components/admin-header.tsx"), /\{ to: "\/recordings", label: "Stu: Recordings", stu: true \}/);
   for (const wf of [".github/workflows/deploy-staging.yml", ".github/workflows/deploy.yml"]) {
     const s = read(wf);
-    assert.match(s, /secret_ref_optional AZURE_STORAGE_ACCOUNT_NAME azure-storage-account-name/, wf);
-    assert.match(s, /secret_ref_optional AZURE_STORAGE_ACCOUNT_KEY azure-storage-account-key/, wf);
+    assert.match(s, /secret_ref(?:_optional)? AZURE_STORAGE_ACCOUNT_NAME azure-storage-account-name/, wf);
+    assert.match(s, /secret_ref(?:_optional)? AZURE_STORAGE_ACCOUNT_KEY azure-storage-account-key/, wf);
   }
   const blob = read("app/lib/recordings/blob.server.ts");
   assert.doesNotMatch(blob, /"(PUT|DELETE)"/, "the admin only reads the recordings");
