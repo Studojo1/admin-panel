@@ -34,6 +34,9 @@ jobs:
       # Stu Auditor (4 Nov 2026): every failure in plain words, ours (Broke) or
       # maybe the student's (Check), the IST window, the since-yesterday line.
       - run: node --test scripts/stu-auditor.test.mjs
+      # VISITORS (4 Nov 2026): real visitors (a page_view), likely bots, crawlers, the first-touch source, the funnel
+      # per source and the furthest step of those who did not sign up.
+      - run: node --test scripts/visitors-model.test.mjs
       # UTM links (2 Nov 2026): the naming scheme, utm_id = slug first, utm_*
       # as the fallback, IST ranges, internal accounts and bots apart.
       - run: node --test scripts/utm-attribution.test.mjs
