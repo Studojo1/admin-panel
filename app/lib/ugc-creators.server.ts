@@ -149,6 +149,22 @@ async function createTables() {
   // photos are) and the parsed latest one: metrics, demographics, the post's date and link.
   await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS analytics_url TEXT`);
   await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS analytics JSONB`);
+  // LinkedIn's export (the founder's guide, 4 Nov 2026) is a week of account-wide Content analytics,
+  // not one post, so fellows upload it once a week and every upload is kept. studojo.com parses it into
+  // data (totals, daily, the posts in it matched to ours, demographics) and also fills in each matching
+  // post's impressions and analytics. Admin and Claude read the newest row per period_end.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS ugc_creator_analytics (
+      id SERIAL PRIMARY KEY,
+      creator_id INTEGER NOT NULL REFERENCES ugc_creators(id) ON DELETE CASCADE,
+      file_url TEXT NOT NULL,
+      period_start DATE,
+      period_end DATE,
+      data JSONB NOT NULL,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ugc_creator_analytics_creator ON ugc_creator_analytics (creator_id, uploaded_at DESC)`);
   // Posts a fellow wrote before the fellowship, so Claude never repeats them.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_creator_earlier_posts (

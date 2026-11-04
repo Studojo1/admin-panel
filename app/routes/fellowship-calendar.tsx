@@ -31,6 +31,12 @@ interface Post {
   photoIdea: string | null; photos: string[]; photoHelpAt: string | null;
   analytics: PostAnalytics | null; analyticsFiles: string[];
 }
+interface AnalyticsWeek {
+  id: number; file: string; uploadedAt: string; periodStart: string | null; periodEnd: string | null; totals: Record<string, number>;
+  daily: Record<string, string | number>[];
+  posts: { url: string | null; publishedOn: string | null; impressions: number | null; engagements: number | null; postId: number | null }[];
+  demographics: Record<string, { value: string; pct: number }[]>;
+}
 interface PostAnalytics { uploadedAt: string; file: string; postedOn: string | null; postUrl: string | null; metrics: Record<string, number>; demographics: Record<string, { value: string; pct: number }[]> }
 interface Draft { id: number; creatorId: number; title: string; body: string; kind: Kind; due: string; angle: string; photoIdea: string; status: "review" | "changes"; batch: string | null; feedback: Feedback[]; versions: Version[]; updatedAt: string }
 interface Standing {
@@ -833,7 +839,7 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
   f: Fellow; D: Desk; act: (b: Record<string, unknown>, done?: string) => Promise<Desk | null>; creatorApi: (p: string, b: Record<string, unknown>, d?: string) => Promise<unknown>;
   setDrawer: (d: DrawerState | null) => void; nudge: (id: number) => void; copyPlan: (names: string[], w: string) => void; toast: (m: string) => void;
 }) {
-  const [extras, setExtras] = useState<{ stories: Story[]; earlierPosts: { id: number; title: string | null; body: string; posted_on: string | null; impressions: number | null }[]; applicationNotes: string } | null>(null);
+  const [extras, setExtras] = useState<{ stories: Story[]; earlierPosts: { id: number; title: string | null; body: string; posted_on: string | null; impressions: number | null }[]; applicationNotes: string; weeks?: AnalyticsWeek[] } | null>(null);
   const [confirmPause, setConfirmPause] = useState(false);
   useEffect(() => { let on = true; api<typeof extras>(`/api/fellowship-calendar?fellow=${f.id}`).then((x) => { if (on) setExtras(x); }).catch(() => {}); return () => { on = false; }; }, [f.id, f.stories, f.earlierPosts]);
   const s = f.standing, today = D.today, THIS = D.thisWeek;
@@ -896,6 +902,8 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
           })}
         </section>
 
+        <section aria-labelledby="wa-h"><div className="sec-h"><h3 id="wa-h">LinkedIn analytics</h3><span>Uploaded by {f.first} each week</span></div>
+          <WeeklyAnalytics weeks={extras?.weeks ?? null} f={f} /></section>
         <section aria-labelledby="ab-h"><div className="sec-h"><h3 id="ab-h">About them</h3><span>Notes from your calls. Claude reads these before writing</span></div>
           <NotesBox saved={f.teamNotes} label={`About ${f.name}`} placeholder="Their goals, the roles they want, what they've done, how they talk, anything to avoid."
             onSave={(text) => act({ intent: "notes", id: f.id, teamNotes: text }, "Notes saved")} />
@@ -998,7 +1006,7 @@ function AnalyticsBox({ p, first }: { p: Post; first: string }) {
       setTimeout(() => URL.revokeObjectURL(u), 10_000);
     } catch { setErr("Couldn't download it"); }
   };
-  if (!a) return <div className="proofs"><h3 className="label" style={{ margin: 0 }}>LinkedIn analytics</h3><p className="hint">Not uploaded yet. {first} exports it from the post on LinkedIn (View analytics, then Export) and uploads the file on their page.</p></div>;
+  if (!a) return <div className="proofs"><h3 className="label" style={{ margin: 0 }}>LinkedIn analytics</h3><p className="hint">Not in yet. The numbers fill in from {first}'s weekly LinkedIn export once it covers the day this went up.</p></div>;
   const keys = [...METRIC_ORDER.filter((k) => k in a.metrics), ...Object.keys(a.metrics).filter((k) => !METRIC_ORDER.includes(k))];
   return (
     <div className="proofs">
@@ -1009,6 +1017,45 @@ function AnalyticsBox({ p, first }: { p: Post; first: string }) {
           <ul className="thread">{rows.slice(0, 8).map((r) => <li key={r.value}>{r.value} <b>{(r.pct * 100).toFixed(1)}%</b></li>)}</ul></details>
       ))}
       {a.file ? <div className="actions"><button className="btn btn-line btn-sm" type="button" onClick={download}><Icon id="down" />Download the file</button>{err ? <span className="hint" role="alert">{err}</span> : null}</div> : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- a fellow's weekly LinkedIn export (account-wide, 7 days)
+async function downloadRef(ref: string, name: string): Promise<string | null> {
+  try {
+    const token = await getToken();
+    const res = await fetch(`/api/fellowship-proof?ref=${encodeURIComponent(ref)}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { const j = await res.json().catch(() => null); return (j && j.error) || "Couldn't download it"; }
+    const u = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a"); link.href = u; link.download = name; link.click();
+    setTimeout(() => URL.revokeObjectURL(u), 10_000);
+    return null;
+  } catch { return "Couldn't download it"; }
+}
+function WeeklyAnalytics({ weeks, f }: { weeks: AnalyticsWeek[] | null; f: Fellow }) {
+  const [err, setErr] = useState("");
+  if (!weeks) return <div className="storyb"><p className="m">Loading…</p></div>;
+  if (!weeks.length) return <div className="storyb"><p className="m">No upload yet. {f.first}'s page asks for LinkedIn's weekly export every Sunday.</p></div>;
+  const [w, ...older] = weeks;
+  const span = (x: AnalyticsWeek) => (x.periodStart && x.periodEnd ? `${fmt(x.periodStart)} to ${fmt(x.periodEnd)}` : `uploaded ${fmt(istDay(x.uploadedAt))}`);
+  const keys = [...["impressions", "membersReached", "newFollowers", "totalFollowers"].filter((k) => k in w.totals), ...Object.keys(w.totals).filter((k) => !["impressions", "membersReached", "newFollowers", "totalFollowers"].includes(k))];
+  const title = (id: number | null) => (id != null ? f.posts.find((p) => p.id === id)?.title ?? null : null);
+  return (
+    <div className="proofs">
+      <h3 className="label" style={{ margin: 0 }}>Week of {span(w)} <small className="hint">uploaded {fmt(istDay(w.uploadedAt))}</small></h3>
+      {keys.length ? <dl className="kv">{keys.map((k) => <div key={k}><dt>{metricLabel(k)}</dt><dd>{num(w.totals[k])}</dd></div>)}</dl> : null}
+      {w.posts.length ? <details className="more" open><summary>Posts in this export ({w.posts.length})</summary>
+        <ul className="thread">{w.posts.map((p, i) => <li key={`${p.url}-${i}`}><b>{title(p.postId) ?? (p.postId != null ? `Post ${p.postId}` : "A post not from the fellowship")}</b>{p.publishedOn ? ` · ${fmt(p.publishedOn)}` : ""} · {p.impressions != null ? `${num(p.impressions)} impressions` : "no impressions"}{p.engagements != null ? ` · ${num(p.engagements)} engagements` : ""}</li>)}</ul></details> : null}
+      {w.daily.length ? <details className="more"><summary>Day by day</summary>
+        <ul className="thread">{w.daily.map((d) => <li key={String(d.date)}>{fmt(String(d.date))}: {Object.entries(d).filter(([k]) => k !== "date").map(([k, v]) => `${metricLabel(k)} ${num(Number(v))}`).join(" · ")}</li>)}</ul></details> : null}
+      {Object.entries(w.demographics).filter(([, rows]) => rows.length).map(([k, rows]) => (
+        <details className="more" key={k}><summary>Who saw it: {k}</summary>
+          <ul className="thread">{rows.slice(0, 8).map((r) => <li key={r.value}>{r.value} <b>{(r.pct * 100).toFixed(1)}%</b></li>)}</ul></details>
+      ))}
+      <div className="actions"><button className="btn btn-line btn-sm" type="button" onClick={async () => setErr((await downloadRef(w.file, `linkedin-week-${f.first.toLowerCase()}-${w.periodEnd ?? w.id}.xlsx`)) ?? "")}><Icon id="down" />Download the file</button>{err ? <span className="hint" role="alert">{err}</span> : null}</div>
+      {older.length ? <details className="more"><summary>Earlier weeks ({older.length})</summary>
+        <ul className="thread">{older.map((x) => <li key={x.id}>{span(x)}: {x.totals.impressions != null ? `${num(x.totals.impressions)} impressions` : "no impressions total"}{x.totals.newFollowers != null ? ` · ${num(x.totals.newFollowers)} new followers` : ""}</li>)}</ul></details> : null}
     </div>
   );
 }

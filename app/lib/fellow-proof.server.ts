@@ -7,9 +7,10 @@ import { createHmac, randomBytes } from "node:crypto";
 // REST with Shared Key auth, so no storage SDK. The blob names are the frontend's:
 // fellow-proof/<creatorId>/<postId>/<uploadMs>-<12 hex>.jpg        (screenshot)
 // fellow-proof/<creatorId>/<postId>/photo/<uploadMs>-<12 hex>.jpg  (post photo)
-// fellow-proof/<creatorId>/<postId>/analytics/<uploadMs>-<12 hex>.xlsx  (LinkedIn analytics export, since 3 Nov 2026)
-const PROOF = /^fellow-proof\/\d{1,10}\/\d{1,10}\/(?:(?:photo\/)?\d{13}-[0-9a-f]{12}\.jpg|analytics\/\d{13}-[0-9a-f]{12}\.xlsx)$/;
-const ANALYTICS = /^fellow-proof\/\d{1,10}\/\d{1,10}\/analytics\/\d{13}-[0-9a-f]{12}\.xlsx$/;
+// fellow-proof/<creatorId>/<postId>/analytics/<uploadMs>-<12 hex>.xlsx  (one post's export, 3 Nov 2026)
+// fellow-proof/<creatorId>/analytics/<uploadMs>-<12 hex>.xlsx  (the weekly account-wide export, since 4 Nov 2026)
+const PROOF = /^fellow-proof\/\d{1,10}\/(?:\d{1,10}\/(?:(?:photo\/)?\d{13}-[0-9a-f]{12}\.jpg|analytics\/\d{13}-[0-9a-f]{12}\.xlsx)|analytics\/\d{13}-[0-9a-f]{12}\.xlsx)$/;
+const ANALYTICS = /^fellow-proof\/\d{1,10}\/(?:\d{1,10}\/)?analytics\/\d{13}-[0-9a-f]{12}\.xlsx$/;
 const PHOTO = /^fellow-proof\/\d{1,10}\/\d{1,10}\/photo\/\d{13}-[0-9a-f]{12}\.jpg$/;
 const VERSION = "2021-08-06";
 export const PHOTOS_PER_POST = 4;
