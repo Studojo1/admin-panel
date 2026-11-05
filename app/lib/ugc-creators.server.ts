@@ -222,6 +222,12 @@ async function createTables() {
     SET rules = jsonb_set(rules, '{milestones}', ${JSON.stringify(PROGRAMME_RULES.milestones)}::jsonb) || '{"hiringPipeline": null}'::jsonb,
         updated_at = NOW(), updated_by = 'founder, 4 Nov 2026'
     WHERE id = 1 AND rules->'milestones' @> '[{"id": "trial"}]'::jsonb
+  `);  // 5 Nov 2026: the founder moved weeks to Wednesday to Tuesday, starting the day the first posts went out.
+  // Applied once, only while the row still describes Monday weeks.
+  await db.execute(sql`
+    UPDATE ugc_programme
+    SET rules = jsonb_set(rules, '{weeks}', ${JSON.stringify(PROGRAMME_RULES.weeks)}::jsonb), updated_at = NOW(), updated_by = 'founder, 5 Nov 2026'
+    WHERE id = 1 AND rules->>'weeks' LIKE 'Weeks run Monday to Sunday%'
   `);
 }
 
@@ -249,7 +255,7 @@ export function studentLink(slug: string | null | undefined): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Programme rules. Weeks run Monday to Sunday, India time. A post belongs to
+// Programme rules. Weeks run Wednesday to Tuesday, India time. A post belongs to
 // the week of its due date. A week is complete when it has posts and every one
 // of them is posted. The run is the complete weeks in a row counting back from
 // last week, plus this week once it is complete (an unfinished current week
@@ -264,11 +270,11 @@ export function istDate(t: Date | string | number = new Date()): string {
   return IST_DATE.format(new Date(t));
 }
 
-/** The Monday of the week a "YYYY-MM-DD" date falls in. */
+/** The Wednesday of the week a "YYYY-MM-DD" date falls in: weeks run Wednesday to Tuesday (the founder, 5 Nov 2026). */
 export function weekOf(day: string): string {
   const [y, m, d] = day.slice(0, 10).split("-").map(Number);
   const t = Date.UTC(y, m - 1, d);
-  const dow = (new Date(t).getUTCDay() + 6) % 7; // Monday = 0
+  const dow = (new Date(t).getUTCDay() + 4) % 7; // Wednesday = 0
   return new Date(t - dow * DAY).toISOString().slice(0, 10);
 }
 
@@ -330,7 +336,7 @@ export const PROGRAMME_RULES = {
   studojoPerWeek: 2,
   partnershipLabel: "In partnership with Studojo",
   weeks:
-    "Weeks run Monday to Sunday, India time. A week is complete when it has posts and every one is posted. Posts the team has blocked don't count.",
+    "Weeks run Wednesday to Tuesday, India time (week 1 began Wednesday 4 November 2026, when the first posts went out). A week is complete when it has posts and every one is posted. Posts the team has blocked don't count.",
   milestones: MILESTONES.map((m) => ({ id: m.id, weeks: m.weeks, name: m.name, detail: m.detail })),
   // The 12-week milestone is now the hiring opportunity, so there is no separate hiring step.
   hiringPipeline: null,
