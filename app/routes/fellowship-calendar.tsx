@@ -63,13 +63,14 @@ interface Desk {
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DOWL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const DSHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// Weeks run Wednesday to Tuesday (the founder, 5 Nov 2026), so the calendar's columns start on Wednesday.
+const DSHORT = ["Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"];
 const day = (s: string) => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
 const fmt = (s: string) => { const x = day(s); return `${x.getUTCDate()} ${MON[x.getUTCMonth()]}`; };
 const dow = (s: string) => DOW[day(s).getUTCDay()];
 const addDays = (s: string, n: number) => { const x = day(s); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const diff = (a: string, b: string) => Math.round((day(b).getTime() - day(a).getTime()) / 86400000);
-const weekOf = (s: string) => addDays(s, -((day(s).getUTCDay() + 6) % 7));
+const weekOf = (s: string) => addDays(s, -((day(s).getUTCDay() + 4) % 7));
 const istDay = (t: string | number) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t));
 const num = (n: number) => Number(n || 0).toLocaleString("en-US");
 const kfmt = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + "M" : n >= 1000 ? String(Math.round(n / 100) / 10).replace(/\.0$/, "") + "K" : String(n));
@@ -1162,7 +1163,7 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
   const existing = f && state.postId ? f.posts.find((p) => p.id === state.postId) ?? null : null;
   const today = D.today, LABEL = D.rules.partnershipLabel;
   const taken = new Set(f ? [...f.posts, ...f.drafts].map((x) => x.due) : []);
-  const isPostDay = (s: string) => postDays.includes((day(s).getUTCDay() + 6) % 7);
+  const isPostDay = (s: string) => postDays.includes((day(s).getUTCDay() + 4) % 7);
   const freeDays = (n: number) => { const out: string[] = []; for (let k = 0; out.length < n && k < 60; k++) { const s = addDays(today, k); if (isPostDay(s) && !taken.has(s)) out.push(s); } return out; };
   const [kind, setKind] = useState<Kind>(existing?.kind ?? "personal");
   const [date, setDate] = useState<string>(existing?.due ?? state.date ?? "");

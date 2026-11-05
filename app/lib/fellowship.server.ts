@@ -682,10 +682,13 @@ export async function calendarView() {
   const weekly = Array.from({ length: 6 }, (_, i) => addDays(thisWeek, -7 * (5 - i))).map((w) => ({
     week: w, impressions: posts.filter((p) => isPosted(p) && p.postedAt && weekOf(istDate(p.postedAt)) === w).reduce((s, p) => s + imp(p), 0), partial: w === thisWeek,
   }));
+  // Week 1 is the week the first approved posts were due (the founder, 5 Nov 2026: the fellowship's clock
+  // starts when posts start going out), or the first join while there are none yet.
+  const firstDue = posts.map((p) => p.due).filter(Boolean).sort()[0];
   const firstJoin = live.map((f) => f.joined).filter(Boolean).sort()[0] ?? today;
 
   return {
-    today, thisWeek, rules, playbook: pb, programmeStart: weekOf(firstJoin),
+    today, thisWeek, rules, playbook: pb, programmeStart: weekOf(firstDue ?? firstJoin),
     totals: {
       impressions: posts.filter(isPosted).reduce((s, p) => s + imp(p), 0), studojoImpressions,
       measuredPosts: posts.filter(measured).length,

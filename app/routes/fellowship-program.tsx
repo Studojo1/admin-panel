@@ -238,7 +238,7 @@ function Funnel({ f }: { f: Dash["funnel"] }) {
     ["Applied", f.applied, "Every application on the form"],
     ["Selected (fellows)", f.fellows, "Selected and given a fellow page"],
     ["Posted at least once", f.postedOnce, "Marked a post as posted"],
-    ["Posted this week", f.postingThisWeek, "Since Monday, India time"],
+    ["Posted this week", f.postingThisWeek, "Since Wednesday, India time"],
   ] as const;
   const top = Math.max(1, f.applied);
   return (
