@@ -879,7 +879,7 @@ export async function agentRoster() {
   const [fs, posts, drafts, rules] = await Promise.all([fellows(), postsOf(null), draftsOf(null), programmeRules()]);
   return {
     today,
-    programme: { postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules), partnershipLabel: rules.partnershipLabel },
+    programme: { postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules) },
     fellows: fs.filter((f) => f.status !== "removed").map((f) => {
       const ps = posts.filter((p) => p.creatorId === f.id), ds = drafts.filter((d) => d.creatorId === f.id);
       return {
@@ -1058,7 +1058,7 @@ export async function agentFellow(id: number) {
     drafts: ds.map(agentDraft),
     takenDays: [...own.map((p) => p.due), ...ds.map((d) => d.due)].filter((d) => d >= today).sort(),
     programme: {
-      postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules), partnershipLabel: rules.partnershipLabel,
+      postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules),
       postsWithNumbers: all.filter(measured).length, usualImpressions: usual(), usualStudojoPost: usual("studojo"), usualPersonalPost: usual("personal"),
     },
     playbook: pb.text,

@@ -77,7 +77,6 @@ const kfmt = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + "M"
 const plural = (n: number, one: string, many = one + "s") => `${num(n)} ${n === 1 ? one : many}`;
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 const avClass = (name: string) => "av-" + ((name.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 5) + 1);
-const PARTNERSHIP = /in partnership with studojo|#partnership|#ad\b|#sponsored|paid partnership/i; // only to suggest the optional line; nothing requires it
 const POST_MAX = 3000;
 const ago = (iso: string | null) => {
   if (!iso) return "No activity yet";
@@ -1110,7 +1109,6 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
   const byClaude = d.versions.filter((v) => v.by === "claude").length;
   const lastV = d.versions[d.versions.length - 1];
   const ver = lastV?.by === "team" ? "Edited by the team" : byClaude > 1 ? `Revised by Claude (draft ${byClaude})` : "Claude's first draft";
-  const noLabel = kind === "studojo" && !PARTNERSHIP.test(body);
   const open = d.feedback.filter((x) => !x.resolvedAt);
   return (
     <article className={`dcard${dirty ? " is-dirty" : ""}${busy ? " is-busy" : ""}`} aria-label={title}>
@@ -1122,8 +1120,6 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
       {d.status === "changes" ? <p className="note note-warn"><Icon id="alert" /><span><b>Waiting for Claude.</b> Sent back {open.length ? fmt(istDay(open[open.length - 1].t)) : ""}. It stays off {f.first}'s page until it's approved.</span></p> : null}
       <input className="input" aria-label="Title" value={title} maxLength={140} onChange={(e) => setTitle(e.target.value)} style={{ fontWeight: 650 }} />
       <textarea className="input dbody" aria-label="Post text" value={body} onChange={(e) => setBody(e.target.value)} />
-      {noLabel ? <div className="note"><span>This Studojo post has no partnership line. That's allowed; add it if you want one.</span>
-        <button className="btn btn-outline btn-sm" type="button" style={{ background: "var(--card)" }} onClick={() => setBody(`In partnership with Studojo\n\n${body.trim()}`)}>Add the line</button></div> : null}
       <div className="text-meta"><span className={`cnt${body.trim().length > POST_MAX ? " over" : ""}`}>{num(body.trim().length)} / 3,000 characters</span>{dirty ? <span className="dirty">Unsaved edits</span> : null}</div>
       {d.angle ? <p className="why-line"><b>Why this post: </b>{d.angle}</p> : null}
       <div className="field"><label htmlFor={`dpi-${d.id}`}>Photo idea, shown to {f.first} with the post</label>
@@ -1161,7 +1157,7 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
   const [fid, setFid] = useState<number | null>(state.id);
   const f = fid ? byId(fid) : null;
   const existing = f && state.postId ? f.posts.find((p) => p.id === state.postId) ?? null : null;
-  const today = D.today, LABEL = D.rules.partnershipLabel;
+  const today = D.today;
   const taken = new Set(f ? [...f.posts, ...f.drafts].map((x) => x.due) : []);
   const isPostDay = (s: string) => postDays.includes((day(s).getUTCDay() + 4) % 7);
   const freeDays = (n: number) => { const out: string[] = []; for (let k = 0; out.length < n && k < 60; k++) { const s = addDays(today, k); if (isPostDay(s) && !taken.has(s)) out.push(s); } return out; };
@@ -1207,7 +1203,6 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
     );
   }
 
-  const hasLabel = PARTNERSHIP.test(text);
   const save = async () => {
     setErr(null);
     if (!f) return setErr("Choose who this post is for.");
@@ -1234,7 +1229,7 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
         <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}><legend className="label" style={{ marginBottom: 6 }}>Type</legend>
           <div className="typeseg">
             <label><input type="radio" name="pe-kind" value="personal" checked={kind === "personal"} onChange={() => setKind("personal")} />Their story</label>
-            <label><input type="radio" name="pe-kind" value="studojo" checked={kind === "studojo"} onChange={() => { setKind("studojo"); if (!text.trim()) setText(`${LABEL}\n\n`); }} /><span className="mk" aria-hidden="true">S</span>{LABEL}</label>
+            <label><input type="radio" name="pe-kind" value="studojo" checked={kind === "studojo"} onChange={() => setKind("studojo")} /><span className="mk" aria-hidden="true">S</span>Studojo post</label>
           </div></fieldset>
         <div className="field"><label htmlFor="pe-date">Post date</label>
           <div className="date-row"><input className="input" id="pe-date" type="date" min={today} value={date} onChange={(e) => setDate(e.target.value)} />
@@ -1246,7 +1241,6 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
         <div className="field"><label htmlFor="pe-text">Post text</label>
           <textarea className="input" id="pe-text" rows={10} maxLength={POST_MAX} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write it the way it will appear on LinkedIn" />
           <div className="text-meta">
-            {kind === "studojo" ? (hasLabel ? <span className="note note-ok" style={{ padding: "4px 10px" }}><Icon id="check" />Includes "{LABEL}"</span> : <span className="cnt">Optional: add "{LABEL}". <button className="btn btn-quiet btn-sm" type="button" onClick={() => setText(`${LABEL}\n\n${text.trim()}`)}>Add the line</button></span>) : <span className="cnt">Their own posts don't need a label.</span>}
             <span className="cnt">{num(text.length)} / 3,000</span></div>
         </div>
         {err ? <div className="note note-bad" role="alert"><Icon id="alert" /><span>{err}</span></div> : null}
