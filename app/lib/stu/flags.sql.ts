@@ -100,12 +100,13 @@ export function flagQueries(w: FlagWindow): FlagQuery[] {
        ORDER BY created_at DESC LIMIT ${LIMIT}`),
 
     // The 'onboarded' step is stamped after the jobs were first shown (in prod 66 of 96 saw_jobs came in the 30 minutes before it), so a
-    // desk_opened strictly after it alone would flag 87 of 96. Reaching the desk is desk_opened, saw_jobs, job_opened or job_saved after it.
+    // desk_opened strictly after it alone would flag 87 of 96. Reaching the desk is desk_opened, saw_jobs, job_opened or job_saved from 10 minutes before it (on 7 Nov, after it only
+    // flagged 31 of 96, 29 of them had seen their jobs just before) to 30 minutes after.
     q("ONBOARDED_NO_DESK", "Onboarded, no desk", ["career_journey_events"], `
       SELECT DISTINCT ON (e.user_id) e.user_id, ${ms("e.at")} AS at, extract(epoch FROM (now() - e.at)) / 60 AS mins
         FROM ${J} e
        WHERE e.step = 'onboarded' AND e.at >= ${F} AND e.at < ${T} AND e.at < now() - interval '30 minutes' AND e.user_id IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM ${J} d WHERE d.user_id = e.user_id AND d.step IN ('desk_opened', 'saw_jobs', 'job_opened', 'job_saved') AND d.at >= e.at AND d.at <= e.at + interval '30 minutes')
+         AND NOT EXISTS (SELECT 1 FROM ${J} d WHERE d.user_id = e.user_id AND d.step IN ('desk_opened', 'saw_jobs', 'job_opened', 'job_saved') AND d.at >= e.at - interval '10 minutes' AND d.at <= e.at + interval '30 minutes')
        ORDER BY e.user_id, e.at DESC LIMIT ${LIMIT}`),
 
     q("MIC_BLOCKED_LEFT", "Mic blocked, left", ["career_journey_events"], `

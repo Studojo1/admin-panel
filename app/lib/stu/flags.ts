@@ -32,7 +32,7 @@ export const FLAG_TYPES: FlagType[] = [
   { key: "REPEATED_PICKS", group: "matching", severity: "med", label: "Repeated picks", rule: "A day's picks hold jobs that were already in an earlier day's picks for the same student." },
   { key: "WEAK_PICK", group: "matching", severity: "med", label: "Weak pick", rule: "A picked job whose verdict has fit under 70, or says far above or far below." },
   { key: "CALL_NOT_CONFIRMED", group: "journey", severity: "high", label: "Call not confirmed", rule: "A call has been ready for over 30 minutes: analysis done, the student never confirmed the review or saw jobs." },
-  { key: "ONBOARDED_NO_DESK", group: "journey", severity: "high", label: "Onboarded, no desk", rule: "Onboarded, and no desk opened, jobs shown, opened or saved within 30 minutes after." },
+  { key: "ONBOARDED_NO_DESK", group: "journey", severity: "high", label: "Onboarded, no desk", rule: "Onboarded, and no desk opened, jobs shown, opened or saved from 10 minutes before to 30 minutes after (a call shows the jobs just before the step is stamped)." },
   { key: "MIC_BLOCKED_LEFT", group: "journey", severity: "med", label: "Mic blocked, left", rule: "The mic was denied and there was no call started or onboarding within an hour after." },
   { key: "CALL_DROPPED", group: "journey", severity: "high", label: "Call dropped", rule: "A call failed (not a blocked mic) or ended as failed, and no completed call came after." },
   { key: "VERIFIED_NO_CALL", group: "journey", severity: "low", label: "Verified, no call", rule: "Phone verified and no call started within 24 hours." },
