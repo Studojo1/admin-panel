@@ -28,6 +28,8 @@ export default [
   // Auditor (4 Nov 2026): every failure in a range with the person and why; its own range control, like the Overview.
   route("auditor", "routes/stu-auditor.tsx"),
   route("api/stu/auditor", "routes/api.stu-auditor.tsx"),
+  // Auditor flags (7 Nov 2026): bad matches and bad journeys per student, a tab on the Auditor page.
+  route("api/stu/flags", "routes/api.stu-flags.tsx"),
   // Visitors (4 Nov 2026): real visitors, likely bots and crawlers, the funnel per source and the drop-offs; its own range control.
   route("visitors", "routes/visitors.tsx"),
   route("api/visitors", "routes/api.visitors.tsx"),
