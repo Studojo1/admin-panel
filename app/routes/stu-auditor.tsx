@@ -7,6 +7,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { AdminHeader } from "~/components";
+import { AuditorTabs, FlagsPanel } from "~/components/stu/flags-panel";
 import { CARD } from "~/components/stu/ui";
 import { getToken } from "~/lib/api";
 import { useAdminGuard } from "~/lib/auth-guard";
@@ -56,6 +57,8 @@ export default function StuAuditor() {
   const internal = params.get("internal") === "1";
   const group = (AUDIT_GROUPS.some((g) => g.key === params.get("group")) ? params.get("group") : null) as AuditGroup | null;
   const code = params.get("reason");
+  const tab = params.get("tab") === "flags" ? "flags" : "failures";
+  const setTab = (t: "failures" | "flags") => setParam({ tab: t === "flags" ? "flags" : null });
 
   const setParam = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
@@ -90,8 +93,8 @@ export default function StuAuditor() {
     }
   }, [start, end, internal]);
   useEffect(() => {
-    if (isAuthorized) load(false);
-  }, [isAuthorized, load]);
+    if (isAuthorized && tab === "failures") load(false);
+  }, [isAuthorized, load, tab]);
 
   const rows = useMemo(() => (report ? report.rows.filter((r) => inRange(r, start, end)) : []), [report, start, end]);
   const groups = useMemo(() => byGroup(rows), [rows]);
@@ -103,6 +106,21 @@ export default function StuAuditor() {
     return <div className="flex min-h-screen items-center justify-center bg-neutral-50 text-neutral-500">Loading...</div>;
   }
   if (!isAuthorized) return null;
+  if (tab === "flags") {
+    return (
+      <div className="min-h-screen bg-neutral-50">
+        <AdminHeader />
+        <main className="mx-auto max-w-[100rem] px-4 py-6 sm:px-6 lg:px-8">
+          <div className="mb-3">
+            <div className="text-xs font-bold uppercase tracking-wide text-purple-700">Stu</div>
+            <h1 className="font-['Clash_Display'] text-3xl font-bold text-neutral-900">Auditor</h1>
+          </div>
+          <AuditorTabs tab={tab} onTab={setTab} />
+          <FlagsPanel />
+        </main>
+      </div>
+    );
+  }
 
   const qs = new URLSearchParams({ start, end, ...(internal ? { internal: "1" } : {}) }).toString();
   const journey = (r: AuditRow) => `/journeys?${qs}&u=${encodeURIComponent(r.user!)}`;
@@ -142,6 +160,8 @@ export default function StuAuditor() {
             <button onClick={() => load(true)} disabled={loading} className="rounded-lg border-2 border-neutral-900 bg-purple-500 px-2.5 py-1 font-semibold text-white shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50">{loading ? "Loading" : "Refresh"}</button>
           </div>
         </div>
+
+        <AuditorTabs tab={tab} onTab={setTab} />
 
         {error && <div className="mb-3 rounded-xl border-2 border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
         {!report && !error && (
