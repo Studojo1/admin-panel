@@ -14,84 +14,159 @@ type Pages = {
   "/": {
     params: {};
   };
+  "/daily": {
+    params: {};
+  };
+  "/funnel": {
+    params: {};
+  };
+  "/ratios": {
+    params: {};
+  };
+  "/drop-offs": {
+    params: {};
+  };
+  "/sources": {
+    params: {};
+  };
+  "/journeys": {
+    params: {};
+  };
+  "/retention": {
+    params: {};
+  };
+  "/usage": {
+    params: {};
+  };
+  "/api/stu": {
+    params: {};
+  };
+  "/api/stu/overview": {
+    params: {};
+  };
+  "/auditor": {
+    params: {};
+  };
+  "/api/stu/auditor": {
+    params: {};
+  };
+  "/api/stu/flags": {
+    params: {};
+  };
+  "/visitors": {
+    params: {};
+  };
+  "/api/visitors": {
+    params: {};
+  };
+  "/recordings": {
+    params: {};
+  };
+  "/api/recordings": {
+    params: {};
+  };
+  "/api/recordings/:id": {
+    params: {
+      "id": string;
+    };
+  };
+  "/api/recordings/:id/chunk": {
+    params: {
+      "id": string;
+    };
+  };
+  "/vendors": {
+    params: {};
+  };
+  "/api/vendors": {
+    params: {};
+  };
   "/login": {
     params: {};
   };
   "/users": {
     params: {};
   };
-  "/funnel": {
-    params: {};
-  };
-  "/journeys": {
-    params: {};
-  };
-  "/daily": {
-    params: {};
-  };
-  "/api/dashboard": {
-    params: {};
-  };
-  "/api/overview": {
-    params: {};
-  };
-  "/api/paid-emails": {
-    params: {};
-  };
-  "/assignments": {
-    params: {};
-  };
-  "/dissertations": {
-    params: {};
-  };
-  "/outreach-orders": {
-    params: {};
-  };
-  "/campaign-health": {
-    params: {};
-  };
-  "/paid-users": {
-    params: {};
-  };
-  "/outreach-campaign": {
-    params: {};
-  };
-  "/outreach": {
-    params: {};
-  };
-  "/careers": {
-    params: {};
-  };
-  "/settings": {
-    params: {};
-  };
-  "/api/settings": {
-    params: {};
-  };
-  "/email-sequences": {
-    params: {};
-  };
-  "/chat-logs": {
-    params: {};
-  };
-  "/api/chat-logs": {
-    params: {};
-  };
   "/ops-alerts": {
     params: {};
-  };
-  "/api/ops-alerts": {
-    params: {};
-  };
-  "/api/ops-alerts/:id": {
-    params: {
-      "id": string;
-    };
   };
   "/tickets": {
     params: {};
   };
   "/tickets/:id": {
+    params: {
+      "id": string;
+    };
+  };
+  "/settings": {
+    params: {};
+  };
+  "/consultation-signups": {
+    params: {};
+  };
+  "/utm-builder": {
+    params: {};
+  };
+  "/webinar-registrations": {
+    params: {};
+  };
+  "/campus-ambassadors": {
+    params: {};
+  };
+  "/ugc-applicants": {
+    params: {};
+  };
+  "/fellowship": {
+    params: {};
+  };
+  "/fellowship-program": {
+    params: {};
+  };
+  "/fellowship-program/calendar": {
+    params: {};
+  };
+  "/fellowship/calendar": {
+    params: {};
+  };
+  "/sensei": {
+    params: {};
+  };
+  "/b2b-gtm": {
+    params: {};
+  };
+  "/b2b-gtm/team/:who": {
+    params: {
+      "who": string;
+    };
+  };
+  "/b2b-gtm/:id": {
+    params: {
+      "id": string;
+    };
+  };
+  "/gtm": {
+    params: {};
+  };
+  "/gtm/:slug": {
+    params: {
+      "slug": string;
+    };
+  };
+  "/api/settings": {
+    params: {};
+  };
+  "/api/sensei": {
+    params: {};
+  };
+  "/api/sensei/chat/:chatId": {
+    params: {
+      "chatId": string;
+    };
+  };
+  "/api/ops-alerts": {
+    params: {};
+  };
+  "/api/ops-alerts/:id": {
     params: {
       "id": string;
     };
@@ -109,66 +184,251 @@ type Pages = {
       "id": string;
     };
   };
-  "/consultation-signups": {
-    params: {};
-  };
   "/api/consultation-signups": {
-    params: {};
-  };
-  "/analytics": {
-    params: {};
-  };
-  "/utm-builder": {
     params: {};
   };
   "/api/utm-campaigns": {
     params: {};
   };
-  "/coupons": {
-    params: {};
-  };
-  "/api/coupons": {
+  "/api/utm-report": {
     params: {};
   };
   "/api/posthog": {
     params: {};
   };
-  "/api/analytics": {
-    params: {};
-  };
-  "/api/outreach": {
-    params: {};
-  };
-  "/career-coach": {
-    params: {};
-  };
-  "/webinar-registrations": {
-    params: {};
-  };
   "/api/webinar-registrations": {
     params: {};
   };
-  "/b2b-gtm": {
+  "/api/campus-ambassadors": {
     params: {};
   };
-  "/b2b-gtm/:id": {
+  "/api/ugc-applicants": {
+    params: {};
+  };
+  "/api/ugc-creators": {
+    params: {};
+  };
+  "/api/ugc-creators/:id": {
     params: {
       "id": string;
     };
   };
+  "/api/fellowship-calendar": {
+    params: {};
+  };
+  "/api/fellowship-dashboard": {
+    params: {};
+  };
+  "/api/fellowship-proof": {
+    params: {};
+  };
+  "/api/agent/*": {
+    params: {
+      "*": string;
+    };
+  };
   "/api/b2b-gtm": {
     params: {};
+  };
+  "/api/gtm-dashboards": {
+    params: {};
+  };
+  "/old": {
+    params: {};
+  };
+  "/old/daily": {
+    params: {};
+  };
+  "/old/funnel": {
+    params: {};
+  };
+  "/old/journeys": {
+    params: {};
+  };
+  "/old/analytics": {
+    params: {};
+  };
+  "/old/outreach-orders": {
+    params: {};
+  };
+  "/old/outreach": {
+    params: {};
+  };
+  "/old/outreach-campaign": {
+    params: {};
+  };
+  "/old/campaign-health": {
+    params: {};
+  };
+  "/old/campaign-refund-check": {
+    params: {};
+  };
+  "/old/paid-users": {
+    params: {};
+  };
+  "/old/suppression": {
+    params: {};
+  };
+  "/old/coupons": {
+    params: {};
+  };
+  "/old/email-sequences": {
+    params: {};
+  };
+  "/old/career-coach": {
+    params: {};
+  };
+  "/old/careers": {
+    params: {};
+  };
+  "/old/dissertations": {
+    params: {};
+  };
+  "/old/assignments": {
+    params: {};
+  };
+  "/old/chat-logs": {
+    params: {};
+  };
+  "/old/api/dashboard": {
+    params: {};
+  };
+  "/old/api/sources": {
+    params: {};
+  };
+  "/old/api/health-watch": {
+    params: {};
+  };
+  "/old/api/overview": {
+    params: {};
+  };
+  "/old/api/paid-emails": {
+    params: {};
+  };
+  "/old/api/analytics": {
+    params: {};
+  };
+  "/old/api/outreach": {
+    params: {};
+  };
+  "/old/api/refund-check": {
+    params: {};
+  };
+  "/old/api/suppression": {
+    params: {};
+  };
+  "/old/api/coupons": {
+    params: {};
+  };
+  "/old/api/career-coach": {
+    params: {};
+  };
+  "/old/api/chat-logs": {
+    params: {};
+  };
+  "/*": {
+    params: {
+      "*": string;
+    };
   };
 };
 
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/login" | "/users" | "/funnel" | "/journeys" | "/daily" | "/api/dashboard" | "/api/overview" | "/api/paid-emails" | "/assignments" | "/dissertations" | "/outreach-orders" | "/campaign-health" | "/paid-users" | "/outreach-campaign" | "/outreach" | "/careers" | "/settings" | "/api/settings" | "/email-sequences" | "/chat-logs" | "/api/chat-logs" | "/ops-alerts" | "/api/ops-alerts" | "/api/ops-alerts/:id" | "/tickets" | "/tickets/:id" | "/api/tickets" | "/api/tickets/:id" | "/api/tickets/:id/messages" | "/consultation-signups" | "/api/consultation-signups" | "/analytics" | "/utm-builder" | "/api/utm-campaigns" | "/coupons" | "/api/coupons" | "/api/posthog" | "/api/analytics" | "/api/outreach" | "/career-coach" | "/webinar-registrations" | "/api/webinar-registrations" | "/b2b-gtm" | "/b2b-gtm/:id" | "/api/b2b-gtm";
+    page: "/" | "/daily" | "/funnel" | "/ratios" | "/drop-offs" | "/sources" | "/journeys" | "/retention" | "/usage" | "/api/stu" | "/api/stu/overview" | "/auditor" | "/api/stu/auditor" | "/api/stu/flags" | "/visitors" | "/api/visitors" | "/recordings" | "/api/recordings" | "/api/recordings/:id" | "/api/recordings/:id/chunk" | "/vendors" | "/api/vendors" | "/login" | "/users" | "/ops-alerts" | "/tickets" | "/tickets/:id" | "/settings" | "/consultation-signups" | "/utm-builder" | "/webinar-registrations" | "/campus-ambassadors" | "/ugc-applicants" | "/fellowship" | "/fellowship-program" | "/fellowship-program/calendar" | "/fellowship/calendar" | "/sensei" | "/b2b-gtm" | "/b2b-gtm/team/:who" | "/b2b-gtm/:id" | "/gtm" | "/gtm/:slug" | "/api/settings" | "/api/sensei" | "/api/sensei/chat/:chatId" | "/api/ops-alerts" | "/api/ops-alerts/:id" | "/api/tickets" | "/api/tickets/:id" | "/api/tickets/:id/messages" | "/api/consultation-signups" | "/api/utm-campaigns" | "/api/utm-report" | "/api/posthog" | "/api/webinar-registrations" | "/api/campus-ambassadors" | "/api/ugc-applicants" | "/api/ugc-creators" | "/api/ugc-creators/:id" | "/api/fellowship-calendar" | "/api/fellowship-dashboard" | "/api/fellowship-proof" | "/api/agent/*" | "/api/b2b-gtm" | "/api/gtm-dashboards" | "/old" | "/old/daily" | "/old/funnel" | "/old/journeys" | "/old/analytics" | "/old/outreach-orders" | "/old/outreach" | "/old/outreach-campaign" | "/old/campaign-health" | "/old/campaign-refund-check" | "/old/paid-users" | "/old/suppression" | "/old/coupons" | "/old/email-sequences" | "/old/career-coach" | "/old/careers" | "/old/dissertations" | "/old/assignments" | "/old/chat-logs" | "/old/api/dashboard" | "/old/api/sources" | "/old/api/health-watch" | "/old/api/overview" | "/old/api/paid-emails" | "/old/api/analytics" | "/old/api/outreach" | "/old/api/refund-check" | "/old/api/suppression" | "/old/api/coupons" | "/old/api/career-coach" | "/old/api/chat-logs" | "/*";
   };
-  "routes/dashboard.tsx": {
-    id: "routes/dashboard";
+  "routes/stu-overview.tsx": {
+    id: "routes/stu-overview";
     page: "/";
+  };
+  "routes/stu-layout.tsx": {
+    id: "routes/stu-layout";
+    page: "/daily" | "/funnel" | "/ratios" | "/drop-offs" | "/sources" | "/journeys" | "/retention" | "/usage";
+  };
+  "routes/stu-daily.tsx": {
+    id: "routes/stu-daily";
+    page: "/daily";
+  };
+  "routes/stu-funnel.tsx": {
+    id: "routes/stu-funnel";
+    page: "/funnel";
+  };
+  "routes/stu-ratios.tsx": {
+    id: "routes/stu-ratios";
+    page: "/ratios";
+  };
+  "routes/stu-dropoffs.tsx": {
+    id: "routes/stu-dropoffs";
+    page: "/drop-offs";
+  };
+  "routes/stu-sources.tsx": {
+    id: "routes/stu-sources";
+    page: "/sources";
+  };
+  "routes/stu-journeys.tsx": {
+    id: "routes/stu-journeys";
+    page: "/journeys";
+  };
+  "routes/stu-retention.tsx": {
+    id: "routes/stu-retention";
+    page: "/retention";
+  };
+  "routes/stu-usage.tsx": {
+    id: "routes/stu-usage";
+    page: "/usage";
+  };
+  "routes/api.stu.tsx": {
+    id: "routes/api.stu";
+    page: "/api/stu";
+  };
+  "routes/api.stu-overview.tsx": {
+    id: "routes/api.stu-overview";
+    page: "/api/stu/overview";
+  };
+  "routes/stu-auditor.tsx": {
+    id: "routes/stu-auditor";
+    page: "/auditor";
+  };
+  "routes/api.stu-auditor.tsx": {
+    id: "routes/api.stu-auditor";
+    page: "/api/stu/auditor";
+  };
+  "routes/api.stu-flags.tsx": {
+    id: "routes/api.stu-flags";
+    page: "/api/stu/flags";
+  };
+  "routes/visitors.tsx": {
+    id: "routes/visitors";
+    page: "/visitors";
+  };
+  "routes/api.visitors.tsx": {
+    id: "routes/api.visitors";
+    page: "/api/visitors";
+  };
+  "routes/recordings.tsx": {
+    id: "routes/recordings";
+    page: "/recordings";
+  };
+  "routes/api.recordings.tsx": {
+    id: "routes/api.recordings";
+    page: "/api/recordings";
+  };
+  "routes/api.recordings.$id.tsx": {
+    id: "routes/api.recordings.$id";
+    page: "/api/recordings/:id";
+  };
+  "routes/api.recordings.$id.chunk.tsx": {
+    id: "routes/api.recordings.$id.chunk";
+    page: "/api/recordings/:id/chunk";
+  };
+  "routes/vendors.tsx": {
+    id: "routes/vendors";
+    page: "/vendors";
+  };
+  "routes/api.vendors.tsx": {
+    id: "routes/api.vendors";
+    page: "/api/vendors";
   };
   "routes/login.tsx": {
     id: "routes/login";
@@ -178,93 +438,9 @@ type RouteFiles = {
     id: "routes/users";
     page: "/users";
   };
-  "routes/funnel.tsx": {
-    id: "routes/funnel";
-    page: "/funnel";
-  };
-  "routes/user-journeys.tsx": {
-    id: "routes/user-journeys";
-    page: "/journeys";
-  };
-  "routes/daily-dashboard.tsx": {
-    id: "routes/daily-dashboard";
-    page: "/daily";
-  };
-  "routes/api.dashboard.tsx": {
-    id: "routes/api.dashboard";
-    page: "/api/dashboard";
-  };
-  "routes/api.overview.tsx": {
-    id: "routes/api.overview";
-    page: "/api/overview";
-  };
-  "routes/api.paid-emails.tsx": {
-    id: "routes/api.paid-emails";
-    page: "/api/paid-emails";
-  };
-  "routes/assignments.tsx": {
-    id: "routes/assignments";
-    page: "/assignments";
-  };
-  "routes/dissertations.tsx": {
-    id: "routes/dissertations";
-    page: "/dissertations";
-  };
-  "routes/outreach-orders.tsx": {
-    id: "routes/outreach-orders";
-    page: "/outreach-orders";
-  };
-  "routes/campaign-health.tsx": {
-    id: "routes/campaign-health";
-    page: "/campaign-health";
-  };
-  "routes/paid-users.tsx": {
-    id: "routes/paid-users";
-    page: "/paid-users";
-  };
-  "routes/outreach-campaign.tsx": {
-    id: "routes/outreach-campaign";
-    page: "/outreach-campaign";
-  };
-  "routes/outreach.tsx": {
-    id: "routes/outreach";
-    page: "/outreach";
-  };
-  "routes/careers.tsx": {
-    id: "routes/careers";
-    page: "/careers";
-  };
-  "routes/settings.tsx": {
-    id: "routes/settings";
-    page: "/settings";
-  };
-  "routes/api.settings.tsx": {
-    id: "routes/api.settings";
-    page: "/api/settings";
-  };
-  "routes/email-sequences.tsx": {
-    id: "routes/email-sequences";
-    page: "/email-sequences";
-  };
-  "routes/chat-logs.tsx": {
-    id: "routes/chat-logs";
-    page: "/chat-logs";
-  };
-  "routes/api.chat-logs.tsx": {
-    id: "routes/api.chat-logs";
-    page: "/api/chat-logs";
-  };
   "routes/ops-alerts.tsx": {
     id: "routes/ops-alerts";
     page: "/ops-alerts";
-  };
-  "routes/api.ops-alerts.tsx": {
-    id: "routes/api.ops-alerts";
-    page: "/api/ops-alerts";
-  };
-  "routes/api.ops-alerts.$id.tsx": {
-    id: "routes/api.ops-alerts.$id";
-    page: "/api/ops-alerts/:id";
   };
   "routes/tickets.tsx": {
     id: "routes/tickets";
@@ -273,6 +449,89 @@ type RouteFiles = {
   "routes/tickets.$id.tsx": {
     id: "routes/tickets.$id";
     page: "/tickets/:id";
+  };
+  "routes/settings.tsx": {
+    id: "routes/settings";
+    page: "/settings";
+  };
+  "routes/consultation-signups.tsx": {
+    id: "routes/consultation-signups";
+    page: "/consultation-signups";
+  };
+  "routes/utm-builder.tsx": {
+    id: "routes/utm-builder";
+    page: "/utm-builder";
+  };
+  "routes/webinar-registrations.tsx": {
+    id: "routes/webinar-registrations";
+    page: "/webinar-registrations";
+  };
+  "routes/campus-ambassadors.tsx": {
+    id: "routes/campus-ambassadors";
+    page: "/campus-ambassadors";
+  };
+  "routes/ugc-applicants.tsx": {
+    id: "routes/ugc-applicants";
+    page: "/ugc-applicants";
+  } | {
+    id: "fellowship";
+    page: "/fellowship";
+  };
+  "routes/fellowship-program.tsx": {
+    id: "routes/fellowship-program";
+    page: "/fellowship-program";
+  };
+  "routes/fellowship-calendar.tsx": {
+    id: "routes/fellowship-calendar";
+    page: "/fellowship-program/calendar";
+  };
+  "routes/fellowship-calendar-redirect.tsx": {
+    id: "routes/fellowship-calendar-redirect";
+    page: "/fellowship/calendar";
+  };
+  "routes/sensei.tsx": {
+    id: "routes/sensei";
+    page: "/sensei";
+  };
+  "routes/b2b-gtm.tsx": {
+    id: "routes/b2b-gtm";
+    page: "/b2b-gtm";
+  };
+  "routes/b2b-gtm.team.$who.tsx": {
+    id: "routes/b2b-gtm.team.$who";
+    page: "/b2b-gtm/team/:who";
+  };
+  "routes/b2b-gtm.$id.tsx": {
+    id: "routes/b2b-gtm.$id";
+    page: "/b2b-gtm/:id";
+  };
+  "routes/gtm.tsx": {
+    id: "routes/gtm";
+    page: "/gtm";
+  };
+  "routes/gtm.$slug.tsx": {
+    id: "routes/gtm.$slug";
+    page: "/gtm/:slug";
+  };
+  "routes/api.settings.tsx": {
+    id: "routes/api.settings";
+    page: "/api/settings";
+  };
+  "routes/api.sensei.tsx": {
+    id: "routes/api.sensei";
+    page: "/api/sensei";
+  };
+  "routes/api.sensei.chat.$chatId.tsx": {
+    id: "routes/api.sensei.chat.$chatId";
+    page: "/api/sensei/chat/:chatId";
+  };
+  "routes/api.ops-alerts.tsx": {
+    id: "routes/api.ops-alerts";
+    page: "/api/ops-alerts";
+  };
+  "routes/api.ops-alerts.$id.tsx": {
+    id: "routes/api.ops-alerts.$id";
+    page: "/api/ops-alerts/:id";
   };
   "routes/api.tickets.tsx": {
     id: "routes/api.tickets";
@@ -286,118 +545,300 @@ type RouteFiles = {
     id: "routes/api.tickets.$id.messages";
     page: "/api/tickets/:id/messages";
   };
-  "routes/consultation-signups.tsx": {
-    id: "routes/consultation-signups";
-    page: "/consultation-signups";
-  };
   "routes/api.consultation-signups.tsx": {
     id: "routes/api.consultation-signups";
     page: "/api/consultation-signups";
-  };
-  "routes/analytics.tsx": {
-    id: "routes/analytics";
-    page: "/analytics";
-  };
-  "routes/utm-builder.tsx": {
-    id: "routes/utm-builder";
-    page: "/utm-builder";
   };
   "routes/api.utm-campaigns.tsx": {
     id: "routes/api.utm-campaigns";
     page: "/api/utm-campaigns";
   };
-  "routes/coupons.tsx": {
-    id: "routes/coupons";
-    page: "/coupons";
-  };
-  "routes/api.coupons.tsx": {
-    id: "routes/api.coupons";
-    page: "/api/coupons";
+  "routes/api.utm-report.tsx": {
+    id: "routes/api.utm-report";
+    page: "/api/utm-report";
   };
   "routes/api.posthog.tsx": {
     id: "routes/api.posthog";
     page: "/api/posthog";
   };
-  "routes/api.analytics.tsx": {
-    id: "routes/api.analytics";
-    page: "/api/analytics";
-  };
-  "routes/api.outreach.tsx": {
-    id: "routes/api.outreach";
-    page: "/api/outreach";
-  };
-  "routes/career-coach.tsx": {
-    id: "routes/career-coach";
-    page: "/career-coach";
-  };
-  "routes/webinar-registrations.tsx": {
-    id: "routes/webinar-registrations";
-    page: "/webinar-registrations";
-  };
   "routes/api.webinar-registrations.tsx": {
     id: "routes/api.webinar-registrations";
     page: "/api/webinar-registrations";
   };
-  "routes/b2b-gtm.tsx": {
-    id: "routes/b2b-gtm";
-    page: "/b2b-gtm";
+  "routes/api.campus-ambassadors.tsx": {
+    id: "routes/api.campus-ambassadors";
+    page: "/api/campus-ambassadors";
   };
-  "routes/b2b-gtm.$id.tsx": {
-    id: "routes/b2b-gtm.$id";
-    page: "/b2b-gtm/:id";
+  "routes/api.ugc-applicants.tsx": {
+    id: "routes/api.ugc-applicants";
+    page: "/api/ugc-applicants";
+  };
+  "routes/api.ugc-creators.tsx": {
+    id: "routes/api.ugc-creators";
+    page: "/api/ugc-creators";
+  };
+  "routes/api.ugc-creators.$id.tsx": {
+    id: "routes/api.ugc-creators.$id";
+    page: "/api/ugc-creators/:id";
+  };
+  "routes/api.fellowship-calendar.tsx": {
+    id: "routes/api.fellowship-calendar";
+    page: "/api/fellowship-calendar";
+  };
+  "routes/api.fellowship-dashboard.tsx": {
+    id: "routes/api.fellowship-dashboard";
+    page: "/api/fellowship-dashboard";
+  };
+  "routes/api.fellowship-proof.tsx": {
+    id: "routes/api.fellowship-proof";
+    page: "/api/fellowship-proof";
+  };
+  "routes/api.agent.$.tsx": {
+    id: "routes/api.agent.$";
+    page: "/api/agent/*";
   };
   "routes/api.b2b-gtm.tsx": {
     id: "routes/api.b2b-gtm";
     page: "/api/b2b-gtm";
   };
+  "routes/api.gtm-dashboards.tsx": {
+    id: "routes/api.gtm-dashboards";
+    page: "/api/gtm-dashboards";
+  };
+  "routes/old-layout.tsx": {
+    id: "routes/old-layout";
+    page: "/old" | "/old/daily" | "/old/funnel" | "/old/journeys" | "/old/analytics" | "/old/outreach-orders" | "/old/outreach" | "/old/outreach-campaign" | "/old/campaign-health" | "/old/campaign-refund-check" | "/old/paid-users" | "/old/suppression" | "/old/coupons" | "/old/email-sequences" | "/old/career-coach" | "/old/careers" | "/old/dissertations" | "/old/assignments" | "/old/chat-logs";
+  };
+  "routes/dashboard.tsx": {
+    id: "routes/dashboard";
+    page: "/old";
+  };
+  "routes/daily-dashboard.tsx": {
+    id: "routes/daily-dashboard";
+    page: "/old/daily";
+  };
+  "routes/funnel.tsx": {
+    id: "routes/funnel";
+    page: "/old/funnel";
+  };
+  "routes/user-journeys.tsx": {
+    id: "routes/user-journeys";
+    page: "/old/journeys";
+  };
+  "routes/analytics.tsx": {
+    id: "routes/analytics";
+    page: "/old/analytics";
+  };
+  "routes/outreach-orders.tsx": {
+    id: "routes/outreach-orders";
+    page: "/old/outreach-orders";
+  };
+  "routes/outreach.tsx": {
+    id: "routes/outreach";
+    page: "/old/outreach";
+  };
+  "routes/outreach-campaign.tsx": {
+    id: "routes/outreach-campaign";
+    page: "/old/outreach-campaign";
+  };
+  "routes/campaign-health.tsx": {
+    id: "routes/campaign-health";
+    page: "/old/campaign-health";
+  };
+  "routes/campaign-refund-check.tsx": {
+    id: "routes/campaign-refund-check";
+    page: "/old/campaign-refund-check";
+  };
+  "routes/paid-users.tsx": {
+    id: "routes/paid-users";
+    page: "/old/paid-users";
+  };
+  "routes/suppression.tsx": {
+    id: "routes/suppression";
+    page: "/old/suppression";
+  };
+  "routes/coupons.tsx": {
+    id: "routes/coupons";
+    page: "/old/coupons";
+  };
+  "routes/email-sequences.tsx": {
+    id: "routes/email-sequences";
+    page: "/old/email-sequences";
+  };
+  "routes/career-coach.tsx": {
+    id: "routes/career-coach";
+    page: "/old/career-coach";
+  };
+  "routes/careers.tsx": {
+    id: "routes/careers";
+    page: "/old/careers";
+  };
+  "routes/dissertations.tsx": {
+    id: "routes/dissertations";
+    page: "/old/dissertations";
+  };
+  "routes/assignments.tsx": {
+    id: "routes/assignments";
+    page: "/old/assignments";
+  };
+  "routes/chat-logs.tsx": {
+    id: "routes/chat-logs";
+    page: "/old/chat-logs";
+  };
+  "routes/api.dashboard.tsx": {
+    id: "routes/api.dashboard";
+    page: "/old/api/dashboard";
+  };
+  "routes/api.sources.tsx": {
+    id: "routes/api.sources";
+    page: "/old/api/sources";
+  };
+  "routes/api.health-watch.tsx": {
+    id: "routes/api.health-watch";
+    page: "/old/api/health-watch";
+  };
+  "routes/api.overview.tsx": {
+    id: "routes/api.overview";
+    page: "/old/api/overview";
+  };
+  "routes/api.paid-emails.tsx": {
+    id: "routes/api.paid-emails";
+    page: "/old/api/paid-emails";
+  };
+  "routes/api.analytics.tsx": {
+    id: "routes/api.analytics";
+    page: "/old/api/analytics";
+  };
+  "routes/api.outreach.tsx": {
+    id: "routes/api.outreach";
+    page: "/old/api/outreach";
+  };
+  "routes/api.refund-check.tsx": {
+    id: "routes/api.refund-check";
+    page: "/old/api/refund-check";
+  };
+  "routes/api.suppression.tsx": {
+    id: "routes/api.suppression";
+    page: "/old/api/suppression";
+  };
+  "routes/api.coupons.tsx": {
+    id: "routes/api.coupons";
+    page: "/old/api/coupons";
+  };
+  "routes/api.career-coach.tsx": {
+    id: "routes/api.career-coach";
+    page: "/old/api/career-coach";
+  };
+  "routes/api.chat-logs.tsx": {
+    id: "routes/api.chat-logs";
+    page: "/old/api/chat-logs";
+  };
+  "routes/old-redirect.tsx": {
+    id: "routes/old-redirect";
+    page: "/*";
+  };
 };
 
 type RouteModules = {
   "root": typeof import("./app/root.tsx");
-  "routes/dashboard": typeof import("./app/routes/dashboard.tsx");
+  "routes/stu-overview": typeof import("./app/routes/stu-overview.tsx");
+  "routes/stu-layout": typeof import("./app/routes/stu-layout.tsx");
+  "routes/stu-daily": typeof import("./app/routes/stu-daily.tsx");
+  "routes/stu-funnel": typeof import("./app/routes/stu-funnel.tsx");
+  "routes/stu-ratios": typeof import("./app/routes/stu-ratios.tsx");
+  "routes/stu-dropoffs": typeof import("./app/routes/stu-dropoffs.tsx");
+  "routes/stu-sources": typeof import("./app/routes/stu-sources.tsx");
+  "routes/stu-journeys": typeof import("./app/routes/stu-journeys.tsx");
+  "routes/stu-retention": typeof import("./app/routes/stu-retention.tsx");
+  "routes/stu-usage": typeof import("./app/routes/stu-usage.tsx");
+  "routes/api.stu": typeof import("./app/routes/api.stu.tsx");
+  "routes/api.stu-overview": typeof import("./app/routes/api.stu-overview.tsx");
+  "routes/stu-auditor": typeof import("./app/routes/stu-auditor.tsx");
+  "routes/api.stu-auditor": typeof import("./app/routes/api.stu-auditor.tsx");
+  "routes/api.stu-flags": typeof import("./app/routes/api.stu-flags.tsx");
+  "routes/visitors": typeof import("./app/routes/visitors.tsx");
+  "routes/api.visitors": typeof import("./app/routes/api.visitors.tsx");
+  "routes/recordings": typeof import("./app/routes/recordings.tsx");
+  "routes/api.recordings": typeof import("./app/routes/api.recordings.tsx");
+  "routes/api.recordings.$id": typeof import("./app/routes/api.recordings.$id.tsx");
+  "routes/api.recordings.$id.chunk": typeof import("./app/routes/api.recordings.$id.chunk.tsx");
+  "routes/vendors": typeof import("./app/routes/vendors.tsx");
+  "routes/api.vendors": typeof import("./app/routes/api.vendors.tsx");
   "routes/login": typeof import("./app/routes/login.tsx");
   "routes/users": typeof import("./app/routes/users.tsx");
-  "routes/funnel": typeof import("./app/routes/funnel.tsx");
-  "routes/user-journeys": typeof import("./app/routes/user-journeys.tsx");
-  "routes/daily-dashboard": typeof import("./app/routes/daily-dashboard.tsx");
-  "routes/api.dashboard": typeof import("./app/routes/api.dashboard.tsx");
-  "routes/api.overview": typeof import("./app/routes/api.overview.tsx");
-  "routes/api.paid-emails": typeof import("./app/routes/api.paid-emails.tsx");
-  "routes/assignments": typeof import("./app/routes/assignments.tsx");
-  "routes/dissertations": typeof import("./app/routes/dissertations.tsx");
-  "routes/outreach-orders": typeof import("./app/routes/outreach-orders.tsx");
-  "routes/campaign-health": typeof import("./app/routes/campaign-health.tsx");
-  "routes/paid-users": typeof import("./app/routes/paid-users.tsx");
-  "routes/outreach-campaign": typeof import("./app/routes/outreach-campaign.tsx");
-  "routes/outreach": typeof import("./app/routes/outreach.tsx");
-  "routes/careers": typeof import("./app/routes/careers.tsx");
-  "routes/settings": typeof import("./app/routes/settings.tsx");
-  "routes/api.settings": typeof import("./app/routes/api.settings.tsx");
-  "routes/email-sequences": typeof import("./app/routes/email-sequences.tsx");
-  "routes/chat-logs": typeof import("./app/routes/chat-logs.tsx");
-  "routes/api.chat-logs": typeof import("./app/routes/api.chat-logs.tsx");
   "routes/ops-alerts": typeof import("./app/routes/ops-alerts.tsx");
-  "routes/api.ops-alerts": typeof import("./app/routes/api.ops-alerts.tsx");
-  "routes/api.ops-alerts.$id": typeof import("./app/routes/api.ops-alerts.$id.tsx");
   "routes/tickets": typeof import("./app/routes/tickets.tsx");
   "routes/tickets.$id": typeof import("./app/routes/tickets.$id.tsx");
+  "routes/settings": typeof import("./app/routes/settings.tsx");
+  "routes/consultation-signups": typeof import("./app/routes/consultation-signups.tsx");
+  "routes/utm-builder": typeof import("./app/routes/utm-builder.tsx");
+  "routes/webinar-registrations": typeof import("./app/routes/webinar-registrations.tsx");
+  "routes/campus-ambassadors": typeof import("./app/routes/campus-ambassadors.tsx");
+  "routes/ugc-applicants": typeof import("./app/routes/ugc-applicants.tsx");
+  "fellowship": typeof import("./app/routes/ugc-applicants.tsx");
+  "routes/fellowship-program": typeof import("./app/routes/fellowship-program.tsx");
+  "routes/fellowship-calendar": typeof import("./app/routes/fellowship-calendar.tsx");
+  "routes/fellowship-calendar-redirect": typeof import("./app/routes/fellowship-calendar-redirect.tsx");
+  "routes/sensei": typeof import("./app/routes/sensei.tsx");
+  "routes/b2b-gtm": typeof import("./app/routes/b2b-gtm.tsx");
+  "routes/b2b-gtm.team.$who": typeof import("./app/routes/b2b-gtm.team.$who.tsx");
+  "routes/b2b-gtm.$id": typeof import("./app/routes/b2b-gtm.$id.tsx");
+  "routes/gtm": typeof import("./app/routes/gtm.tsx");
+  "routes/gtm.$slug": typeof import("./app/routes/gtm.$slug.tsx");
+  "routes/api.settings": typeof import("./app/routes/api.settings.tsx");
+  "routes/api.sensei": typeof import("./app/routes/api.sensei.tsx");
+  "routes/api.sensei.chat.$chatId": typeof import("./app/routes/api.sensei.chat.$chatId.tsx");
+  "routes/api.ops-alerts": typeof import("./app/routes/api.ops-alerts.tsx");
+  "routes/api.ops-alerts.$id": typeof import("./app/routes/api.ops-alerts.$id.tsx");
   "routes/api.tickets": typeof import("./app/routes/api.tickets.tsx");
   "routes/api.tickets.$id": typeof import("./app/routes/api.tickets.$id.tsx");
   "routes/api.tickets.$id.messages": typeof import("./app/routes/api.tickets.$id.messages.tsx");
-  "routes/consultation-signups": typeof import("./app/routes/consultation-signups.tsx");
   "routes/api.consultation-signups": typeof import("./app/routes/api.consultation-signups.tsx");
-  "routes/analytics": typeof import("./app/routes/analytics.tsx");
-  "routes/utm-builder": typeof import("./app/routes/utm-builder.tsx");
   "routes/api.utm-campaigns": typeof import("./app/routes/api.utm-campaigns.tsx");
-  "routes/coupons": typeof import("./app/routes/coupons.tsx");
-  "routes/api.coupons": typeof import("./app/routes/api.coupons.tsx");
+  "routes/api.utm-report": typeof import("./app/routes/api.utm-report.tsx");
   "routes/api.posthog": typeof import("./app/routes/api.posthog.tsx");
+  "routes/api.webinar-registrations": typeof import("./app/routes/api.webinar-registrations.tsx");
+  "routes/api.campus-ambassadors": typeof import("./app/routes/api.campus-ambassadors.tsx");
+  "routes/api.ugc-applicants": typeof import("./app/routes/api.ugc-applicants.tsx");
+  "routes/api.ugc-creators": typeof import("./app/routes/api.ugc-creators.tsx");
+  "routes/api.ugc-creators.$id": typeof import("./app/routes/api.ugc-creators.$id.tsx");
+  "routes/api.fellowship-calendar": typeof import("./app/routes/api.fellowship-calendar.tsx");
+  "routes/api.fellowship-dashboard": typeof import("./app/routes/api.fellowship-dashboard.tsx");
+  "routes/api.fellowship-proof": typeof import("./app/routes/api.fellowship-proof.tsx");
+  "routes/api.agent.$": typeof import("./app/routes/api.agent.$.tsx");
+  "routes/api.b2b-gtm": typeof import("./app/routes/api.b2b-gtm.tsx");
+  "routes/api.gtm-dashboards": typeof import("./app/routes/api.gtm-dashboards.tsx");
+  "routes/old-layout": typeof import("./app/routes/old-layout.tsx");
+  "routes/dashboard": typeof import("./app/routes/dashboard.tsx");
+  "routes/daily-dashboard": typeof import("./app/routes/daily-dashboard.tsx");
+  "routes/funnel": typeof import("./app/routes/funnel.tsx");
+  "routes/user-journeys": typeof import("./app/routes/user-journeys.tsx");
+  "routes/analytics": typeof import("./app/routes/analytics.tsx");
+  "routes/outreach-orders": typeof import("./app/routes/outreach-orders.tsx");
+  "routes/outreach": typeof import("./app/routes/outreach.tsx");
+  "routes/outreach-campaign": typeof import("./app/routes/outreach-campaign.tsx");
+  "routes/campaign-health": typeof import("./app/routes/campaign-health.tsx");
+  "routes/campaign-refund-check": typeof import("./app/routes/campaign-refund-check.tsx");
+  "routes/paid-users": typeof import("./app/routes/paid-users.tsx");
+  "routes/suppression": typeof import("./app/routes/suppression.tsx");
+  "routes/coupons": typeof import("./app/routes/coupons.tsx");
+  "routes/email-sequences": typeof import("./app/routes/email-sequences.tsx");
+  "routes/career-coach": typeof import("./app/routes/career-coach.tsx");
+  "routes/careers": typeof import("./app/routes/careers.tsx");
+  "routes/dissertations": typeof import("./app/routes/dissertations.tsx");
+  "routes/assignments": typeof import("./app/routes/assignments.tsx");
+  "routes/chat-logs": typeof import("./app/routes/chat-logs.tsx");
+  "routes/api.dashboard": typeof import("./app/routes/api.dashboard.tsx");
+  "routes/api.sources": typeof import("./app/routes/api.sources.tsx");
+  "routes/api.health-watch": typeof import("./app/routes/api.health-watch.tsx");
+  "routes/api.overview": typeof import("./app/routes/api.overview.tsx");
+  "routes/api.paid-emails": typeof import("./app/routes/api.paid-emails.tsx");
   "routes/api.analytics": typeof import("./app/routes/api.analytics.tsx");
   "routes/api.outreach": typeof import("./app/routes/api.outreach.tsx");
-  "routes/career-coach": typeof import("./app/routes/career-coach.tsx");
-  "routes/webinar-registrations": typeof import("./app/routes/webinar-registrations.tsx");
-  "routes/api.webinar-registrations": typeof import("./app/routes/api.webinar-registrations.tsx");
-  "routes/b2b-gtm": typeof import("./app/routes/b2b-gtm.tsx");
-  "routes/b2b-gtm.$id": typeof import("./app/routes/b2b-gtm.$id.tsx");
-  "routes/api.b2b-gtm": typeof import("./app/routes/api.b2b-gtm.tsx");
+  "routes/api.refund-check": typeof import("./app/routes/api.refund-check.tsx");
+  "routes/api.suppression": typeof import("./app/routes/api.suppression.tsx");
+  "routes/api.coupons": typeof import("./app/routes/api.coupons.tsx");
+  "routes/api.career-coach": typeof import("./app/routes/api.career-coach.tsx");
+  "routes/api.chat-logs": typeof import("./app/routes/api.chat-logs.tsx");
+  "routes/old-redirect": typeof import("./app/routes/old-redirect.tsx");
 };

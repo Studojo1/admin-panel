@@ -264,6 +264,11 @@ export function problemWith(x: { title: string; body: string; kind: string; due:
     if ((x.photoIdea ?? "").length < PHOTO_IDEA_MIN) {
       return `${name}: add "photoIdea", one sentence on which of their own photos to post with it (for example "a photo of you and your team at the hackathon"). Fellows can't post without a photo.`;
     }
+    // The fellow reads photoIdea on their page (the founder, 7 Nov 2026), so it's said to them, not about them.
+    const first = ctx.fellow.name.trim().split(/\s+/)[0] ?? "";
+    if (/\b(she|her|hers|herself|he|him|his|himself)\b/i.test(x.photoIdea ?? "") || (first.length > 1 && new RegExp(`\\b${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(x.photoIdea ?? ""))) {
+      return `${name}: write "photoIdea" to the fellow, who reads it on their page: "you" and "your", not their name, she or he (for example "A photo of you at your desk, or any photo from your internship"). Suggest a photo they very likely already have on their phone.`;
+    }
     const mine = runs(x.body);
     for (const p of extra) if (overlap(mine, runs(p.body)) >= SAME_POST) return `${name} repeats too much of another post in this batch ("${p.title}"). Write it fresh.`;
     for (const p of ctx.own) if (p.id !== o.skipId && overlap(mine, runs(p.body)) >= SAME_POST) return `${name} repeats too much of their post "${p.title || "from before the dashboard"}". Write it fresh.`;
@@ -1076,7 +1081,7 @@ export async function agentFellow(id: number) {
       `posts holds their newest ${RECENT_POSTS} posts in full and olderPosts the rest, one line each. earlierPosts and olderEarlierPosts work the same way.`,
       "weeklyAnalytics is their last 4 weekly LinkedIn exports, newest first: what their whole account did that week, day by day, and each post in it (ourPostId links it to posts).",
       "When you save drafts, the admin panel checks them for repeats against all of their posts, so you don't have to.",
-      "Every draft needs photoIdea: one sentence on which of the fellow's own photos to post with it. No post goes up without a photo.",
+      "Every draft needs photoIdea: one sentence on which of the fellow's own photos to post with it, written to them (\"A photo of you at your desk\"), since they read it on their page. Suggest a photo they very likely already have on their phone. No post goes up without a photo; if they have none, their page offers a free photo.",
       "A post's fellowRewrote is the fellow rewriting it in their own words, and what the team approved: write their next posts closer to how they write. fellowVersionWaitingForTeam is one the team hasn't decided yet.",
       "A story's readBack is their page's quick read of one talk (covers lists the saved parts it read): usable is what can become a post, leaveOut is what to skip. answers names the story a follow-up answer belongs to. What they said wins over the readBack.",
     ],
