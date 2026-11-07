@@ -266,7 +266,7 @@ function Pipeline({ p }: { p: Dash["pipeline"] }) {
     ["Sent back to Claude", p.sentBack, "Claude rewrites these with /revise", false],
     ["Approved, coming up", p.scheduled, "On the fellow's page, due today or later", false],
     ["Approved, waiting for a photo", p.needPhoto, "Locked on the fellow's page until it has a photo", false],
-    ["Fellow asked us for a photo", p.askedForPhoto, "They have none of their own: add one on the calendar", p.askedForPhoto > 0],
+    ["No photo, offered a stock image", p.askedForPhoto, "Their page offers a stock image; it unlocks when they say yes", false],
     ["Approved, past due", p.overdue, "Due before today and not marked posted", p.overdue > 0],
     ["Blocked", p.blocked, "Taken back by the team; the fellow sees a warning", p.blocked > 0],
     ["Posted", p.posted, "Marked posted by the fellow or the team", false],

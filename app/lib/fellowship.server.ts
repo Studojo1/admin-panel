@@ -527,8 +527,9 @@ export async function recordPost(postId: number, b: { posted?: unknown; url?: un
 }
 
 // Photos. No post goes up without one (the founder, 3 Nov 2026): the fellow adds
-// their own on their page, and when they have none the team adds one here. The
-// fellow's page locks Copy and Post on LinkedIn until a post has a photo.
+// their own on their page, and when they have none their page offers stock images
+// (the team can still add one here). The fellow's page locks Copy and Post on
+// LinkedIn until a post has a photo.
 
 const NOT_FOR_POSTED = "It's already up on LinkedIn, so its photos stay as they are.";
 
