@@ -30,6 +30,7 @@ interface Post {
   metricsAt: string | null; review: Review | null; insight: string | null; createdBy: string | null; verdict: Verdict | null;
   photoIdea: string | null; photos: string[]; photoHelpAt: string | null;
   analytics: PostAnalytics | null; analyticsFiles: string[];
+  fellowVersion: { text: string; at: string } | null; versionReply: string | null;
 }
 interface AnalyticsWeek {
   id: number; file: string; uploadedAt: string; periodStart: string | null; periodEnd: string | null; totals: Record<string, number>;
@@ -55,7 +56,7 @@ interface Rules {
 interface Story { id: number; creatorId: number; prompt: string | null; text: string; spoken: boolean; createdAt: string }
 interface Desk {
   today: string; thisWeek: string; rules: Rules; playbook: { text: string; updatedAt: string | null; by: string | null }; programmeStart: string;
-  totals: { impressions: number; studojoImpressions: number; measuredPosts: number; avgPerPost: number; storiesCollected: number; draftsWaiting: number; draftsSentBack: number };
+  totals: { impressions: number; studojoImpressions: number; measuredPosts: number; avgPerPost: number; storiesCollected: number; draftsWaiting: number; draftsSentBack: number; versionsWaiting: number };
   weekly: { week: string; impressions: number; partial: boolean }[]; stories: Story[]; fellows: Fellow[];
 }
 
@@ -163,6 +164,7 @@ const SLOT: Record<string, Slot> = {
   blocked: { key: "blocked", label: "Blocked", icon: "alert" },
   photo: { key: "photo", label: "Needs photo", icon: "alert" },
   askedPhoto: { key: "photo", label: "No photo: offered a stock image", icon: "alert" },
+  version: { key: "review", label: "Their version to approve", icon: "pen" },
 };
 const LEGEND = ["review", "back", "photo", "ready", "copied", "posted", "numbers", "missed", "blocked", "paused"];
 function postSlot(p: Post, today: string, paused: boolean): Slot {
@@ -170,6 +172,8 @@ function postSlot(p: Post, today: string, paused: boolean): Slot {
   if (p.status === "posted") return p.impressions != null ? SLOT.numbers : SLOT.posted;
   if (p.due < today) return SLOT.missed;
   if (paused) return SLOT.paused;
+  // The fellow rewrote it: locked on their page until the team decides.
+  if (p.fellowVersion) return SLOT.version;
   // No post goes up without a photo: the fellow's page keeps it locked until one is added.
   if (!p.photos.length) return p.photoHelpAt ? SLOT.askedPhoto : SLOT.photo;
   return p.copiedAt ? SLOT.copied : SLOT.ready;
@@ -417,7 +421,7 @@ function Desk(P: DeskProps) {
           <div className="head-actions">
             <FellowshipProgramSwitch />
             <button className="btn btn-line" type="button" onClick={() => setDrawer({ mode: "add-fellow" })}><Icon id="plus" />Add a fellow</button>
-            <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "queue" })}><Icon id="pen" />Review posts{T.draftsWaiting ? ` (${T.draftsWaiting})` : ""}</button>
+            <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "queue" })}><Icon id="pen" />Review posts{T.draftsWaiting + T.versionsWaiting ? ` (${T.draftsWaiting + T.versionsWaiting})` : ""}</button>
           </div>
         </div>
 
@@ -965,6 +969,7 @@ function MicButton({ onText }: { onText: (text: string) => void }) {
 function QueueView({ D, setDrawer }: { D: Desk; setDrawer: (d: DrawerState | null) => void }) {
   const rows = D.fellows.flatMap((f) => f.drafts.map((d) => ({ f, d }))).sort((a, b) => (a.d.status === b.d.status ? 0 : a.d.status === "review" ? -1 : 1) || a.d.due.localeCompare(b.d.due) || a.d.id - b.d.id);
   const waiting = rows.filter((r) => r.d.status === "review"), back = rows.filter((r) => r.d.status === "changes");
+  const versions = D.fellows.flatMap((f) => f.posts.filter((p) => p.status === "ready" && p.fellowVersion).map((p) => ({ f, p }))).sort((a, b) => a.p.fellowVersion!.at.localeCompare(b.p.fellowVersion!.at));
   const item = ({ f, d }: { f: Fellow; d: Draft }) => (
     <div className="prow" key={d.id}><span className="dt">{dow(d.due)} {fmt(d.due)}</span>
       <span className="tt"><b>{d.title || "Untitled post"}</b><small>{f.name} · {d.kind === "studojo" ? "Studojo" : "Their story"}{d.status === "changes" ? " · waiting for Claude's revision" : d.versions.filter((v) => v.by === "claude").length > 1 ? " · revised by Claude" : ""}</small></span>
@@ -978,6 +983,12 @@ function QueueView({ D, setDrawer }: { D: Desk; setDrawer: (d: DrawerState | nul
           <h2 id="sheet-title" style={{ margin: 0, font: "600 23px/1.2 var(--serif)" }}>Posts to review</h2>
           <p className="card-sub">Claude writes every post from the fellow's call notes and stories. Open one to edit it, speak or type your feedback and send it back, or approve it. Nothing reaches a fellow until you approve it.</p>
         </div>
+        {versions.length ? <section aria-labelledby="q-ver"><div className="sec-h"><h3 id="q-ver">Fellows' own versions</h3><span>{versions.length}</span></div>
+          {versions.map(({ f, p }) => (
+            <div className="prow" key={p.id}><span className="dt">{dow(p.due)} {fmt(p.due)}</span>
+              <span className="tt"><b>{p.title}</b><small>{f.name} rewrote this post · sent {fmt(istDay(p.fellowVersion!.at))} · locked on their page until you decide</small></span>
+              <button className="btn btn-sm btn-primary" type="button" onClick={() => setDrawer({ mode: "post", id: f.id, postId: p.id })}>Review</button></div>
+          ))}</section> : null}
         <section aria-labelledby="q-wait"><div className="sec-h"><h3 id="q-wait">Waiting for you</h3><span>{waiting.length}</span></div>
           {waiting.length ? waiting.map(item) : <div className="empty"><b>No posts waiting</b>When Claude writes posts, they appear here. Ask Vanshika's Claude Code to write a fellow's week, or use "Plan week" on the calendar to copy the request.</div>}
         </section>
@@ -1218,6 +1229,8 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
   const sugg = f ? freeDays(3) : [];
   return (
     <>{head}<div className="sheet-body">
+      {existing?.fellowVersion && f ? <VersionBox key={`${existing.id}-${existing.fellowVersion.at}`} p={existing} first={f.first} act={act} /> : null}
+      {existing && !existing.fellowVersion && existing.versionReply && existing.status === "ready" ? <p className="note note-warn"><Icon id="chat" /><span>You kept the original instead of {f?.first}'s version. They see: "{existing.versionReply}"</span></p> : null}
       <form className="compose" noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
         {existing?.status === "blocked" ? (
           <div className="note note-bad" role="alert"><Icon id="alert" /><span><b>Blocked{existing.review?.blocked ? ` by ${existing.review.blocked.by.split("@")[0]} on ${fmt(istDay(existing.review.blocked.at))}` : ""}.</b> {existing.review?.blocked?.reason ? `What needs doing: ${existing.review.blocked.reason}. ` : ""}{f?.first} sees an "on hold" warning instead of this post. Fix it below and save, then release it.</span>
@@ -1273,6 +1286,42 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
         </section>
       ) : null}
     </div></>
+  );
+}
+
+// ---------------------------------------------------------------- a fellow's own version of an approved post
+// They rewrote it on their page; it stays locked there until the team approves their version (edited here if it
+// needs it), which becomes the post, or keeps the original and tells them why.
+function VersionBox({ p, first, act }: { p: Post; first: string; act: (b: Record<string, unknown>, done?: string) => Promise<Desk | null> }) {
+  const [text, setText] = useState(p.fellowVersion!.text);
+  const [keep, setKeep] = useState(false);
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+  const run = async (b: Record<string, unknown>, done: string) => { setBusy(true); await act(b, done); setBusy(false); };
+  return (
+    <section className="compose" aria-label={`${first}'s own version`}>
+      <div className="sec-h"><h3>{first}'s own version</h3><span>sent {fmt(istDay(p.fellowVersion!.at))}</span></div>
+      <p className="note note-warn"><Icon id="alert" /><span><b>{first} rewrote this post in their own words</b> and can't post it until you decide. Edit their version if it needs it, then approve it, or keep the original and tell them why.</span></p>
+      <div className="field"><label htmlFor="fv-text">Their version</label>
+        <textarea className="input" id="fv-text" rows={12} maxLength={POST_MAX} value={text} onChange={(e) => setText(e.target.value)} />
+        <div className="text-meta"><span className="cnt">{num(text.length)} / 3,000</span>{text !== p.fellowVersion!.text ? <button className="btn-link" type="button" onClick={() => setText(p.fellowVersion!.text)}>Undo my edits</button> : null}</div></div>
+      <details className="more"><summary>The post as it is now</summary><p className="post-text" style={{ marginTop: 8 }}>{p.body}</p></details>
+      {!keep ? (
+        <div className="actions">
+          <button className="btn btn-primary btn-sm" type="button" disabled={busy || text.trim().length < 20} onClick={() => run({ intent: "version-approve", id: p.id, text: text.trim() }, `Approved. ${first} can post their version now.`)}><Icon id="check" />Approve {text === p.fellowVersion!.text ? "their version" : "with my edits"}</button>
+          <button className="btn btn-line btn-sm" type="button" onClick={() => setKeep(true)}>Keep the original</button>
+        </div>
+      ) : (
+        <div className="backbox">
+          <label className="label" htmlFor="fv-reply">Tell {first} why (their page shows this)</label>
+          <textarea className="input" id="fv-reply" rows={3} autoFocus value={reply} onChange={(e) => setReply(e.target.value)} placeholder="For example: the opening line is what makes it work on LinkedIn, so we kept it. Add your own line at the top instead." />
+          <div className="actions">
+            <MicButton onText={(t) => setReply((v) => `${v.trimEnd()}${v.trim() ? " " : ""}${t}`)} />
+            <button className="btn btn-primary btn-sm" type="button" disabled={busy || reply.trim().length < 3} onClick={() => run({ intent: "version-keep", id: p.id, reply: reply.trim() }, `Kept the original. ${first} sees your note and can post it.`)}>Keep the original</button>
+            <button className="btn btn-quiet btn-sm" type="button" onClick={() => setKeep(false)}>Cancel</button></div>
+        </div>
+      )}
+    </section>
   );
 }
 
