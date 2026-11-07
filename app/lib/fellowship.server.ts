@@ -39,7 +39,11 @@ export interface Review {
   blocked?: Block | null; blocks?: Block[];
   /** Photos the team added because the fellow had none (refs in photo_url). */
   teamPhotos?: string[];
+  /** Each version the fellow wrote themselves, and what the team did with it. */
+  fellowVersions?: FellowVersion[];
 }
+/** A fellow's own rewrite of an approved post: approved (as final, maybe edited by the team) or the original kept, with a note to them. */
+export interface FellowVersion { sentAt: string; text: string; before: string; decidedAt: string; decidedBy: string; final?: string; keptOriginal?: boolean; reply?: string }
 export interface Draft {
   id: number; creatorId: number; title: string; body: string; kind: Kind; due: string; angle: string; photoIdea: string;
   status: "review" | "changes"; batch: string | null; feedback: Feedback[]; versions: Version[]; createdAt: string; updatedAt: string;
@@ -53,6 +57,8 @@ export interface Post {
   photoIdea: string | null; photos: string[]; photoHelpAt: string | null;
   /** The post's LinkedIn analytics export, parsed by studojo.com (the latest upload), and every file uploaded (refs). */
   analytics: PostAnalytics | null; analyticsFiles: string[];
+  /** The fellow's own version, waiting for the team (the post is locked on their page meanwhile), and the team's note when they kept the original. */
+  fellowVersion: { text: string; at: string } | null; versionReply: string | null;
 }
 /** studojo.com's parse of a LinkedIn post analytics export (fellow-page side, 3 Nov 2026). */
 export interface PostAnalytics {
@@ -130,6 +136,7 @@ function toPost(r: Record<string, unknown>): Post {
     insight: (r.insight as string) ?? null, insightAt: iso(r.insight_at), createdAt: iso(r.created_at) ?? "", createdBy: (r.created_by as string) ?? null,
     photoIdea: (r.photo_idea as string) || null, photos: proofRefs((r.photo_url as string) ?? null).filter(isPhotoRef), photoHelpAt: iso(r.photo_help_at),
     analytics: analyticsOf(r.analytics), analyticsFiles: proofRefs((r.analytics_url as string) ?? null).filter(isAnalyticsRef),
+    fellowVersion: r.rewrite_body ? { text: String(r.rewrite_body), at: iso(r.rewrite_at) ?? "" } : null, versionReply: (r.rewrite_reply as string) || null,
   };
 }
 function toDraft(r: Record<string, unknown>): Draft {
@@ -144,7 +151,7 @@ const FELLOW_COLS = sql`id, application_id, slug, full_name, email, whatsapp, li
   connections_at_join, to_char(joined_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS joined_day, learnings, team_notes, nudged_at, intern_at, referred_at`;
 const POST_COLS = sql`id, creator_id, title, body, kind, to_char(due_date, 'YYYY-MM-DD') AS due, status, copied_at, own_line, posted_at,
   post_url, impressions, reactions, comments, screenshot_url, metrics_at, review, insight, insight_at, created_at, created_by,
-  photo_idea, photo_url, photo_help_at, analytics_url, analytics`;
+  photo_idea, photo_url, photo_help_at, analytics_url, analytics, rewrite_body, rewrite_at, rewrite_reply`;
 const DRAFT_COLS = sql`id, creator_id, title, body, kind, to_char(due_date, 'YYYY-MM-DD') AS due, angle, photo_idea, status, batch, feedback, versions, created_at, updated_at`;
 
 /** How many of a fellow's weekly posts are Studojo posts, when the team has set it (ugc_programme.rules.studojoPerWeek). */
@@ -503,6 +510,46 @@ export async function releasePost(postId: number, by: string) {
   });
 }
 
+const VERSION_GONE = "There's no version from the fellow waiting on this post any more. Refresh the page.";
+
+/** The fellow's own version of a post, as the team leaves it (edited or not), becomes the post; their page unlocks it. */
+export async function approveVersion(postId: number, text: unknown, by: string) {
+  const body = str(text, POST_MAX);
+  if (body.length < 20) throw new Refused("The post can't be empty.");
+  const owner = await postOwner(postId);
+  if (owner == null) throw new Refused("That post is gone. Refresh the page.", 404);
+  await forFellow(owner, async (tx) => {
+    const p = await loadPost(postId, tx);
+    if (!p) throw new Refused("That post is gone. Refresh the page.", 404);
+    if (!p.fellowVersion) throw new Refused(VERSION_GONE);
+    if (p.status !== "ready") throw new Refused(p.status === "blocked" ? "This post is blocked. Release it first." : "It's already up on LinkedIn.");
+    const r = p.review ?? ({} as Partial<Review>);
+    const v: FellowVersion = { sentAt: p.fellowVersion.at, text: p.fellowVersion.text, before: p.body, decidedAt: nowIso(), decidedBy: by, final: body };
+    const review = { ...r, fellowVersions: [...(r.fellowVersions ?? []), v] };
+    // The text changed, so "copied" no longer describes it.
+    await tx.execute(sql`UPDATE ugc_creator_posts SET body = ${body}, rewrite_body = NULL, rewrite_at = NULL, rewrite_reply = NULL, copied_at = NULL,
+      review = ${JSON.stringify(review)}::jsonb, updated_at = NOW() WHERE id = ${postId} AND status = 'ready'`);
+  });
+}
+
+/** The team keeps the original post instead of the fellow's version, and says why; their page shows the note and unlocks the post. */
+export async function keepOriginal(postId: number, reply: unknown, by: string) {
+  const note = str(reply, 600);
+  if (note.length < 3) throw new Refused("Tell them why in a line: their page shows it.");
+  const owner = await postOwner(postId);
+  if (owner == null) throw new Refused("That post is gone. Refresh the page.", 404);
+  await forFellow(owner, async (tx) => {
+    const p = await loadPost(postId, tx);
+    if (!p) throw new Refused("That post is gone. Refresh the page.", 404);
+    if (!p.fellowVersion) throw new Refused(VERSION_GONE);
+    const r = p.review ?? ({} as Partial<Review>);
+    const v: FellowVersion = { sentAt: p.fellowVersion.at, text: p.fellowVersion.text, before: p.body, decidedAt: nowIso(), decidedBy: by, keptOriginal: true, reply: note };
+    const review = { ...r, fellowVersions: [...(r.fellowVersions ?? []), v] };
+    await tx.execute(sql`UPDATE ugc_creator_posts SET rewrite_body = NULL, rewrite_at = NULL, rewrite_reply = ${note},
+      review = ${JSON.stringify(review)}::jsonb, updated_at = NOW() WHERE id = ${postId}`);
+  });
+}
+
 /** The team marks a post as up (with its link) or records its numbers, when a fellow tells them directly. */
 export async function recordPost(postId: number, b: { posted?: unknown; url?: unknown; impressions?: unknown; reactions?: unknown; comments?: unknown }) {
   const n = (v: unknown) => (v === "" || v == null ? null : Math.max(0, Math.round(Number(v)) || 0));
@@ -697,6 +744,7 @@ export async function calendarView() {
       storiesCollected: stories.length,
       draftsWaiting: drafts.filter((d) => d.status === "review").length,
       draftsSentBack: drafts.filter((d) => d.status === "changes").length,
+      versionsWaiting: posts.filter((p) => p.status === "ready" && p.fellowVersion).length,
     },
     weekly,
     stories: stories.filter((s) => Date.parse(s.createdAt) > Date.now() - 14 * DAY).slice(0, 40),
@@ -797,6 +845,7 @@ export async function programmeDashboard() {
       // Approved posts the fellow can't put up yet because they have no photo, and those where they asked the team for one.
       needPhoto: posts.filter((p) => p.status === "ready" && !p.photos.length).length,
       askedForPhoto: posts.filter((p) => p.status === "ready" && !p.photos.length && p.photoHelpAt).length,
+      fellowVersions: posts.filter((p) => p.status === "ready" && p.fellowVersion).length,
       measured: posts.filter(measured).length,
     },
     weekly, kinds,
@@ -927,6 +976,9 @@ function agentPost(p: Post, own: Post[], all: Post[]) {
     // What the team changed before approving: the best signal for how to write the next one.
     whatClaudeWrote: !r ? "written by the team" : r.editedByTeam ? { title: r.claudeTitle, body: r.claudeBody } : "approved exactly as Claude wrote it",
     feedbackGiven: r ? r.feedback.map((f) => f.text) : [],
+    // The fellow rewrote it in their own words: how they write, which beats any guess. waitingForTeam is a version not yet decided.
+    fellowRewrote: (p.review?.fellowVersions ?? []).map((v) => ({ before: asLines(v.before), theirVersion: asLines(v.text), ...(v.keptOriginal ? { teamKeptTheOriginal: v.reply } : { approvedAs: v.final === v.text ? "exactly as they wrote it" : asLines(v.final ?? "") }) })),
+    ...(p.fellowVersion ? { fellowVersionWaitingForTeam: asLines(p.fellowVersion.text) } : {}),
   };
 }
 export const agentDraft = (d: Draft) => ({
@@ -1025,6 +1077,7 @@ export async function agentFellow(id: number) {
       "weeklyAnalytics is their last 4 weekly LinkedIn exports, newest first: what their whole account did that week, day by day, and each post in it (ourPostId links it to posts).",
       "When you save drafts, the admin panel checks them for repeats against all of their posts, so you don't have to.",
       "Every draft needs photoIdea: one sentence on which of the fellow's own photos to post with it. No post goes up without a photo.",
+      "A post's fellowRewrote is the fellow rewriting it in their own words, and what the team approved: write their next posts closer to how they write. fellowVersionWaitingForTeam is one the team hasn't decided yet.",
       "A story's readBack is their page's quick read of one talk (covers lists the saved parts it read): usable is what can become a post, leaveOut is what to skip. answers names the story a follow-up answer belongs to. What they said wins over the readBack.",
     ],
     fellow: { id: f.id, name: f.name, firstName: f.first, college: f.college, field: f.field, cohort: f.cohort, paused: f.status === "paused", linkedin: f.linkedin, joined: f.joined, connectionsAtJoin: f.connectionsAtJoin },

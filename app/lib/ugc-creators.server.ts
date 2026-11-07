@@ -139,6 +139,12 @@ async function createTables() {
   await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS photo_idea TEXT`);
   await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS photo_url TEXT`);
   await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS photo_help_at TIMESTAMPTZ`);
+  // A fellow can rewrite an approved post in their own words (the founder, 7 Nov 2026): their version waits in
+  // rewrite_body (sent at rewrite_at) and the post stays locked on their page until the team approves it, when it
+  // becomes the post, or keeps the original, with a note their page shows (rewrite_reply).
+  await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS rewrite_body TEXT`);
+  await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS rewrite_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE ugc_creator_posts ADD COLUMN IF NOT EXISTS rewrite_reply TEXT`);
   // The fellow's page reads each talk back to them (what we heard, what can become a post, what we'll
   // leave out, follow-up questions) and keeps that read-back on the talk's last story. An answer to one
   // of those follow-up questions names the story it answers.

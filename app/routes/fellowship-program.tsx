@@ -36,7 +36,7 @@ interface Dash {
   postsWeek: { target: number; scheduled: number; posted: number; dueByToday: number; missed: number; postedToday: number; total: number };
   daily: { day: string; due: number; postedOfDue: number; posted: number }[];
   funnel: { applied: number; fellows: number; postedOnce: number; postingThisWeek: number };
-  pipeline: { drafting: number; sentBack: number; scheduled: number; overdue: number; blocked: number; posted: number; awaitingNumbers: number; withAnalytics: number; measured: number; needPhoto: number; askedForPhoto: number };
+  pipeline: { drafting: number; sentBack: number; scheduled: number; overdue: number; blocked: number; posted: number; awaitingNumbers: number; withAnalytics: number; measured: number; needPhoto: number; askedForPhoto: number; fellowVersions: number };
   weekly: Week[]; kinds: { kind: "personal" | "studojo"; posted: number; impressions: number; avg: number }[]; fellows: Row[];
 }
 
@@ -264,6 +264,7 @@ function Pipeline({ p }: { p: Dash["pipeline"] }) {
   const stages: [string, number, string, boolean][] = [
     ["Claude's drafts to review", p.drafting, "Waiting on the calendar for someone to approve", false],
     ["Sent back to Claude", p.sentBack, "Claude rewrites these with /revise", false],
+    ["Fellow's own version to approve", p.fellowVersions, "Locked on their page until you approve it or keep the original", p.fellowVersions > 0],
     ["Approved, coming up", p.scheduled, "On the fellow's page, due today or later", false],
     ["Approved, waiting for a photo", p.needPhoto, "Locked on the fellow's page until it has a photo", false],
     ["No photo, offered a stock image", p.askedForPhoto, "Their page offers a stock image; it unlocks when they say yes", false],
