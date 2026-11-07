@@ -162,7 +162,7 @@ const SLOT: Record<string, Slot> = {
   paused: { key: "paused", label: "Paused", icon: "pause" },
   blocked: { key: "blocked", label: "Blocked", icon: "alert" },
   photo: { key: "photo", label: "Needs photo", icon: "alert" },
-  askedPhoto: { key: "photo", label: "Asked us for a photo", icon: "alert" },
+  askedPhoto: { key: "photo", label: "No photo: offered a stock image", icon: "alert" },
 };
 const LEGEND = ["review", "back", "photo", "ready", "copied", "posted", "numbers", "missed", "blocked", "paused"];
 function postSlot(p: Post, today: string, paused: boolean): Slot {
@@ -683,7 +683,7 @@ async function toJpeg(file: File): Promise<Blob> {
 }
 
 // The photo that goes up with a post. No post goes up without one (the founder, 3 Nov 2026): the fellow adds their
-// own on their page, and their page keeps the post locked until it has one. When they have none, the team adds one here.
+// own on their page, and their page keeps the post locked until it has one. When they have none, their page offers stock images for it.
 function PostPhotos({ p, first, act, upload }: {
   p: Post; first: string; act: (b: Record<string, unknown>, done?: string) => Promise<Desk | null>; upload: ((postId: number, file: File) => Promise<boolean>) | null;
 }) {
@@ -701,7 +701,7 @@ function PostPhotos({ p, first, act, upload }: {
     <section className="compose" aria-label="Photo">
       <div className="sec-h"><h3>Photo</h3><span>{p.photos.length ? `${p.photos.length} added` : posted ? "None" : "Needed before it can go up"}</span></div>
       {!posted && !p.photos.length ? <p className={`note ${p.photoHelpAt ? "note-bad" : "note-warn"}`}><Icon id="alert" /><span>{p.photoHelpAt
-        ? <><b>{first} has no photo for this</b> (said so {fmt(istDay(p.photoHelpAt))}). Add one below and their page unlocks the post.</>
+        ? <><b>{first} has no photo for this</b> (said so {fmt(istDay(p.photoHelpAt))}). Their page is offering them a stock image: it unlocks once they say yes or add their own.</>
         : <>{first} can't copy or post this until it has a photo. They add their own on their page.</>}</span></p> : null}
       {p.photos.length ? <div className="proof-grid">{p.photos.map((r, i) => (
         <figure key={r} className="photo-fig">
