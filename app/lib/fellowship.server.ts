@@ -232,14 +232,43 @@ export function overlap(a: Set<string>, b: Set<string>): number {
 export interface CheckContext {
   today: string;
   fellow: { id: number; name: string };
-  /** This fellow's posts and drafts (for one-a-day) and earlier posts (for repeats). */
-  own: { id: string; due?: string; title: string; body: string }[];
+  /** This fellow's posts and drafts (for one-a-day and the week's mix) and earlier posts (for repeats). */
+  own: { id: string; due?: string; kind?: string; title: string; body: string }[];
   /** Other fellows' posts and drafts from the last 60 days. */
   others: { owner: string; title: string; body: string }[];
   /** Every other fellow's full name. */
   otherNames: string[];
+  /** Each week's posts: this many Studojo and this many personal. */
+  mix: WeekMix;
 }
-export interface CheckOptions { skipId?: string; extra?: { title: string; body: string; due: string }[]; allowPast?: boolean; strict?: boolean }
+export interface CheckOptions { skipId?: string; extra?: { title: string; body: string; due: string; kind: string }[]; allowPast?: boolean; strict?: boolean }
+
+/** Every week (Wednesday to Tuesday) has exactly 2 Studojo posts and 3 personal ones (the founder, 2 and 8 Nov 2026). */
+export interface WeekMix { studojo: number; personal: number }
+export function weekMix(rules: { postsPerWeek: number }): WeekMix {
+  const studojo = studojoPerWeek(rules) ?? 2;
+  return { studojo, personal: Math.max(0, rules.postsPerWeek - studojo) };
+}
+const weekRule = (rules: { postsPerWeek: number }) => `${mixLine(weekMix(rules))} A batch must leave each week that hasn't started at exactly that, so write a fellow's whole week at once.`;
+const mixLine = (m: WeekMix) => `Every week (Wednesday to Tuesday) has exactly ${m.studojo} Studojo and ${m.personal} personal posts.`;
+
+/**
+ * A week that hasn't started yet and doesn't come out at exactly the mix once
+ * this batch is in, in plain words, or null. So a fellow's week is written in
+ * one batch. The week under way only has to stay within the mix (problemWith).
+ */
+export function weekShort(made: { due: string; kind: string }[], ctx: CheckContext): string | null {
+  const thisWeek = weekOf(ctx.today);
+  for (const week of [...new Set(made.map((x) => weekOf(x.due)))].sort()) {
+    if (week <= thisWeek) continue;
+    const all = [...ctx.own.filter((p) => p.due && weekOf(p.due) === week), ...made.filter((x) => weekOf(x.due) === week)];
+    const studojo = all.filter((p) => p.kind === "studojo").length, personal = all.filter((p) => p.kind === "personal").length;
+    if (studojo !== ctx.mix.studojo || personal !== ctx.mix.personal) {
+      return `The week of ${week} would have ${studojo} Studojo and ${personal} personal posts for ${ctx.fellow.name}. ${mixLine(ctx.mix)} Send their whole week in one batch.`;
+    }
+  }
+  return null;
+}
 
 /**
  * The problem with one post, in plain words, or null. `strict` (Claude's
@@ -259,6 +288,11 @@ export function problemWith(x: { title: string; body: string; kind: string; due:
   const extra = o.extra ?? [];
   const taken = ctx.own.some((p) => p.id !== o.skipId && p.due === x.due) || extra.some((p) => p.due === x.due);
   if (taken) return `${name}: ${ctx.fellow.name} already has a post due on ${x.due}. One post a day.`;
+  const week = weekOf(x.due);
+  const sameKind = [...ctx.own.filter((p) => p.id !== o.skipId), ...extra].filter((p) => p.due && p.kind === x.kind && weekOf(p.due) === week).length + 1;
+  if (sameKind > (x.kind === "studojo" ? ctx.mix.studojo : ctx.mix.personal)) {
+    return `${name}: the week of ${week} would have ${sameKind} ${x.kind === "studojo" ? "Studojo" : "personal"} posts for ${ctx.fellow.name}. ${mixLine(ctx.mix)}`;
+  }
   if (o.strict) {
     // No post goes up without a photo (the founder, 3 Nov 2026), so Claude says which of the fellow's own photos fits.
     if ((x.photoIdea ?? "").length < PHOTO_IDEA_MIN) {
@@ -289,8 +323,8 @@ async function checkContext(fellowId: number, ex: Exec): Promise<CheckContext | 
   if (!f) return null;
   const since = istDate(Date.now() - REPEAT_WINDOW_DAYS * DAY);
   const own = [
-    ...(await postsOf(fellowId, ex)).map((p) => ({ id: `p${p.id}`, due: p.due, title: p.title, body: p.body })),
-    ...(await draftsOf(fellowId, ex)).map((d) => ({ id: `d${d.id}`, due: d.due, title: d.title, body: d.body })),
+    ...(await postsOf(fellowId, ex)).map((p) => ({ id: `p${p.id}`, due: p.due, kind: p.kind, title: p.title, body: p.body })),
+    ...(await draftsOf(fellowId, ex)).map((d) => ({ id: `d${d.id}`, due: d.due, kind: d.kind, title: d.title, body: d.body })),
     ...(await earlierPostsOf(fellowId, ex)).map((e) => ({ id: `e${e.id}`, title: e.title ?? "", body: e.body })),
   ];
   const others = (await ex.execute(sql`
@@ -301,7 +335,7 @@ async function checkContext(fellowId: number, ex: Exec): Promise<CheckContext | 
       WHERE d.creator_id <> ${fellowId} AND d.created_at >= ${since}::date
   `)).rows as { owner: string; title: string; body: string }[];
   const otherNames = ((await ex.execute(sql`SELECT full_name FROM ugc_creators WHERE id <> ${fellowId}`)).rows as { full_name: string }[]).map((r) => r.full_name);
-  return { today: istDate(), fellow: { id: f.id, name: f.name }, own, others, otherNames };
+  return { today: istDate(), fellow: { id: f.id, name: f.name }, own, others, otherNames, mix: weekMix(await programmeRules(ex)) };
 }
 
 function readInput(x: PostInput) {
@@ -351,6 +385,8 @@ export async function addDrafts(fellowId: number, posts: PostInput[], batch: unk
       if (err) throw new Refused(err);
       made.push(x);
     }
+    const short = weekShort(made, ctx);
+    if (short) throw new Refused(short);
     const t = nowIso();
     const ids: number[] = [];
     for (const x of made) {
@@ -934,7 +970,7 @@ export async function agentRoster() {
   const [fs, posts, drafts, rules] = await Promise.all([fellows(), postsOf(null), draftsOf(null), programmeRules()]);
   return {
     today,
-    programme: { postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules) },
+    programme: { postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules), eachWeek: weekRule(rules) },
     fellows: fs.filter((f) => f.status !== "removed").map((f) => {
       const ps = posts.filter((p) => p.creatorId === f.id), ds = drafts.filter((d) => d.creatorId === f.id);
       return {
@@ -1117,7 +1153,7 @@ export async function agentFellow(id: number) {
     drafts: ds.map(agentDraft),
     takenDays: [...own.map((p) => p.due), ...ds.map((d) => d.due)].filter((d) => d >= today).sort(),
     programme: {
-      postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules),
+      postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules), eachWeek: weekRule(rules),
       postsWithNumbers: all.filter(measured).length, usualImpressions: usual(), usualStudojoPost: usual("studojo"), usualPersonalPost: usual("personal"),
     },
     playbook: pb.text,
