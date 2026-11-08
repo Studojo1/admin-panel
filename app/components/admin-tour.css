@@ -1,0 +1,34 @@
+/* The admin page tour (admin-tour.tsx): a dimmed page with one part lit, and a card that says what it's for.
+   Every class starts "atour-" so none of them matches a Tailwind utility. */
+.atour-open {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid #D9CCFA; background: #F4F0FE; color: #4B23B8; font: 600 13px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; cursor: pointer; white-space: nowrap;
+}
+.atour-open:hover { background: #ECE4FD; }
+.atour-open:focus-visible { outline: 2px solid #6C3AE8; outline-offset: 2px; }
+.atour-open svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+
+.atour-layer { position: fixed; inset: 0; z-index: 10000; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1A1625; }
+.atour-layer.atour-center { background: rgba(20, 12, 48, .58); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.atour-hole {
+  position: fixed; border-radius: 14px; pointer-events: none; outline: 2px solid #fff;
+  box-shadow: 0 0 0 5px #6C3AE8, 0 0 0 11px rgba(108, 58, 232, .3), 0 0 0 9999px rgba(20, 12, 48, .58);
+  transition: top .2s ease, left .2s ease, width .2s ease, height .2s ease;
+}
+.atour-card { position: fixed; width: min(380px, calc(100vw - 32px)); background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 18px 50px rgba(20, 12, 48, .35); }
+.atour-center .atour-card { position: relative; }
+.atour-head { padding: 16px 18px 14px; background: #6C3AE8; color: #fff; }
+.atour-step { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .85; }
+.atour-title { margin: 4px 0 10px; font: 600 20px/1.25 "Iowan Old Style", Charter, Georgia, serif; }
+.atour-bar { display: flex; gap: 4px; }
+.atour-bar i { flex: 1; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .3); }
+.atour-bar i.atour-on { background: #fff; }
+.atour-body { margin: 0; padding: 14px 18px 4px; font-size: 14.5px; line-height: 1.5; color: #3A3450; }
+.atour-actions { display: flex; justify-content: space-between; gap: 8px; padding: 12px 18px 16px; }
+.atour-btn { min-height: 40px; padding: 0 18px; border-radius: 999px; font: 600 14px/1 inherit; cursor: pointer; border: 1px solid transparent; }
+.atour-quiet { background: none; color: #4B23B8; }
+.atour-quiet:hover { background: #F4F0FE; }
+.atour-main { background: #6C3AE8; color: #fff; }
+.atour-main:hover { background: #5B2BD6; }
+.atour-btn:focus-visible { outline: 2px solid #6C3AE8; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .atour-hole { transition: none; } }

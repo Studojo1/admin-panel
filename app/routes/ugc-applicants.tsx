@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { toast } from "sonner";
 import { AdminHeader } from "~/components";
+import { AdminTour, type TourStep } from "~/components/admin-tour";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
 import type { Route } from "./+types/ugc-applicants";
@@ -128,6 +129,17 @@ interface Analytics {
 
 // The review states and the notes limit, as enforced by api.ugc-applicants.tsx.
 const STATUSES = ["new", "shortlisted", "selected", "rejected"] as const;
+
+// The applicants page's tour: what each part is for, for whoever on the team opens it first.
+const TOUR: TourStep[] = [
+  { title: "Growth Fellowship applicants", body: "Everyone who applied from studojo.com/fellowship-growth. Here's how to find the right people and take them on." },
+  { sel: '[data-tour="ap-counts"]', title: "Applicants at a glance", body: "How many applied, how many in the past 24 hours, and how many are new, shortlisted, selected or rejected." },
+  { sel: '[data-tour="ap-standout"]', title: "Who stands out", body: "Quick filters for the strongest signals: reach, a post over 1K impressions, posting every week. Pick several to see people who match all of them, or sort by the stand-out score." },
+  { sel: '[data-tour="ap-filters"]', title: "Search and filter", body: "Search by name, email or college, or filter by status, field, connections and more." },
+  { sel: '[data-tour="ap-table"]', title: "Every applicant", body: "Change someone's status right in their row. Click a row to read every answer, add team notes, or press Make fellow, which creates their fellow page and marks them selected." },
+  { sel: '[data-tour="ap-funnel"]', title: "Funnel and sharing", body: "How many people visit, start and finish the form, and which share links bring applicants in." },
+  { sel: '[data-tour="ap-csv"]', title: "Download CSV", body: "Downloads the applicants shown, with every answer and their share link numbers." },
+];
 
 const STATUS_LABELS: Record<string, string> = {
   new: "New",
@@ -773,12 +785,14 @@ export default function UgcApplicants() {
             </p>
           </div>
           <div className="flex items-center gap-4">
+            <AdminTour page="fellowship-applicants" steps={TOUR} ready={!loading} />
             <a href="#funnel-and-sharing" className="text-sm font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900">
               Funnel and sharing
             </a>
             <button
               type="button"
               onClick={() => downloadCsv(filtered, links)}
+              data-tour="ap-csv"
               disabled={filtered.length === 0}
               title="Downloads the applicants shown below, with every answer and their share link numbers"
               className="rounded-lg border-2 border-neutral-900 bg-white px-4 py-1.5 text-sm font-semibold text-gray-900 shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] transition-all hover:shadow-[3px_3px_0px_0px_rgba(25,26,35,1)] disabled:opacity-50"
@@ -789,7 +803,7 @@ export default function UgcApplicants() {
         </div>
 
         {counts && (
-          <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-5">
+          <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-5" data-tour="ap-counts">
             <CountTile
               label="Total applicants"
               value={counts.total}
@@ -808,7 +822,7 @@ export default function UgcApplicants() {
         )}
 
         {!loading && rows.length > 0 && (
-          <section className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" aria-label="Who stands out">
+          <section className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" aria-label="Who stands out" data-tour="ap-standout">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-gray-900">Who stands out</h2>
@@ -850,7 +864,7 @@ export default function UgcApplicants() {
         )}
 
         {!loading && rows.length > 0 && (
-          <div className="mb-4">
+          <div className="mb-4" data-tour="ap-filters">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
               <div>
                 <label htmlFor="ugc-search" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -929,7 +943,7 @@ export default function UgcApplicants() {
         ) : (
           // @container lets an open row's answers size to the visible width
           // (100cqw) when the table is wider than the screen and scrolls.
-          <div className="@container overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="@container overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm" data-tour="ap-table">
             <table className="w-full text-sm">
               <thead className="border-b border-gray-200 bg-gray-50">
                 <tr>
@@ -1157,7 +1171,7 @@ function FunnelAndSharing({
   onOpenApplicant: (id: number) => void;
 }) {
   return (
-    <section id="funnel-and-sharing" aria-labelledby="ugc-funnel-title" className="mt-8 scroll-mt-28">
+    <section id="funnel-and-sharing" aria-labelledby="ugc-funnel-title" className="mt-8 scroll-mt-28" data-tour="ap-funnel">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="ugc-funnel-title" className="text-lg font-bold text-gray-900" style={{ fontFamily: "Clash Display, sans-serif" }}>

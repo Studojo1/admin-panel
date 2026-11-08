@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AdminHeader } from "~/components";
+import { AdminTour, type TourStep } from "~/components/admin-tour";
 import { FellowshipProgramSwitch } from "~/components/fellowship-program-switch";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
@@ -66,6 +67,17 @@ const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DOWL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 // Weeks run Wednesday to Tuesday (the founder, 5 Nov 2026), so the calendar's columns start on Wednesday.
 const DSHORT = ["Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"];
+
+// The calendar's tour: what each part is for, for whoever on the team opens it first.
+const TOUR: TourStep[] = [
+  { title: "The Editorial calendar", body: "This is where the team runs the fellowship day to day: which posts go out, what needs a decision today, and how posts are doing. Here's a quick look around." },
+  { sel: '[data-tour="cal-goal"]', title: "The goal and this week", body: "Impressions so far against the 1M goal and the founder's plan. Underneath: posts done of those due this week, fellows active, who's at risk, and numbers still to come in." },
+  { sel: '[data-tour="cal-attention"]', title: "Needs attention today", body: "Today's to-do list. To review: Claude's drafts waiting for approval. Nudge: fellows behind on posts, with a WhatsApp message ready to send. Numbers due, New stories and Ask for stories work the same way." },
+  { sel: '[data-tour="cal-review"]', title: "Review posts", body: "Opens every draft, and every fellow's own version of a post, waiting for you. Approve it, edit it, or send it back with a note. Nothing reaches a fellow until someone here approves it." },
+  { sel: '[data-tour="cal-week"]', title: "The week, fellow by fellow", body: "One row per fellow, one column per day, Wednesday to Tuesday. A post's colour shows where it is; the key is above the table. Click a name for the fellow's profile and stories, or a post to open it. The arrows move between weeks." },
+  { sel: '[data-tour="cal-results"]', title: "Results and lessons", body: "How each posted post did against that fellow's usual. Next to it are the lessons Claude reads before it writes anything. You can edit them, and Claude follows whatever is there." },
+  { sel: '[data-tour="program-switch"]', title: "Dashboard and calendar", body: "Switch to the Program dashboard for the big picture against the plan. Take this tour again any time from Take the tour." },
+];
 const day = (s: string) => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
 const fmt = (s: string) => { const x = day(s); return `${x.getUTCDate()} ${MON[x.getUTCMonth()]}`; };
 const dow = (s: string) => DOW[day(s).getUTCDay()];
@@ -423,13 +435,14 @@ function Desk(P: DeskProps) {
           </div>
           <div className="head-actions">
             <FellowshipProgramSwitch />
+            <AdminTour page="fellowship-calendar" steps={TOUR} />
             <button className="btn btn-line" type="button" onClick={() => setDrawer({ mode: "add-fellow" })}><Icon id="plus" />Add a fellow</button>
-            <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "queue" })}><Icon id="pen" />Review posts{T.draftsWaiting + T.versionsWaiting ? ` (${T.draftsWaiting + T.versionsWaiting})` : ""}</button>
+            <button className="btn btn-primary" type="button" data-tour="cal-review" onClick={() => setDrawer({ mode: "queue" })}><Icon id="pen" />Review posts{T.draftsWaiting + T.versionsWaiting ? ` (${T.draftsWaiting + T.versionsWaiting})` : ""}</button>
           </div>
         </div>
 
         <div className="band">
-          <section className="card overview" aria-labelledby="ov-title">
+          <section className="card overview" aria-labelledby="ov-title" data-tour="cal-goal">
             <div className="goal">
               <div>
                 <p className="eyebrow" id="ov-title">Programme goal</p>
@@ -460,7 +473,7 @@ function Desk(P: DeskProps) {
             </dl>
           </section>
 
-          <section className="card attention" aria-labelledby="att-title">
+          <section className="card attention" aria-labelledby="att-title" data-tour="cal-attention">
             <div className="att-head">
               <h2 className="card-title" id="att-title">Needs attention today</h2>
               <div className="seg" role="tablist" aria-label="Needs attention">
@@ -478,7 +491,7 @@ function Desk(P: DeskProps) {
           </section>
         </div>
 
-        <section className="card cal" aria-labelledby="week-title">
+        <section className="card cal" aria-labelledby="week-title" data-tour="cal-week">
           <div className="cal-bar">
             <div className="weeknav">
               <button className="icon-btn" type="button" aria-label="Previous week" disabled={week <= D.programmeStart} onClick={() => setWeek(addDays(week, -7))}><Icon id="left" /></button>
@@ -803,7 +816,7 @@ function Results({ D, act }: { D: Desk; act: (b: Record<string, unknown>, done?:
   const avg = (k: Kind) => { const ps = posts.filter((p) => p.kind === k); return ps.length ? Math.round(ps.reduce((s, p) => s + (p.impressions ?? 0), 0) / ps.length) : null; };
   const sj = avg("studojo"), ps = avg("personal");
   return (
-    <section className="card results" aria-labelledby="res-title">
+    <section className="card results" aria-labelledby="res-title" data-tour="cal-results">
       <div>
         <h2 className="card-title" id="res-title">How the posts are doing</h2>
         <p className="card-sub">Each post against the fellow's usual (or the programme's, for their first few). Open a post to see Claude's note on why.</p>

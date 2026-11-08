@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminHeader } from "~/components";
+import { AdminTour, type TourStep } from "~/components/admin-tour";
 import { FellowshipProgramSwitch } from "~/components/fellowship-program-switch";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { getToken } from "~/lib/api";
@@ -67,6 +68,17 @@ async function api<T>(path: string): Promise<T> {
   return j as T;
 }
 
+
+// The dashboard's tour: what each part is for, for whoever on the team opens it first.
+const TOUR: TourStep[] = [
+  { title: "The Program dashboard", body: "How the fellowship is doing against the founder's plan, from applicants to impressions. It's for reading: the work itself happens on the Editorial calendar." },
+  { sel: '[data-tour="pd-plan"]', title: "Against the plan", body: "Fellows, fellows who posted in the last 7 days, impressions, and this week's posts, each against where the plan says we should be today. The table lists the plan's checkpoints." },
+  { sel: '[data-tour="pd-funnel"]', title: "Applicant to posting fellow", body: "Where people drop off: applied, became fellows, posted at least once, posting this week. Each step shows its share of the one before." },
+  { sel: '[data-tour="pd-pipeline"]', title: "Posts in the pipeline", body: "Every post from Claude's draft to a post with numbers: waiting for review, sent back, scheduled, overdue, posted, numbers still to come, and posts still waiting for a photo." },
+  { sel: '[data-tour="pd-weekly"]', title: "Week by week", body: "Each week, Wednesday to Tuesday: posts due and posted, Studojo posts, impressions, fellows posting and fellows who joined." },
+  { sel: '[data-tour="pd-fellows"]', title: "Fellows", body: "One row per fellow: posts, impressions, best post and when they last posted. Open the calendar to act on any of it." },
+  { sel: '[data-tour="program-switch"]', title: "Dashboard and calendar", body: "Go to the Editorial calendar to review drafts, nudge fellows and see each day's posts. Take this tour again any time from Take the tour." },
+];
 function rowState(f: Row): [string, string] {
   if (f.status === "paused") return ["Paused", "pill-paused"];
   if (f.standing.atRisk) return ["At risk", "pill-risk"];
@@ -144,10 +156,11 @@ function Dashboard({ D, at }: { D: Dash; at: string | null }) {
           </div>
           <div className="head-actions">
             <FellowshipProgramSwitch />
+            <AdminTour page="fellowship-program" steps={TOUR} />
           </div>
         </div>
 
-        <section className="card pd-plan" aria-labelledby="plan-title">
+        <section className="card pd-plan" aria-labelledby="plan-title" data-tour="pd-plan">
           <div className="pd-head">
             <div>
               <h2 className="card-title" id="plan-title">Against the plan</h2>
@@ -242,7 +255,7 @@ function Funnel({ f }: { f: Dash["funnel"] }) {
   ] as const;
   const top = Math.max(1, f.applied);
   return (
-    <section className="card pd-card" aria-labelledby="funnel-title">
+    <section className="card pd-card" aria-labelledby="funnel-title" data-tour="pd-funnel">
       <h2 className="card-title" id="funnel-title">Applicant to posting fellow</h2>
       <p className="card-sub">Where people stop. Each step shows its share of the step before.</p>
       <ol className="pd-funnel">
@@ -276,7 +289,7 @@ function Pipeline({ p }: { p: Dash["pipeline"] }) {
     ["Posted with numbers", p.measured, "Counted in impressions and verdicts", false],
   ];
   return (
-    <section className="card pd-card" aria-labelledby="pipe-title">
+    <section className="card pd-card" aria-labelledby="pipe-title" data-tour="pd-pipeline">
       <h2 className="card-title" id="pipe-title">Posts in the pipeline</h2>
       <p className="card-sub">From Claude's draft to a post with numbers. Nothing reaches a fellow before approval.</p>
       <dl className="pd-pipe">
@@ -295,7 +308,7 @@ function Weekly({ D, weekNo }: { D: Dash; weekNo: (w: string) => number }) {
   const maxImp = Math.max(1, ...D.weekly.map((w) => w.impressions));
   const [personal, studojo] = D.kinds;
   return (
-    <section className="card pd-card" aria-labelledby="weekly-title">
+    <section className="card pd-card" aria-labelledby="weekly-title" data-tour="pd-weekly">
       <div className="pd-head">
         <div>
           <h2 className="card-title" id="weekly-title">Week by week</h2>
@@ -367,7 +380,7 @@ function Fellows({ D }: { D: Dash }) {
     return live.filter((f) => !s || [f.name, f.college, f.field].some((v) => v?.toLowerCase().includes(s))).sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
   }, [live, q, sort]);
   return (
-    <section className="card pd-card" aria-labelledby="fellows-title">
+    <section className="card pd-card" aria-labelledby="fellows-title" data-tour="pd-fellows">
       <div className="pd-head">
         <div>
           <h2 className="card-title" id="fellows-title">Fellows</h2>

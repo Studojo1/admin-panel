@@ -11,7 +11,7 @@ const PAGES: { to: string; label: string; icon: ReactNode }[] = [
 export function FellowshipProgramSwitch() {
   const { pathname } = useLocation();
   return (
-    <nav className="switch" aria-label="Fellowship program">
+    <nav className="switch" aria-label="Fellowship program" data-tour="program-switch">
       {PAGES.map((p) => (
         <Link key={p.to} to={p.to} aria-current={pathname === p.to ? "page" : undefined}>
           <svg className="i" viewBox="0 0 24 24" aria-hidden="true">{p.icon}</svg>{p.label}
