@@ -178,9 +178,11 @@
 .fx .filters .count { margin-left: auto; color: var(--ink-3); font-size: 13px; }
 .fx .cal-scroll { overflow: visible; }
 @media (max-width: 1379px) { .fx .cal-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; } }
-.fx table.grid { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 1340px; table-layout: fixed; }
-.fx col.k-who { width: 236px; } .fx col.k-st { width: 104px; } .fx col.k-wk { width: 86px; } .fx col.k-run { width: 78px; } .fx col.k-done { width: 84px; } .fx col.k-imp { width: 96px; } .fx col.k-act { width: 96px; }
-.fx col.k-on { width: 144px; } .fx col.k-off { width: 38px; } .fx col.k-today { width: 50px; }
+/* display: table beats Tailwind's .grid utility (display: grid), which otherwise splits the header from the rows. */
+.fx table.grid { display: table; width: 100%; border-collapse: separate; border-spacing: 0; min-width: 1260px; table-layout: fixed; }
+.fx col.k-who { width: 220px; } .fx col.k-st { width: 100px; } .fx col.k-wk { width: 84px; } .fx col.k-run { width: 70px; } .fx col.k-done { width: 80px; } .fx col.k-imp { width: 90px; } .fx col.k-act { width: 92px; }
+/* Day columns share what's left, so the week fits the card; the table scrolls sideways below its min-width. */
+.fx col.k-on { width: auto; } .fx col.k-off { width: 38px; } .fx col.k-today { width: 50px; }
 .fx .grid th, .fx .grid td { padding: 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
 .fx .grid thead th { position: sticky; top: var(--fx-top); z-index: 3; background: var(--card); font-size: 12px; font-weight: 600; line-height: 1.2; color: var(--ink-3); height: 50px; padding: 0 10px; border-bottom: 1px solid var(--line-2); }
 @media (max-width: 1379px) { .fx .grid thead th { position: static; top: auto; } .fx .grid thead th.c-who { position: sticky; left: 0; top: auto; } }

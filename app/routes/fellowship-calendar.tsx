@@ -370,6 +370,9 @@ function Desk(P: DeskProps) {
   const postedIn = (f: Fellow, w: string) => f.posts.filter((p) => p.status === "posted" && weekOf(p.due) === w).length;
   const itemsOn = (f: Fellow, date: string) => [...f.drafts.filter((d) => d.due === date).map((d) => ({ d })), ...f.posts.filter((p) => p.due === date).map((p) => ({ p }))];
   const weekEmpty = (f: Fellow, w: string) => ![...f.drafts, ...f.posts].some((x) => weekOf(x.due) === w);
+  // Days drawn full width: the posting days, plus any other day with a post this week (launch week's Sunday),
+  // so no post shrinks to a dot.
+  const WIDE = [0, 1, 2, 3, 4, 5, 6].filter((d) => POST_DAYS.includes(d) || live.some((f) => itemsOn(f, addDays(week, d)).length > 0));
   const RISK: Record<string, number> = { "at risk": 0, new: 1, active: 2, paused: 3 };
   const list = useMemo(() => {
     const qq = F.q.trim().toLowerCase();
@@ -509,14 +512,14 @@ function Desk(P: DeskProps) {
               <caption className="sr">Posts for week {weekNo(week)}, {range(week)}, by fellow</caption>
               <colgroup>
                 <col className="k-who" /><col className="k-st" /><col className="k-wk" /><col className="k-run" /><col className="k-done" /><col className="k-imp" /><col className="k-act" />
-                {[0, 1, 2, 3, 4, 5, 6].map((d) => <col key={d} className={POST_DAYS.includes(d) ? "k-on" : addDays(week, d) === today ? "k-today" : "k-off"} />)}
+                {[0, 1, 2, 3, 4, 5, 6].map((d) => <col key={d} className={WIDE.includes(d) ? "k-on" : addDays(week, d) === today ? "k-today" : "k-off"} />)}
               </colgroup>
               <thead>
                 <tr>
                   {sortTh("name", "Fellow", "c-who")}{sortTh("status", "Status")}{sortTh("posted", week === THIS ? "This week" : `Posted wk ${weekNo(week)}`, "num")}
                   {sortTh("run", "Weekly run", "num")}{sortTh("completed", "Completed weeks", "num")}{sortTh("impressions", "Impressions", "num")}{sortTh("active", "Last active")}
                   {[0, 1, 2, 3, 4, 5, 6].map((d) => {
-                    const date = addDays(week, d), on = POST_DAYS.includes(d), isToday = date === today;
+                    const date = addDays(week, d), on = WIDE.includes(d), isToday = date === today;
                     return <th key={d} className={`d ${on ? "d-on" : "d-off"}${isToday ? " is-today" : ""}`} scope="col"><span className="dd">{on ? DSHORT[d] : DSHORT[d][0]}</span><span className="dn">{day(date).getUTCDate()}</span>{isToday ? <span className="tdy">Today</span> : null}</th>;
                   })}
                 </tr>
@@ -534,7 +537,7 @@ function Desk(P: DeskProps) {
                       : <button className="plan-btn" type="button" onClick={() => copyPlan([f.name], week)}><Icon id="wand" />Plan week {weekNo(week)}: copy the Claude Code request</button>}</td>{off(6)}</>;
                   } else {
                     days = [0, 1, 2, 3, 4, 5, 6].map((d) => {
-                      const date = addDays(week, d), on = POST_DAYS.includes(d), isToday = date === today ? " is-today" : "";
+                      const date = addDays(week, d), on = POST_DAYS.includes(d), wide = WIDE.includes(d), isToday = date === today ? " is-today" : "";
                       const items = itemsOn(f, date);
                       const label = `${f.name}, ${DSHORT[d]} ${fmt(date)}`;
                       if (!items.length) {
@@ -550,9 +553,9 @@ function Desk(P: DeskProps) {
                       const kind = "d" in it && it.d ? it.d.kind : (it as { p: Post }).p.kind;
                       const open = () => ("d" in it && it.d ? setDrawer({ mode: "review", id: f.id, draftId: it.d.id }) : setDrawer({ mode: "post", id: f.id, postId: (it as { p: Post }).p.id }));
                       return (
-                        <td key={d} className={`d ${on ? "d-on" : "d-off"}${isToday}`}>
-                          <button className={`slot s-${s.key}`} type="button" onClick={open} title={title} aria-label={`${label}, ${kind === "studojo" ? "Studojo" : "personal"} post, ${s.label}`} style={on ? undefined : { padding: 4, minHeight: 30 }}>
-                            {on ? <><span className="st"><Icon id={s.icon} />{s.label}{items.length > 1 ? ` +${items.length - 1}` : ""}</span><span className="k">{title || (kind === "studojo" ? "Studojo post" : "Personal post")}</span></> : <span className="mini-dot" style={{ background: "currentColor" }} />}
+                        <td key={d} className={`d ${wide ? "d-on" : "d-off"}${isToday}`}>
+                          <button className={`slot s-${s.key}`} type="button" onClick={open} title={title} aria-label={`${label}, ${kind === "studojo" ? "Studojo" : "personal"} post, ${s.label}`} style={wide ? undefined : { padding: 4, minHeight: 30 }}>
+                            {wide ? <><span className="st"><Icon id={s.icon} />{s.label}{items.length > 1 ? ` +${items.length - 1}` : ""}</span><span className="k">{title || (kind === "studojo" ? "Studojo post" : "Personal post")}</span></> : <span className="mini-dot" style={{ background: "currentColor" }} />}
                           </button>
                         </td>
                       );
