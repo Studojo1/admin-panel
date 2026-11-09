@@ -49,10 +49,16 @@ export interface SendOpts {
   replyTo?: string;
   /** Sender name in place of "Studojo Support"; the address stays the same. */
   fromName?: string;
+  /**
+   * A message someone on the team read and pressed Send on, to one fellow, from the fellowship desk
+   * (the founder, 9 Nov 2026: nudges and requests for stories go by email in one click). The pause
+   * holds what the app sends by itself, so only these go through it.
+   */
+  teamSend?: boolean;
 }
 
 export async function sendDirectGmail(opts: SendOpts): Promise<boolean> {
-  if (emailsPaused()) {
+  if (emailsPaused() && !opts.teamSend) {
     console.info("[email-pause] held: ticket reply email (gmail-direct)");
     return false;
   }

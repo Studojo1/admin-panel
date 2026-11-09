@@ -171,6 +171,24 @@ async function createTables() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ugc_creator_analytics_creator ON ugc_creator_analytics (creator_id, uploaded_at DESC)`);
+  // Emails the team sends a fellow from the desk in one click (the founder, 9 Nov 2026): a nudge, a request
+  // for stories, or for a post's numbers (post_id). Kept as sent, so the desk shows who was emailed today.
+  // Admin only.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS ugc_creator_emails (
+      id SERIAL PRIMARY KEY,
+      creator_id INTEGER NOT NULL REFERENCES ugc_creators(id) ON DELETE CASCADE,
+      post_id INTEGER,
+      kind TEXT NOT NULL,
+      to_email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      body TEXT NOT NULL,
+      sent_by TEXT,
+      status TEXT NOT NULL DEFAULT 'sending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ugc_creator_emails_creator ON ugc_creator_emails (creator_id, created_at DESC)`);
   // Posts a fellow wrote before the fellowship, so Claude never repeats them.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS ugc_creator_earlier_posts (
