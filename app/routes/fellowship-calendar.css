@@ -338,6 +338,12 @@
 .fx .bubble textarea:focus { outline: none; }
 .fx .bubble:focus-within { box-shadow: 0 0 0 2px var(--accent); }
 .fx .bubble .tm { display: block; text-align: right; font-size: 11px; color: #667066; }
+.fx .mail { border: 1px solid var(--line-2); border-radius: var(--r); background: var(--card); overflow: hidden; }
+.fx .mail:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-tint-2); }
+.fx .mail-subj { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--ink-3); }
+.fx .mail-subj input { flex: 1; min-width: 0; border: 0; background: transparent; font: 600 14.5px/1.3 var(--sans); color: var(--ink); padding: 0; }
+.fx .mail textarea { display: block; width: 100%; border: 0; background: transparent; resize: vertical; font: 14.5px/1.5 var(--sans); color: var(--ink); padding: 12px; min-height: 200px; }
+.fx .mail input:focus, .fx .mail textarea:focus { outline: none; }
 
 /* ---------- applicants ---------- */
 

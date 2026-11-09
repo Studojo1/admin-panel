@@ -30,6 +30,8 @@ interface Post {
   postedAt: string | null; url: string | null; impressions: number | null; reactions: number | null; comments: number | null; screenshot: string | null;
   metricsAt: string | null; review: Review | null; insight: string | null; createdBy: string | null; verdict: Verdict | null;
   photoIdea: string | null; photos: string[]; photoHelpAt: string | null;
+  /** When the team last emailed the fellow for this post's numbers, from the desk. */
+  numbersEmailedAt?: string | null;
   analytics: PostAnalytics | null; analyticsFiles: string[];
   fellowVersion: { text: string; at: string } | null; versionReply: string | null;
 }
@@ -49,6 +51,8 @@ interface Fellow {
   id: number; name: string; first: string; slug: string | null; link: string | null; college: string | null; field: string | null; cohort: string | null;
   status: string; email: string | null; whatsapp: string | null; linkedin: string | null; joined: string; connectionsAtJoin: number | null; connections: number | null;
   learnings: string; teamNotes: string; nudgedAt: string | null; internAt: string | null; referredAt: string | null; stories: number; earlierPosts: number; standing: Standing; posts: Post[]; drafts: Draft[];
+  /** When the team last emailed them a nudge or a request for stories, from the desk. */
+  emailed: { nudge: string | null; stories: string | null };
 }
 interface Rules {
   goal: { impressions: number; creators: number; by: string }; plan: { by: string; creators: number; impressions: number }[];
@@ -72,7 +76,7 @@ const DSHORT = ["Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"];
 const TOUR: TourStep[] = [
   { title: "The Editorial calendar", body: "This is where the team runs the fellowship day to day: which posts go out, what needs a decision today, and how posts are doing. Here's a quick look around." },
   { sel: '[data-tour="cal-goal"]', title: "The goal and this week", body: "Impressions so far against the 1M goal and the founder's plan. Underneath: posts done of those due this week, fellows active, who's at risk, and numbers still to come in." },
-  { sel: '[data-tour="cal-attention"]', title: "Needs attention today", body: "Today's to-do list. To review: Claude's drafts waiting for approval. Nudge: fellows behind on posts, with a WhatsApp message ready to send. Numbers due, New stories and Ask for stories work the same way." },
+  { sel: '[data-tour="cal-attention"]', title: "Needs attention today", body: "Today's to-do list. To review: Claude's drafts waiting for approval. Nudge: fellows behind on posts, with an email ready to send in one click. Numbers due, New stories and Ask for stories work the same way." },
   { sel: '[data-tour="cal-review"]', title: "Review posts", body: "Opens every draft, and every fellow's own version of a post, waiting for you. Approve it, edit it, or send it back with a note. Nothing reaches a fellow until someone here approves it." },
   { sel: '[data-tour="cal-week"]', title: "The week, fellow by fellow", body: "One row per fellow, one column per day, Wednesday to Tuesday. A post's colour shows where it is; the key is above the table. Click a name for the fellow's profile and stories, or a post to open it. The arrows move between weeks." },
   { sel: '[data-tour="cal-results"]', title: "Results and lessons", body: "How each posted post did against that fellow's usual. Next to it are the lessons Claude reads before it writes anything. You can edit them, and Claude follows whatever is there." },
@@ -151,6 +155,7 @@ const ICONS: Record<string, ReactNode> = {
   down: <path d="M6 9l6 6 6-6" />,
   up: <path d="M6 15l6-6 6 6" />,
   search: <><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.2-4.2" /></>,
+  mail: <><rect x="3.5" y="5.5" width="17" height="13" rx="2.2" /><path d="M4.5 7.5l7.5 5.5 7.5-5.5" /></>,
   chat: <><path d="M20.5 11.5a8.5 8.5 0 0 1-12.4 7.6L3.5 20.5l1.4-4.4A8.5 8.5 0 1 1 20.5 11.5z" /><path d="M9 10.5h6M9 13.5h4" /></>,
   wand: <path d="M4 20l11-11M14 4v3M12.5 5.5h3M19 9v3M17.5 10.5h3" />,
   link: <><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" /><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /></>,
@@ -769,13 +774,13 @@ function Attention(p: {
     why = `${DOWL[day(p.today).getUTCDay()]}: fellows behind this week, or who fell behind last week.`;
     rows = (p.all ? p.nudgeList : p.nudgeList.slice(0, LIM)).map((f) => (
       <li key={f.id}>{who(f, `${p.nudgeReason(f).join(" · ")} · active ${ago(f.standing.lastActivity).toLowerCase()}`)}
-        {p.nudgedToday(f) ? <span className="done-mark"><Icon id="check" sm />Nudged</span> : <button className="btn btn-outline btn-sm" type="button" onClick={() => p.nudge(f.id)}><Icon id="chat" />Nudge</button>}</li>
+        {p.nudgedToday(f) ? <span className="done-mark"><Icon id="check" sm />Nudged</span> : <button className="btn btn-outline btn-sm" type="button" onClick={() => p.nudge(f.id)}><Icon id={f.email ? "mail" : "chat"} />Nudge</button>}</li>
     ));
   } else if (p.kind === "numbers") {
     total = p.numbersList.length;
     why = "Posts up for more than a week that still need impressions, reactions and comments.";
     rows = (p.all ? p.numbersList : p.numbersList.slice(0, LIM)).map(({ f, p: post }) => (
-      <li key={post.id}>{who(f, `"${post.title}" · posted ${fmt(istDay(post.postedAt!))}`)}<button className="btn btn-outline btn-sm" type="button" onClick={() => p.nudge(f.id, post)}><Icon id="chat" />Ask</button></li>
+      <li key={post.id}>{who(f, `"${post.title}" · posted ${fmt(istDay(post.postedAt!))}`)}{post.numbersEmailedAt && istDay(post.numbersEmailedAt) === p.today ? <span className="done-mark"><Icon id="check" sm />Emailed</span> : <button className="btn btn-outline btn-sm" type="button" onClick={() => p.nudge(f.id, post)}><Icon id={f.email ? "mail" : "chat"} />Ask</button>}</li>
     ));
   } else if (p.kind === "blocked") {
     total = p.blockedList.length;
@@ -787,7 +792,7 @@ function Attention(p: {
     total = p.askList.length;
     why = "Fellows who've shared fewer than 3 stories. Their posts are written from these, so ask them to tell us more about their life.";
     rows = (p.all ? p.askList : p.askList.slice(0, LIM)).map((f) => (
-      <li key={f.id}>{who(f, `${plural(f.stories, "story", "stories")} so far${f.teamNotes ? "" : " · no call notes yet"}`)}<button className="btn btn-outline btn-sm" type="button" onClick={() => p.nudge(f.id, undefined, true)}><Icon id="chat" />Ask</button></li>
+      <li key={f.id}>{who(f, `${plural(f.stories, "story", "stories")} so far${f.teamNotes ? "" : " · no call notes yet"}`)}{f.emailed.stories && istDay(f.emailed.stories) === p.today ? <span className="done-mark"><Icon id="check" sm />Emailed</span> : <button className="btn btn-outline btn-sm" type="button" onClick={() => p.nudge(f.id, undefined, true)}><Icon id={f.email ? "mail" : "chat"} />Ask</button>}</li>
     ));
   } else {
     total = p.storyList.length;
@@ -879,7 +884,7 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
         <div className="actions">
           {f.status === "paused" ? <button className="btn btn-primary" type="button" onClick={() => creatorApi("/api/ugc-creators", { intent: "set-status", id: f.id, status: "active" }, `${f.first} is back on the calendar.`)}><Icon id="play" />Resume</button> : null}
           {f.drafts.some((d) => d.status === "review") ? <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "review", id: f.id })}><Icon id="pen" />Review {plural(f.drafts.filter((d) => d.status === "review").length, "draft")}</button> : null}
-          {f.status === "active" && left > 0 ? <button className="btn btn-outline" type="button" onClick={() => nudge(f.id)}><Icon id="chat" />Nudge on WhatsApp</button> : null}
+          {f.status === "active" && left > 0 ? <button className="btn btn-outline" type="button" onClick={() => nudge(f.id)}><Icon id={f.email ? "mail" : "chat"} />Nudge</button> : null}
           {f.status === "active" && !hasNext ? <button className="btn btn-line" type="button" onClick={() => copyPlan([f.name], addDays(THIS, 7))}><Icon id="wand" />Plan next week</button> : null}
         </div>
         {confirmPause ? <div className="confirm" role="alert"><p><b>Pause {f.first}?</b> Their open posts stop showing as due, and they drop out of nudges until you resume.</p><div className="actions">
@@ -1375,30 +1380,58 @@ function AddFellow({ D, creatorApi, setDrawer, toast }: { D: Desk; creatorApi: (
 }
 
 // ---------------------------------------------------------------- WhatsApp nudge (posts this week, or numbers for one post)
+// A nudge, or a request for stories or a post's numbers. With an email address saved it goes by email in one
+// click (the founder, 9 Nov 2026), from Team Studojo with replies to info@studojo.com. WhatsApp Web stays as the
+// other way, and the only way for a fellow with no email saved.
 function NudgeDialog({ f, post, ask, close, act, toast, today }: { f: Fellow; post?: Post; ask?: boolean; close: () => void; act: (b: Record<string, unknown>, done?: string) => Promise<Desk | null>; toast: (m: string) => void; today: string }) {
   const left = f.standing.thisWeek.due - f.standing.thisWeek.posted;
   const link = f.link ?? "";
-  const initial = ask
-    ? `Hi ${f.first}, to write posts that really sound like you, we'd love to hear more about your life: an experience that shaped you, a setback, something you're proud of, or why you chose your course. There are a few questions waiting for you on your page, and you can write as much or as little as you like: ${link}`
+  const kind = ask ? "stories" : post ? "numbers" : "nudge";
+  const behind = left > 0 ? `${left === 1 ? "1 post is" : `${left} posts are`} waiting for you this week` : "we missed your posts last week";
+  const [subject, setSubject] = useState(ask ? "Tell us more about you" : post ? `The numbers for your post "${post.title}"` : "Your fellowship posts this week");
+  const [text, setText] = useState(ask
+    ? `Hi ${f.first},\n\nTo write posts that really sound like you, we'd love to hear more about your life: an experience that shaped you, a setback, something you're proud of, or why you chose your course. There are a few questions waiting for you on your dashboard. Tap Speak and talk, or type, as much or as little as you like:\n${link}\n\nTeam Studojo`
     : post
-    ? `Hi ${f.first}, could you add the numbers for your post "${post.title}"${post.postedAt ? ` from ${fmt(istDay(post.postedAt))}` : ""}? Impressions, reactions and comments, on your page: ${link}`
-    : `Hi ${f.first}, a quick nudge: ${left === 1 ? "1 post is" : `${left} posts are`} waiting for you this week. They're ready to copy on your page: ${link}`;
-  const [text, setText] = useState(initial);
+    ? `Hi ${f.first},\n\nCould you add the numbers for your post "${post.title}"${post.postedAt ? ` from ${fmt(istDay(post.postedAt))}` : ""}? Impressions, reactions and comments, on your dashboard:\n${link}\n\nTeam Studojo`
+    : `Hi ${f.first},\n\nA quick nudge: ${behind}. Your posts are ready on your dashboard: add a photo, post on LinkedIn, then tap I posted it.\n${link}\n\nIf anything on your dashboard isn't working, just reply to this email.\n\nTeam Studojo`);
+  const [sending, setSending] = useState(false);
+  const email = f.email?.trim() || null;
   const digits = waDigits(f.whatsapp);
-  void today;
+  const last = kind === "numbers" ? post?.numbersEmailedAt : kind === "stories" ? f.emailed.stories : f.emailed.nudge;
+  const sentToday = !!last && istDay(last) === today;
+  const ready = subject.trim().length > 0 && text.trim().length >= 20;
+  const send = async () => {
+    if (sending || !ready) return;
+    setSending(true);
+    const r = await act({ intent: "email", id: f.id, kind, postId: post?.id, subject, text }, `Email sent to ${f.first}.`);
+    setSending(false);
+    if (r) close();
+  };
+  const waText = text.replace("reply to this email", "reply here");
   return (
     <div className="modal-wrap">
       <div className="scrim" onClick={close} />
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="ng-title">
         <button className="icon-btn x" type="button" aria-label="Close" onClick={close}><Icon id="x" /></button>
-        <h2 id="ng-title">{ask ? `Ask ${f.first} for stories` : post ? `Ask ${f.first} for numbers` : `Nudge ${f.first} on WhatsApp`}</h2>
-        <p className="to"><span className={`avatar sm ${avClass(f.name)}`} aria-hidden="true">{initials(f.name)}</span><span>To <b>{f.name}</b> · {f.whatsapp || "no WhatsApp number saved"}</span></p>
-        <div className="chat"><div className="bubble"><label className="sr" htmlFor="ng-text">Message</label><textarea id="ng-text" rows={4} value={text} onChange={(e) => setText(e.target.value)} autoFocus /><span className="tm">Now</span></div></div>
-        <p className="hint">You can edit the message.{post || ask ? "" : ` Then mark ${f.first} as nudged so the team knows.`}</p>
+        <h2 id="ng-title">{ask ? `Ask ${f.first} for stories` : post ? `Ask ${f.first} for numbers` : `Nudge ${f.first}`}</h2>
+        <p className="to"><span className={`avatar sm ${avClass(f.name)}`} aria-hidden="true">{initials(f.name)}</span><span>To <b>{f.name}</b> · {email ?? f.whatsapp ?? "no email or WhatsApp saved"}</span></p>
+        {email ? (
+          <div className="mail">
+            <label className="mail-subj"><span>Subject</span><input value={subject} maxLength={160} onChange={(e) => setSubject(e.target.value)} /></label>
+            <label className="sr" htmlFor="ng-text">Message</label>
+            <textarea id="ng-text" rows={10} maxLength={4000} value={text} onChange={(e) => setText(e.target.value)} autoFocus />
+          </div>
+        ) : (
+          <div className="chat"><div className="bubble"><label className="sr" htmlFor="ng-text">Message</label><textarea id="ng-text" rows={4} value={text} onChange={(e) => setText(e.target.value)} autoFocus /><span className="tm">Now</span></div></div>
+        )}
+        <p className="hint">{email
+          ? `${sentToday ? `You already emailed ${f.first} about this today. ` : ""}Edit it if you like. It goes from Team Studojo, and replies come to info@studojo.com.`
+          : `No email address saved, so this one goes on WhatsApp. You can edit the message.${post || ask ? "" : ` Then mark ${f.first} as nudged so the team knows.`}`}</p>
         <div className="actions">
-          {digits ? <a className="btn btn-primary" href={waWeb(digits, text)} target={WA_TAB} rel="noopener noreferrer"><Icon id="chat" />Open in WhatsApp Web</a> : null}
-          <button className={`btn ${digits ? "btn-line" : "btn-primary"}`} type="button" onClick={async () => toast((await copyText(text)) ? "Message copied. Paste it into WhatsApp." : "Select the message and copy it.")}><Icon id="copy" />Copy message</button>
-          {!post && !ask ? <button className="btn btn-outline" type="button" onClick={async () => { const r = await act({ intent: "nudged", id: f.id }, `${f.first} marked as nudged today.`); if (r) close(); }}><Icon id="check" />Mark as nudged</button> : null}
+          {email ? <button className="btn btn-primary" type="button" disabled={sending || !ready} onClick={send}><Icon id="mail" />{sending ? "Sending…" : "Send email"}</button> : null}
+          {digits ? <a className={`btn ${email ? "btn-line" : "btn-primary"}`} href={waWeb(digits, waText)} target={WA_TAB} rel="noopener noreferrer"><Icon id="chat" />{email ? "WhatsApp instead" : "Open in WhatsApp Web"}</a> : null}
+          {!email ? <button className={`btn ${digits ? "btn-line" : "btn-primary"}`} type="button" onClick={async () => toast((await copyText(waText)) ? "Message copied. Paste it into WhatsApp." : "Select the message and copy it.")}><Icon id="copy" />Copy message</button> : null}
+          {!email && !post && !ask ? <button className="btn btn-outline" type="button" onClick={async () => { const r = await act({ intent: "nudged", id: f.id }, `${f.first} marked as nudged today.`); if (r) close(); }}><Icon id="check" />Mark as nudged</button> : null}
         </div>
       </div>
     </div>

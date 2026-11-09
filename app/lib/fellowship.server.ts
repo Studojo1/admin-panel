@@ -1,5 +1,6 @@
 import db from "~/lib/db.server";
 import { deletePhoto, isAnalyticsRef, isPhotoRef, newPhotoRef, PHOTOS_PER_POST, proofRefs, putPhoto } from "~/lib/fellow-proof.server";
+import { sendDirectGmail } from "~/lib/gmail-direct.server";
 import { sql } from "drizzle-orm";
 import {
   HIRING_PIPELINE,
@@ -681,6 +682,70 @@ export async function setNotes(fellowId: number, b: { teamNotes?: unknown; learn
 export async function markNudged(fellowId: number) {
   await db.execute(sql`UPDATE ugc_creators SET nudged_at = NOW() WHERE id = ${fellowId}`);
 }
+
+// The founder, 9 Nov 2026: a nudge, or a request for stories or a post's numbers, goes to the fellow by email
+// in one click instead of a WhatsApp message the team copies. The team reads and can edit it first. It goes
+// from the admin's Gmail (gmail-direct.server.ts) as "Team Studojo", and replies come to info@studojo.com,
+// where the team already writes to fellows from. Every send is kept in ugc_creator_emails.
+export type EmailKind = "nudge" | "stories" | "numbers";
+const EMAIL_KINDS: EmailKind[] = ["nudge", "stories", "numbers"];
+const EMAIL_REPLY_TO = "info@studojo.com";
+const EMAIL_SUBJECT_MAX = 160;
+const EMAIL_TEXT_MAX = 4000;
+
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+/** The team's plain-text message as simple HTML: its paragraphs and line breaks, with links clickable. */
+export function emailHtml(text: string) {
+  const para = (p: string) => escapeHtml(p).replace(/https?:\/\/[^\s<]*[^\s<.,!?;:)]/g, (u) => `<a href="${u}">${u}</a>`).replace(/\n/g, "<br>");
+  return `<div style="font:15px/1.55 Arial,Helvetica,sans-serif;color:#1d1d1f">${text.split(/\n{2,}/).map((p) => `<p style="margin:0 0 14px">${para(p)}</p>`).join("")}</div>`;
+}
+
+/** Emails one fellow from the desk. A second send of the same email within two minutes is refused (a double click). */
+export async function emailFellow(fellowId: number, b: { kind?: unknown; subject?: unknown; text?: unknown; postId?: unknown }, by: string) {
+  const kind = EMAIL_KINDS.find((k) => k === b.kind);
+  if (!kind) throw new Refused("Unknown kind of email.");
+  const subject = str(b.subject, EMAIL_SUBJECT_MAX).replace(/\s+/g, " ");
+  const text = str(b.text, EMAIL_TEXT_MAX);
+  if (!subject) throw new Refused("Add a subject.");
+  if (text.length < 20) throw new Refused("Write the message first.");
+  const postId = kind === "numbers" ? Number(b.postId) : null;
+  if (postId !== null && !(Number.isInteger(postId) && postId > 0)) throw new Refused("Which post is this about?");
+
+  const { logId, to, first } = await forFellow(fellowId, async (tx) => {
+    const f = await fellow(fellowId, tx);
+    if (!f || f.status === "removed") throw new Refused("No fellow with that id.", 404);
+    const to = (f.email ?? "").trim();
+    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(to)) throw new Refused(`${f.first} has no email address saved.`);
+    if (postId !== null && (await postOwner(postId)) !== fellowId) throw new Refused("That post isn't theirs.");
+    const recent = (await tx.execute(sql`
+      SELECT 1 FROM ugc_creator_emails
+      WHERE creator_id = ${fellowId} AND kind = ${kind} AND post_id IS NOT DISTINCT FROM ${postId}
+        AND status IN ('sending', 'sent') AND created_at > NOW() - INTERVAL '2 minutes'
+    `)).rows;
+    if (recent.length) throw new Refused(`This email just went to ${f.first}.`, 409);
+    const row = (await tx.execute(sql`
+      INSERT INTO ugc_creator_emails (creator_id, post_id, kind, to_email, subject, body, sent_by)
+      VALUES (${fellowId}, ${postId}, ${kind}, ${to}, ${subject}, ${text}, ${by}) RETURNING id
+    `)).rows[0] as { id: number };
+    return { logId: Number(row.id), to, first: f.first };
+  });
+
+  const sent = await sendDirectGmail({ to, subject, text, html: emailHtml(text), replyTo: EMAIL_REPLY_TO, fromName: "Team Studojo", teamSend: true });
+  await db.execute(sql`UPDATE ugc_creator_emails SET status = ${sent ? "sent" : "failed"} WHERE id = ${logId}`);
+  if (!sent) throw new Refused(`The email to ${first} didn't go. Try again in a minute, or send it on WhatsApp.`, 502);
+  if (kind === "nudge") await markNudged(fellowId);
+  return { emailed: to };
+}
+
+/** When each fellow was last emailed from the desk, by kind (and by post, for numbers). */
+async function lastEmails() {
+  const rows = (await db.execute(sql`
+    SELECT creator_id, post_id, kind, MAX(created_at) AS at FROM ugc_creator_emails WHERE status = 'sent' GROUP BY creator_id, post_id, kind
+  `)).rows as { creator_id: number; post_id: number | null; kind: string; at: unknown }[];
+  const m = new Map<string, string>();
+  for (const r of rows) { const at = iso(r.at); if (at) m.set(r.kind === "numbers" ? `post:${r.post_id}` : `${r.kind}:${r.creator_id}`, at); }
+  return m;
+}
 export async function setPlaybook(text: unknown, by: string) {
   await db.execute(sql`UPDATE ugc_playbook SET text = ${str(text, 12000)}, updated_at = NOW(), updated_by = ${by} WHERE id = 1`);
 }
@@ -754,8 +819,8 @@ export function standing(posts: Post[], today: string, postsPerWeek: number) {
 export async function calendarView() {
   await ensureCreatorTables();
   const today = istDate();
-  const [rules, fs, posts, drafts, stories, conns, pb] = await Promise.all([
-    programmeRules(), fellows(), postsOf(null), draftsOf(null), storiesOf(null), latestConnections(), playbook(),
+  const [rules, fs, posts, drafts, stories, conns, pb, emailed] = await Promise.all([
+    programmeRules(), fellows(), postsOf(null), draftsOf(null), storiesOf(null), latestConnections(), playbook(), lastEmails(),
   ]);
   const earlier = new Map(((await db.execute(sql`SELECT creator_id, COUNT(*)::int AS n FROM ugc_creator_earlier_posts GROUP BY creator_id`)).rows as { creator_id: number; n: number }[]).map((r) => [Number(r.creator_id), Number(r.n)]));
   const postsBy = new Map<number, Post[]>(), draftsBy = new Map<number, Draft[]>(), storiesBy = new Map<number, number>();
@@ -797,7 +862,8 @@ export async function calendarView() {
         stories: storiesBy.get(f.id) ?? 0,
         earlierPosts: earlier.get(f.id) ?? 0,
         standing: standing(ps, today, rules.postsPerWeek),
-        posts: ps.map((p) => ({ ...p, verdict: verdictOf(p, ps, all) })),
+        emailed: { nudge: emailed.get(`nudge:${f.id}`) ?? null, stories: emailed.get(`stories:${f.id}`) ?? null },
+        posts: ps.map((p) => ({ ...p, verdict: verdictOf(p, ps, all), numbersEmailedAt: emailed.get(`post:${p.id}`) ?? null })),
         drafts: draftsBy.get(f.id) ?? [],
       };
     }),

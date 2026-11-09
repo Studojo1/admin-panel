@@ -6,6 +6,7 @@ import {
   approveVersion,
   blockPost,
   calendarView,
+  emailFellow,
   fellowExtras,
   isRefused,
   keepOriginal,
@@ -27,7 +28,8 @@ import {
 // of a fellow's drafts, block an approved post (and release it), record a post the fellow
 // reported directly, approve a fellow's own version of a post or keep the original,
 // change what photo fits a post or remove one of its photos,
-// and the notes and lessons Claude reads. Every POST answers
+// the notes and lessons Claude reads, and an email to a fellow (a nudge,
+// or a request for stories or a post's numbers). Every POST answers
 // with the fresh desk. Adding fellows and hand-written posts go through
 // /api/ugc-creators.
 
@@ -66,6 +68,7 @@ export async function action({ request }: Route.ActionArgs) {
       case "photo-remove": if (!id) break; await removePhoto(id, body.ref); break;
       case "notes": if (!id) break; await setNotes(id, body); break;
       case "nudged": if (!id) break; await markNudged(id); break;
+      case "email": if (!id) break; extra = await emailFellow(id, body, by); break;
       case "playbook": await setPlaybook(body.text, by); break;
       default: return Response.json({ error: "Unknown intent" }, { status: 400 });
     }

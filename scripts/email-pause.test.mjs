@@ -5,7 +5,7 @@
 // Imports the TypeScript source directly: Node 22.18+ strips the types itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { emailsPaused } from "../app/lib/email-pause.server.ts";
 
 function withEnv(value, fn) {
@@ -34,7 +34,23 @@ test("only EMAILS_PAUSED=0 lifts the pause", () => {
 test("sendDirectGmail checks the pause before it sends", () => {
   const src = readFileSync(new URL("../app/lib/gmail-direct.server.ts", import.meta.url), "utf8");
   const fn = src.slice(src.indexOf("export async function sendDirectGmail("));
-  const gate = fn.indexOf("if (emailsPaused())");
-  assert.ok(gate > 0, "sendDirectGmail must check emailsPaused()");
+  const gate = fn.indexOf("if (emailsPaused() && !opts.teamSend)");
+  assert.ok(gate > 0, "sendDirectGmail must check emailsPaused(), with only a team send let through");
   assert.ok(gate < fn.indexOf("sendMail("), "the pause check must come before sendMail");
+});
+
+// 9 Nov 2026, the founder: a nudge or a request for stories goes to a fellow by email in one click.
+// Only that send, pressed by someone on the team on the fellowship desk, goes past the pause.
+test("only the fellowship desk's email is a team send", () => {
+  const dir = new URL("../app/", import.meta.url);
+  const users = [];
+  const walk = (u) => {
+    for (const e of readdirSync(u, { withFileTypes: true })) {
+      const c = new URL(e.name + (e.isDirectory() ? "/" : ""), u);
+      if (e.isDirectory()) walk(c);
+      else if (/\.(ts|tsx)$/.test(e.name) && /teamSend:\s*true/.test(readFileSync(c, "utf8"))) users.push(c.pathname.slice(dir.pathname.length));
+    }
+  };
+  walk(dir);
+  assert.deepEqual(users, ["lib/fellowship.server.ts"]);
 });
