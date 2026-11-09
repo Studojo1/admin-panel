@@ -253,6 +253,18 @@ async function createTables() {
     SET rules = jsonb_set(rules, '{weeks}', ${JSON.stringify(PROGRAMME_RULES.weeks)}::jsonb), updated_at = NOW(), updated_by = 'founder, 5 Nov 2026'
     WHERE id = 1 AND rules->>'weeks' LIKE 'Weeks run Monday to Sunday%'
   `);
+  // 9 Nov 2026: the founder, the month-1 milestone is the fellowship certificate, not an intern certificate.
+  // Applied once, only while the row's month milestone still says "intern certificate".
+  const month = PROGRAMME_RULES.milestones.find((m) => m.id === "month")!;
+  await db.execute(sql`
+    UPDATE ugc_programme
+    SET rules = jsonb_set(rules, '{milestones}', (
+          SELECT jsonb_agg(CASE WHEN m->>'id' = 'month' THEN m || ${JSON.stringify({ name: month.name, detail: month.detail })}::jsonb ELSE m END ORDER BY i)
+          FROM jsonb_array_elements(rules->'milestones') WITH ORDINALITY AS t(m, i))),
+        updated_at = NOW(), updated_by = 'founder, 9 Nov 2026'
+    WHERE id = 1 AND jsonb_typeof(rules->'milestones') = 'array'
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(rules->'milestones') m WHERE m->>'id' = 'month' AND m->>'name' ILIKE '%intern certificate%')
+  `);
 }
 
 /** 32 url-safe characters, kept for API use. */
@@ -332,7 +344,7 @@ export interface PostRow {
 
 // The founder (4 Nov 2026): no 2-week certificate, and the 12-week milestone is a hiring opportunity for top performers.
 export const MILESTONES = [
-  { id: "month", weeks: 4, name: "1-month intern certificate", detail: "A certificate for your first month as a Growth Fellowship intern." },
+  { id: "month", weeks: 4, name: "1-month fellowship certificate", detail: "A certificate for your first month in the Studojo Growth Fellowship." },
   { id: "outreach", weeks: 8, name: "The new outreach tool", detail: "Exclusive access to Studojo's new outreach tool." },
   { id: "long", weeks: 12, name: "Hiring opportunity for top performers", detail: "Top performers are considered for roles at Studojo or referred to people hiring in our network." },
 ] as const;
