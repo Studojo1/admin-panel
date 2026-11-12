@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  DUPES, FAMILY_ORDER, PLACE_MIN, TAXONOMY, UNSAID, canonOf, countsOf, famLabel, familiesIn, netOf, placeOf, roleLabelOf, within,
+  BROAD_COURSE_SKILLS, DUPES, FAMILY_ORDER, SKILLS_MIN, TAXONOMY, UNSAID, canonOf, countsOf, famLabel, familiesIn, netOf, placeOf, roleLabelOf, within,
 } from "../app/lib/talent/families.ts";
 import { netLayout } from "../app/lib/talent/net-layout.ts";
 import { skillsOf } from "../app/lib/talent/model.ts";
@@ -105,7 +105,7 @@ test("refusals: a family they rule out never places them; a specific role rules 
   assert.equal(place({ title: "Software Developer", course: "B.Tech Computer Science", said: refuses("coding") }).family, "none");
 });
 
-test("the order of evidence: wanted, then open to, then title and headline, then course, then skills", () => {
+test("the order of evidence: wanted, then open to, then title and headline, then course, then skills; a later tier never outvotes", () => {
   const all = {
     rolesWanted: ["Financial Analyst"], rolesAdjacent: ["Data Analyst"], title: "Content Writer", course: "B.Tech Mechanical",
     claims: [skill("Figma"), skill("Adobe XD"), skill("Photoshop"), skill("Illustrator")],
@@ -121,20 +121,21 @@ test("the order of evidence: wanted, then open to, then title and headline, then
   assert.equal(at({ rolesWanted: ["Data Analyst / Business Analyst"] }), "data data/analyst", "two roles in one text, one family counted once");
   assert.deepEqual(place({ rolesWanted: ["Data Analyst / Business Analyst"] }).also, [{ family: "data", role: "data/ba" }]);
   const old = place({ source: "old", headline: "Zero to One Growth Builder", rolesAdjacent: ["Operations Associate"] });
-  assert.equal(old.family, "ops", "the old product's AI headline weighs less than its resume read");
-  assert.match(old.why, /^Resume fits \(AI read\): Operations Associate/);
-  assert.match(place({ rolesAdjacent: ["Operations Associate"] }).why, /^Open to: /);
+  assert.equal(`${old.family} ${old.role}`, "none none/little", "the old product's AI read alone never decides");
+  assert.equal(old.why, "Too little to tell: only our AI's read of the resume, which guessed Operations Associate");
+  assert.match(place({ rolesAdjacent: ["Operations Associate"] }).why, /^Open to: /, "on the call, open to is their own word");
 });
 
 test("course and skills place a family but name no role; a broad course or two skills is too little", () => {
   assert.equal(at({ course: "B.Tech Mechanical Engineering" }), "core core/mech", "a core branch is the role");
   assert.equal(at({ degree: "B.E. Computer Science" }), "software software/unsaid");
-  const sk = place({ claims: ["Python", "SQL", "Power BI", "Tableau", "Excel"].map(skill) });
+  const sk = place({ claims: ["Python", "SQL", "Power BI", "Tableau", "Excel", "Looker"].map(skill) });
   assert.equal(`${sk.family} ${sk.role}`, "data data/unsaid");
   assert.equal(sk.roleName, "Role not said");
-  assert.equal(sk.why, "Skills: SQL, Power BI, Tableau");
+  assert.equal(sk.why, "Skills: SQL, Power BI, Tableau, Looker");
+  assert.equal(at({ claims: ["SQL", "Power BI", "Tableau", "Excel"].map(skill) }), "none none/little", `skills alone need ${SKILLS_MIN} of one family`);
   assert.equal(at({ course: "B.Com" }), "none none/little", "commerce alone only tips the balance");
-  assert.equal(at({ course: "B.Com", claims: [skill("Tally"), skill("GST")] }), "finance finance/unsaid");
+  assert.equal(at({ course: "B.Com", claims: [skill("Tally"), skill("GST")] }), "finance finance/unsaid", `a broad course with ${BROAD_COURSE_SKILLS} of its skills`);
   assert.equal(at({ claims: [skill("SQL"), skill("Tableau")] }), "none none/little");
 });
 
@@ -146,7 +147,70 @@ test("not enough data: nothing readable is never a guess", () => {
     assert.equal(p.why, "No wanted role, title, course or skill we recognise");
     assert.deepEqual(p.also, []);
   }
-  assert.ok(PLACE_MIN > 0.4 * 2, "two skills never place anyone");
+  assert.ok(SKILLS_MIN >= 4 && BROAD_COURSE_SKILLS >= 2);
+});
+
+test("TALENT-NET-2: the first own wanted role decides family and role; later roles, headline, course and skills are second fits", () => {
+  const fo = place({
+    rolesWanted: ["Founder\u2019s Office Analyst (Edtech)", "Programme Coordinator", "Operations Associate", "Office Admin"],
+    course: "BA Psychology", headline: "Runs student events and ops for a campus club",
+  });
+  assert.equal(`${fo.family} ${fo.role}`, "consulting consulting/foa");
+  assert.equal(fo.why, "Wanted role: Founder\u2019s Office Analyst (Edtech)");
+  assert.ok(fo.also.some((x) => x.family === "ops"));
+  const da = place({ rolesWanted: ["Data Analyst Trainee", "Reporting Analyst", "Equity Research Analyst", "Credit Analyst"], course: "BA Economics",
+    claims: ["Valuation", "DCF", "Financial Modelling", "Bloomberg"].map(skill) });
+  assert.equal(`${da.family} ${da.role}`, "data data/analyst");
+  assert.deepEqual(da.also.slice(0, 2), [{ family: "finance", role: "finance/research" }], "same family roles first, then other families, once each");
+  assert.equal(at({ rolesWanted: ["Performance Marketing Specialist", "Content Writer", "Copywriter", "Content Strategist"] }), "marketing marketing/digital");
+  assert.equal(at({ rolesWanted: ["Strategy Consultant (Associate)", "Product Manager", "APM", "Product Owner"] }), "consulting consulting/consultant");
+  assert.equal(at({ rolesWanted: ["Student Programs and Operations Intern", "Research Assistant", "Research Intern"] }), "ops ops/ops");
+});
+
+test("TALENT-NET-2: the canonical role inside the family comes from the first wanted role too", () => {
+  assert.equal(at({ rolesWanted: ["Software Engineer"], rolesAdjacent: ["DevOps Engineer", "Cloud Engineer", "SRE"] }), "software software/swe");
+  assert.equal(at({ source: "old", rolesWanted: ["Software Engineer"], rolesAdjacent: ["DevOps Engineer", "Cloud Engineer"] }), "software software/swe");
+  assert.equal(at({ rolesWanted: ["Full\u2011Stack Engineer (Fresher)", "Backend Developer", "Cloud Engineer"] }), "software software/fullstack");
+  assert.equal(at({ rolesWanted: ["Back End Engineer", "Web Developer Trainee", "Full Stack Developer"] }), "software software/backend");
+  const sde = place({ rolesWanted: ["SDE Intern", "ML Intern"] });
+  assert.equal(`${sde.family} ${sde.role}`, "software software/swe");
+  assert.deepEqual(sde.also, [{ family: "ai", role: "ai/ml" }]);
+  assert.equal(at({ rolesWanted: ["Intern", "Any role", "Data Analyst"] }), "data data/analyst", "words that say nothing are skipped");
+  assert.equal(at({ rolesWanted: ["Marketing"], said: refuses("Marketing"), rolesAdjacent: ["Sales"] }), "sales sales/sales", "a refused first role is skipped");
+});
+
+test("TALENT-NET-2: text is normalised before matching (hyphens, dashes, curly apostrophes, &, brackets, full-width letters)", () => {
+  for (const r of ["Full-Stack Developer", "Full\u2011Stack Developer", "Full\u2013Stack Developer", "Full\u2014Stack Developer", "[Remote] Full Stack Developer (Entry)", "FULL STACK DEVELOPER"]) {
+    assert.equal(at({ rolesWanted: [r] }), "software software/fullstack", r);
+  }
+  assert.equal(at({ rolesWanted: ["Founder\u2019s Office"] }), "consulting consulting/foa");
+  assert.equal(at({ rolesWanted: ["Founder`s Office (Healthtech)"] }), "consulting consulting/foa");
+  assert.equal(at({ rolesWanted: ["Sales & Marketing Executive"] }), "sales sales/sales", "& reads as and, the first named wins");
+  assert.equal(at({ rolesWanted: ["R&D Engineer"] }), "core core/mech");
+  assert.equal(at({ rolesWanted: ["\uff33\uff24\uff25"] }), "software software/swe", "full-width letters fold");
+});
+
+test("TALENT-NET-2: AI and ML needs AI evidence of their own; the old product's AI guess is only a second fit", () => {
+  const cs = place({ source: "old", course: "B.Tech Computer Science", rolesAdjacent: ["AI Engineer", "ML Engineer"], headline: "Full-Stack AI Builder" });
+  assert.equal(`${cs.family} ${cs.role}`, "software software/unsaid");
+  assert.equal(cs.why, "Course: B.Tech Computer Science");
+  assert.ok(cs.also.some((x) => x.family === "ai"), "the AI guess is a second fit");
+  assert.equal(at({ source: "old", course: "B.E. Computer Engineering", rolesAdjacent: ["AI Engineer"] }), "software software/unsaid");
+  assert.equal(at({ source: "old", rolesAdjacent: ["AI Engineer"] }), "none none/little");
+  assert.equal(at({ source: "old", rolesWanted: ["AI Engineer"], course: "B.Tech Computer Science" }), "ai ai/ai", "their own wanted role");
+  assert.equal(at({ title: "ML Engineer Intern", course: "B.Tech Computer Science" }), "ai ai/ml", "their own title");
+  assert.equal(at({ claims: ["PyTorch", "TensorFlow", "NLP", "LLM"].map(skill) }), "ai ai/unsaid", "their own AI skills");
+  assert.equal(at({ claims: ["AI", "ChatGPT", "Python", "SQL"].map(skill) }), "none none/little", "a bare 'AI' skill is not AI evidence");
+});
+
+test("TALENT-NET-2: a strategy or consulting course is Consulting; a plain business course and skills alone are too little", () => {
+  assert.equal(at({ course: "BBA in Strategy and Business Analytics" }), "consulting consulting/unsaid", "the first specific word in the course");
+  assert.equal(at({ course: "BMS (Consulting)" }), "consulting consulting/unsaid");
+  for (const course of ["BBA", "Bachelor of Business Administration", "BBA (Hons)", "Business Management", "MBA"]) assert.equal(place({ course }).family, "none", course);
+  assert.equal(at({ course: "high_school", claims: ["Tally", "GST", "Accounting"].map(skill) }), "none none/little");
+  const fin = place({ source: "old", course: "high_school", rolesAdjacent: ["Accountant"], claims: ["Tally", "GST", "Accounting", "Bookkeeping"].map(skill) });
+  assert.equal(`${fin.family} ${fin.role}`, "finance finance/unsaid", "skills alone name no role, and the AI guess does not either");
+  assert.deepEqual(fin.also, [{ family: "finance", role: "finance/accounts" }]);
 });
 
 test("other roles: words no family fits keep their own words, and are never a second fit", () => {
