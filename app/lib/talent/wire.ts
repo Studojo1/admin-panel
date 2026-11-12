@@ -8,7 +8,9 @@ export interface WireResult extends Omit<Candidate, "claims"> {
   projects: Claim[];
   credentials: Claim[];
   /** Skills said on the call, as the sentences they are. */
-  said: string[];
+  saidSkills: string[];
+  /** Results the call heard that carry a number, of all it heard. */
+  numbered: { n: number; of: number };
   hits: Hit[];
   matched: number;
   score: number;
@@ -16,10 +18,14 @@ export interface WireResult extends Omit<Candidate, "claims"> {
 
 export interface TalentEnvelope {
   env: string;
-  /** The candidate tables are in this database. */
+  /** The student tables are in this database. */
   live: boolean;
-  /** Students hiring managers may find (internal accounts left out unless asked). */
+  /** Students searched (internal accounts left out unless asked). */
   pool: number;
+  /** Of them, took the Stu call. */
+  called: number;
+  /** Of them, let hiring managers on Studojo find them. */
+  optedIn: number;
   /** Internal accounts left out. */
   hidden: number;
   /** Students this search found; results holds the first 60. */

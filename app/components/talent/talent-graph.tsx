@@ -1,10 +1,10 @@
 // The Talent graph: hubs (the search's terms, or with no search the pool's top skills and wanted roles) pinned on a
 // ring, every student a dot pulled toward the hubs it links to, so a student matching every term sits in the middle.
-// Dot colour is intent, dot size how strongly it matched. Hover or focus a dot for who it is, click to open the
+// Dot colour is intent or, switched, the work style the resume read found (TALENT-ALL); dot size how strongly it matched. Hover or focus a dot for who it is, click to open the
 // profile; hover a hub to light up its students, click it to search for it. Plain SVG, light only like the admin. On a
 // narrow screen the canvas is taller than wide, so the chips and names stay readable.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type Hub, type Layout, firstName, intentLabel, layout } from "~/lib/talent/model";
+import { type Hub, type Layout, STYLE_LABEL, firstName, intentLabel, layout } from "~/lib/talent/model";
 import type { TalentEnvelope, WireResult } from "~/lib/talent/wire";
 
 const WIDE = { w: 1000, h: 620, chars: 22 };
@@ -14,6 +14,11 @@ const NAME_FONT = 13;
 export const INTENT_COLOR: Record<string, string> = { active: "#7c3aed", open: "#f59e0b" };
 export const OTHER_COLOR = "#a3a3a3";
 export const intentColor = (i: string | null) => INTENT_COLOR[i ?? ""] ?? OTHER_COLOR;
+/** Work style: four hues checked for colour-blind separation (worst pair deutan dE 17), grey when not read. */
+export const STYLE_COLOR: Record<string, string> = { "builder-first": "#6d28d9", "strategist-first": "#f59e0b", "operator-first": "#0891b2", hybrid: "#be123c" };
+export type ColorBy = "intent" | "style";
+export const dotColor = (r: Pick<WireResult, "intent" | "traits">, by: ColorBy) =>
+  by === "style" ? STYLE_COLOR[r.traits?.style ?? ""] ?? OTHER_COLOR : intentColor(r.intent);
 
 const short = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const hubWidth = (h: Hub, chars: number) => 32 + Math.min(h.label.length, chars) * 7.8 + String(h.n).length * 8;
@@ -54,12 +59,13 @@ function placeNames(ids: string[], pos: Layout, names: Map<string, string>, r: (
   return out;
 }
 
-export function TalentGraph({ data, selected, onSelect, onHub, dim }: {
+export function TalentGraph({ data, selected, onSelect, onHub, dim, colorBy }: {
   data: TalentEnvelope;
   selected: string | null;
   onSelect: (id: string) => void;
   onHub: (h: Hub) => void;
   dim: boolean;
+  colorBy: ColorBy;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [narrow, setNarrow] = useState(false);
@@ -167,7 +173,7 @@ export function TalentGraph({ data, selected, onSelect, onHub, dim }: {
               onClick={() => onSelect(l.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(l.id); } }}>
               <circle cx={p.x} cy={p.y} r={Math.max(12, rad + 5)} fill="transparent" />
               {sel && <circle cx={p.x} cy={p.y} r={rad + 4} fill="none" stroke="#171717" strokeWidth={2} />}
-              <circle cx={p.x} cy={p.y} r={rad} fill={intentColor(r.intent)} stroke="#ffffff" strokeWidth={2} />
+              <circle cx={p.x} cy={p.y} r={rad} fill={dotColor(r, colorBy)} stroke="#ffffff" strokeWidth={2} />
             </g>
           );
         })}
@@ -184,12 +190,12 @@ export function TalentGraph({ data, selected, onSelect, onHub, dim }: {
           );
         })}
       </svg>
-      {hovered && hp && <Tip r={hovered} x={hp.x / W} y={hp.y / H} terms={data.terms.length} />}
+      {hovered && hp && <Tip r={hovered} x={hp.x / W} y={hp.y / H} terms={data.terms.length} colorBy={colorBy} />}
     </div>
   );
 }
 
-function Tip({ r, x, y, terms }: { r: WireResult; x: number; y: number; terms: number }) {
+function Tip({ r, x, y, terms, colorBy }: { r: WireResult; x: number; y: number; terms: number; colorBy: ColorBy }) {
   const flip = x > 0.55;
   return (
     <div className="pointer-events-none absolute z-10 w-60 max-w-[70%] rounded-xl border-2 border-neutral-900 bg-white p-3 text-xs shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]"
@@ -197,21 +203,30 @@ function Tip({ r, x, y, terms }: { r: WireResult; x: number; y: number; terms: n
       <div className="text-sm font-bold text-neutral-950">{r.name}</div>
       {r.headline && <div className="mt-0.5 line-clamp-2 text-neutral-600">{r.headline}</div>}
       <div className="mt-1.5 flex items-center gap-1.5 text-neutral-700">
-        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: intentColor(r.intent) }} />
-        {intentLabel(r.intent)}
+        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: dotColor(r, colorBy) }} />
+        {colorBy === "style" ? STYLE_LABEL[r.traits?.style ?? ""] ?? "Work style not read" : r.source === "call" ? intentLabel(r.intent) : "Old product"}
         {terms > 0 && <span className="ml-auto font-semibold text-neutral-950">{r.matched} of {terms} matched</span>}
       </div>
     </div>
   );
 }
 
-export function GraphLegend({ searching }: { searching: boolean }) {
+export function GraphLegend({ searching, colorBy }: { searching: boolean; colorBy: ColorBy }) {
   const dot = (c: string) => <span className="inline-block h-3 w-3 rounded-full border-2 border-white ring-1 ring-neutral-200" style={{ background: c }} />;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-neutral-600">
-      <span className="flex items-center gap-1.5">{dot(INTENT_COLOR.active)} Actively looking</span>
-      <span className="flex items-center gap-1.5">{dot(INTENT_COLOR.open)} Open to offers</span>
-      <span className="flex items-center gap-1.5">{dot(OTHER_COLOR)} Not looking now or did not say</span>
+      {colorBy === "style" ? (
+        <>
+          {Object.entries(STYLE_COLOR).map(([k, c]) => <span key={k} className="flex items-center gap-1.5">{dot(c)} {STYLE_LABEL[k]}</span>)}
+          <span className="flex items-center gap-1.5">{dot(OTHER_COLOR)} Not read (from the resume, by our AI)</span>
+        </>
+      ) : (
+        <>
+          <span className="flex items-center gap-1.5">{dot(INTENT_COLOR.active)} Actively looking</span>
+          <span className="flex items-center gap-1.5">{dot(INTENT_COLOR.open)} Open to offers</span>
+          <span className="flex items-center gap-1.5">{dot(OTHER_COLOR)} Not looking, did not say, or old product</span>
+        </>
+      )}
       {searching ? (
         <>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-9 rounded-md border-[1.5px] border-neutral-900 bg-violet-50" /> A word from your search</span>
