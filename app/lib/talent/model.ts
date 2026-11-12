@@ -1,7 +1,7 @@
 // TALENT (12 Nov 2026, the owner: "we do have studojo student data right after the call ... make a page which is like
 // a graph to do a student search for like hiring managers to find the students"). The rules of the /talent page, pure:
-// the words a search is read into, how a student matches each one, the ranking, the hard filters, the graph's hubs and
-// its layout. Students who took the Stu call come from career_agent.career_cand_profile (the row the call derives for
+// the words a search is read into, how a student matches each one, the ranking and the hard filters (the network the
+// page draws, and where each student sits in it, is families.ts and net-layout.ts since TALENT-NET). Students who took the Stu call come from career_agent.career_cand_profile (the row the call derives for
 // exactly this) and their live claims. TALENT-ALL (12 Nov 2026, the owner: "i want all students data here including the
 // old 8000 from the old product and then also add one thing about the personality based stuff and stuff we cant find on
 // a normal ATS that we can uncover because of the call data we get and then the quiz data we used to collect"): the old
@@ -104,6 +104,8 @@ export interface Candidate {
   values: string[];
   derivedAt: number; // epoch ms
   claims: Claim[];
+  /** TALENT-NET: where families.ts placed them (family label, canonical role), so "software engineer" finds an SDE. */
+  canon?: string[];
 }
 
 export type TypeFilter = "any" | "internship" | "full_time";
@@ -120,10 +122,12 @@ export interface Filters {
   src: SourceFilter;
   optin: boolean; // only students who let hiring managers find them
   traits: string[]; // TRAITS keys, every one required
+  fam: string; // TALENT-NET: the open family in the network ("" for all); narrows the list, not the network
+  role: string; // the open role in it ("" for the whole family)
 }
 export type SourceFilter = "all" | "call" | "old";
 export const DEFAULT_FILTERS: Filters = {
-  q: "", city: "", type: "any", exp: "any", grad: null, active: false, budget: "", relocate: true, src: "all", optin: false, traits: [],
+  q: "", city: "", type: "any", exp: "any", grad: null, active: false, budget: "", relocate: true, src: "all", optin: false, traits: [], fam: "", role: "",
 };
 
 export type TermKind = "text" | "city" | "grad" | "type" | "mode" | "exp";
@@ -140,8 +144,6 @@ export interface Result {
   matched: number; // terms matched
   score: number;
 }
-
-export interface Hub { key: string; label: string; kind: "term" | "skill" | "role"; n: number }
 
 // ------------------------------------------------------------------- words
 
@@ -394,6 +396,7 @@ export function matchTerm(c: Candidate, skills: Skill[], t: Term): Hit | null {
   const tries: [number, string, string | null | undefined][] = [];
   for (const r of c.rolesWanted) tries.push([3, "Wants to be", r]);
   tries.push([2.5, "Now", c.title], [2.5, "Headline", c.headline]);
+  for (const x of c.canon ?? []) tries.push([2.25, "Placed in", x]);
   const exact = skills.find((s) => s.key === t.key);
   if (exact) return { term: t.label, where: "Skill", detail: exact.label, w: 2.5 };
   for (const s of skills) tries.push([2, "Skill", s.label]);
@@ -558,6 +561,7 @@ export function vocabOf(pool: Candidate[]): Set<string> {
   for (const c of pool) {
     for (const s of skillsOf(c)) v.add(s.key);
     for (const r of c.rolesWanted) v.add(roleKey(r));
+    if (c.canon?.[1]) v.add(c.canon[1].toLowerCase());
   }
   return v;
 }
@@ -718,163 +722,6 @@ export function fromOld(r: {
     derivedAt: r.created ?? 0,
     claims: [...new Set(skills)].map((x) => ({ kind: "skill", text: `${x}: listed on the resume: ${x}`, org: null, when: null, qty: null, src: "resume" })),
   };
-}
-
-// --------------------------------------------------------------------- graph
-
-export interface GraphIn {
-  hubs: Hub[];
-  /** Hub keys per student id, in result order. */
-  links: { id: string; hubs: string[] }[];
-}
-
-/** The hub a term's hits link to. */
-export const termHub = (t: Term) => `t:${t.kind}:${t.key}`;
-
-/**
- * The graph for a result list. With terms: one hub per term (how many students match it), each student linked to the
- * terms it matches. With none: the pool's most common skills and wanted roles as hubs, each student linked to up to
- * three of them, so the picture is the pool's shape. Students linked to no hub stay off the graph (still in the list).
- */
-export function graphOf(results: Result[], terms: Term[], cap: number): GraphIn {
-  const top = results.slice(0, cap);
-  if (terms.length) {
-    const hubs: Hub[] = terms.map((t) => ({
-      key: termHub(t), label: t.label, kind: "term",
-      n: top.filter((r) => r.hits.some((h) => h.term === t.label)).length,
-    }));
-    const links = top.map((r) => ({ id: r.c.id, hubs: terms.filter((t) => r.hits.some((h) => h.term === t.label)).map(termHub) }));
-    return { hubs: hubs.filter((h) => h.n > 0), links: links.filter((l) => l.hubs.length) };
-  }
-  const skillN = new Map<string, { label: string; n: number }>();
-  const roleN = new Map<string, number>();
-  for (const r of top) {
-    for (const s of r.skills) skillN.set(s.key, { label: s.label, n: (skillN.get(s.key)?.n ?? 0) + 1 });
-    for (const k of new Set(r.c.rolesWanted.map(roleKey))) roleN.set(k, (roleN.get(k) ?? 0) + 1);
-  }
-  const byN = <T,>(m: Map<string, T>, n: (v: T) => number) => [...m.entries()].sort((a, b) => n(b[1]) - n(a[1]) || a[0].localeCompare(b[0]));
-  const roles: Hub[] = byN(roleN, (n) => n).filter(([, n]) => n >= 2).slice(0, 6).map(([k, n]) => ({ key: `r:${k}`, label: roleLabel(k), kind: "role", n }));
-  const skills: Hub[] = byN(skillN, (v) => v.n).filter(([, v]) => v.n >= 2).slice(0, 12 - roles.length)
-    .map(([k, v]) => ({ key: `s:${k}`, label: v.label, kind: "skill", n: v.n }));
-  const hubs = [...roles, ...skills];
-  const links = top.map((r) => {
-    const mine = new Set([...r.c.rolesWanted.map((x) => `r:${roleKey(x)}`), ...r.skills.map((s) => `s:${s.key}`)]);
-    return { id: r.c.id, hubs: hubs.filter((h) => mine.has(h.key)).slice(0, 3).map((h) => h.key) };
-  });
-  return { hubs, links: links.filter((l) => l.hubs.length) };
-}
-
-export interface Pt { x: number; y: number }
-export interface Layout { center: Pt; hubs: Record<string, Pt>; students: Record<string, Pt> }
-
-/** A stable number in [0, 1) for a string: the same student lands in the same place every time. */
-export function hash01(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  return ((h >>> 0) % 100000) / 100000;
-}
-
-/**
- * Where everything sits on a w by h canvas. Hubs are pinned on an ellipse round the centre (a lone hub sits in the
- * centre). A student is pulled to the mean of the hubs it links to, so one that matches every term lands in the
- * middle and one that matches a single term next to that term; with a lone hub, better matches sit closer to it.
- * Then a fixed number of steps push overlapping students apart and keep them clear of the hubs (chips hubHalf wide
- * each side of their point, 16 above and below, kept inside the canvas). Deterministic.
- */
-export function layout(
-  g: GraphIn, rank: Record<string, number>, w: number, h: number, r: (id: string) => number, hubHalf: (key: string) => number = () => 64,
-): Layout {
-  const center = { x: w / 2, y: h / 2 };
-  const rx = w * 0.38;
-  const ry = h * 0.36;
-  const hubs: Record<string, Pt> = {};
-  const nh = g.hubs.length;
-  g.hubs.forEach((hub, i) => {
-    if (nh === 1) hubs[hub.key] = { ...center };
-    else {
-      const a = -Math.PI / 2 + (i * 2 * Math.PI) / nh;
-      const half = Math.min(hubHalf(hub.key), w / 2 - 4);
-      hubs[hub.key] = {
-        x: Math.min(w - half - 4, Math.max(half + 4, center.x + rx * Math.cos(a))),
-        y: Math.min(h - 22, Math.max(18, center.y + ry * Math.sin(a))),
-      };
-    }
-  });
-  const n = g.links.length;
-  const target: Record<string, Pt> = {};
-  const pos: Record<string, Pt> = {};
-  g.links.forEach((l, i) => {
-    let tx = 0;
-    let ty = 0;
-    for (const k of l.hubs) {
-      tx += hubs[k].x;
-      ty += hubs[k].y;
-    }
-    tx /= l.hubs.length;
-    ty /= l.hubs.length;
-    const a = hash01(l.id) * 2 * Math.PI;
-    if (nh === 1) {
-      const q = n > 1 ? (rank[l.id] ?? i) / (n - 1) : 0;
-      const d = 0.12 + 0.82 * q;
-      tx = center.x + rx * d * Math.cos(a);
-      ty = center.y + ry * d * Math.sin(a);
-    } else if (l.hubs.length === 1) {
-      // Next to its one hub, on the side facing the centre, so the ring's outer edge stays clear.
-      const hx = hubs[l.hubs[0]];
-      tx = hx.x + (center.x - hx.x) * 0.3;
-      ty = hx.y + (center.y - hx.y) * 0.3;
-    }
-    target[l.id] = { x: tx, y: ty };
-    const j = 14 + 30 * hash01(`${l.id}:j`);
-    pos[l.id] = { x: tx + j * Math.cos(a), y: ty + j * Math.sin(a) };
-  });
-  const ids = g.links.map((l) => l.id);
-  const hubPts = g.hubs.map((hub) => ({ ...hubs[hub.key], half: hubHalf(hub.key) }));
-  const pad = 4;
-  for (let step = 0; step < 220; step++) {
-    const pull = step < 160 ? 0.04 : 0.015;
-    for (const id of ids) {
-      pos[id].x += (target[id].x - pos[id].x) * pull;
-      pos[id].y += (target[id].y - pos[id].y) * pull;
-    }
-    for (let a = 0; a < ids.length; a++) {
-      const pa = pos[ids[a]];
-      const ra = r(ids[a]);
-      for (let b = a + 1; b < ids.length; b++) {
-        const pb = pos[ids[b]];
-        const min = ra + r(ids[b]) + pad;
-        let dx = pb.x - pa.x;
-        let dy = pb.y - pa.y;
-        let d = Math.hypot(dx, dy);
-        if (d >= min) continue;
-        if (d < 0.01) {
-          const t = hash01(`${ids[a]}|${ids[b]}`) * 2 * Math.PI;
-          dx = Math.cos(t);
-          dy = Math.sin(t);
-          d = 1;
-        }
-        const push = (min - d) / 2;
-        pa.x -= (dx / d) * push;
-        pa.y -= (dy / d) * push;
-        pb.x += (dx / d) * push;
-        pb.y += (dy / d) * push;
-      }
-      // Hubs are chips: keep students off them.
-      for (const hp of hubPts) {
-        const dx = pa.x - hp.x;
-        const dy = pa.y - hp.y;
-        const ox = hp.half + 2 + ra - Math.abs(dx);
-        const oy = 20 + ra - Math.abs(dy);
-        if (ox > 0 && oy > 0) {
-          if (ox < oy) pa.x += dx >= 0 ? ox : -ox;
-          else pa.y += dy >= 0 ? oy : -oy;
-        }
-      }
-      pa.x = Math.min(w - ra - 2, Math.max(ra + 2, pa.x));
-      pa.y = Math.min(h - ra - 2, Math.max(ra + 2, pa.y));
-    }
-  }
-  return { center, hubs, students: pos };
 }
 
 // ---------------------------------------------------------------------- words

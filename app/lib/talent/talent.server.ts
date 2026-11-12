@@ -8,14 +8,18 @@
 // Both meet in one pool, read whole and kept ten minutes (the old product's rows hardly change, and the production
 // database is IOPS-bound); each search runs over that copy. Never read: resume text, email or phone inside the parsed
 // resume. Internal accounts (staff, @studojo.com, the test list, guests) are left out unless asked for, as on the Stu
-// pages.
+// pages. TALENT-NET (12 Nov 2026, the owner: "need our mapping to be more accurate and on the top show a bar with total
+// number of students, the graph should be like a neural network, where if i click then go deeper to see each student"):
+// each student is placed once per pool read (families.ts), the network and the top bar's counts come from every
+// student a search finds, and an open family or role narrows the list only.
 import { sql, type SQL } from "drizzle-orm";
 import db from "~/lib/db.server";
 import { internalReason, testUsers } from "~/lib/stu/data.server";
+import { canonOf, countsOf, famLabel, netOf, placeOf, roleLabelOf, within } from "./families";
 import {
-  type Candidate, type Claim, type Filters, type Result, cityKey, cityLabel, fromOld, graphOf, parseTerms, saidFrom, search, vocabOf,
+  type Candidate, type Claim, type Filters, type Result, cityKey, cityLabel, fromOld, parseTerms, saidFrom, search, skillsOf, vocabOf,
 } from "./model";
-import type { TalentEnvelope, WireResult } from "./wire";
+import type { TalentEnvelope, WirePlace, WireResult } from "./wire";
 
 const CAP = 60;
 const TTL_MS = 10 * 60_000;
@@ -173,6 +177,8 @@ async function loadPool(fresh: boolean): Promise<Pool> {
     }
     return { env, live: true, all: [...byId.values()], derived };
   });
+  // TALENT-NET: place everyone once per read (after the transaction); search then also matches the family and role.
+  for (const c of pool.all) c.canon = canonOf(placeOf(c, skillsOf(c)));
   cache = { at: Date.now(), pool };
   return pool;
 }
@@ -189,13 +195,22 @@ function derivedOf(pool: Pool, people: Person[], internal: boolean) {
   return out;
 }
 
-/** One result as the page needs it: the profile, the claims grouped and trimmed, and why it matched. */
+/** Where a student sits, with labels, for the page. */
+function placeWire(r: Result): WirePlace {
+  const p = placeOf(r.c, r.skills);
+  return {
+    family: p.family, familyLabel: famLabel(p.family), role: p.role, roleLabel: p.roleName, why: p.why,
+    also: p.also.map((a) => ({ family: a.family, familyLabel: famLabel(a.family), role: a.role, roleLabel: roleLabelOf(a.role) })),
+  };
+}
+
+/** One result as the page needs it: the profile, the claims grouped and trimmed, why it matched and where it sits. */
 function wire(r: Result): WireResult {
   const c = r.c;
   const of = (kinds: string[], n: number) => c.claims.filter((k) => kinds.includes(k.kind)).slice(0, n);
   const saidSkills = c.claims.filter((k) => (k.kind === "skill" || k.kind === "tool") && k.src === "call").slice(0, 5).map((k) => k.text);
   const outs = c.claims.filter((k) => k.kind === "outcome");
-  const { claims: _claims, internal: _internal, ...rest } = c as Person;
+  const { claims: _claims, internal: _internal, canon: _canon, ...rest } = c as Person;
   return {
     ...rest,
     skills: r.skills.slice(0, 40),
@@ -208,7 +223,14 @@ function wire(r: Result): WireResult {
     hits: r.hits,
     matched: r.matched,
     score: r.score,
+    place: placeWire(r),
   };
+}
+
+/** Everyone Talent search reads (internal accounts left out unless asked), for scripts/talent-families-dry.mjs. */
+export async function talentPool(internal = false, fresh = false): Promise<Candidate[]> {
+  const pool = await loadPool(fresh);
+  return pool.all.filter((c) => internal || !c.internal);
 }
 
 export async function talentSearch(f: Filters, internal: boolean, fresh: boolean): Promise<TalentEnvelope> {
@@ -218,18 +240,21 @@ export async function talentSearch(f: Filters, internal: boolean, fresh: boolean
   const { vocab, cityN, grads } = derivedOf(pool, people, internal);
   const terms = parseTerms(f.q, vocab, new Set(cityN.keys()));
   const results = search(people, terms, f);
-  const graph = graphOf(results, terms, CAP);
+  // The network is everyone the search found; the open family or role narrows only the list and the "showing" counts.
+  const net = netOf(results.map((r) => placeOf(r.c, r.skills)));
+  const shown = f.fam ? results.filter((r) => within(placeOf(r.c, r.skills), f.fam, f.role)) : results;
   return {
     env: pool.env,
     live: pool.live,
     pool: people.length,
-    called: people.filter((c) => c.source === "call").length,
-    optedIn: people.filter((c) => c.optedIn).length,
     hidden: pool.all.length - people.length,
+    counts: { all: countsOf(people), shown: countsOf(shown.map((r) => r.c)) },
     total: results.length,
     terms,
-    results: results.slice(0, CAP).map(wire),
-    graph,
+    results: shown.slice(0, CAP).map(wire),
+    net,
+    fam: f.fam,
+    role: f.fam ? f.role : "",
     cities: [...cityN.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 30).map(([key, n]) => ({ key, label: cityLabel(key), n })),
     grads,
     ms: Date.now() - t0,

@@ -1,16 +1,15 @@
-// The Talent graph: hubs (the search's terms, or with no search the pool's top skills and wanted roles) pinned on a
-// ring, every student a dot pulled toward the hubs it links to, so a student matching every term sits in the middle.
-// Dot colour is intent or, switched, the work style the resume read found (TALENT-ALL); dot size how strongly it matched. Hover or focus a dot for who it is, click to open the
-// profile; hover a hub to light up its students, click it to search for it. Plain SVG, light only like the admin. On a
-// narrow screen the canvas is taller than wide, so the chips and names stay readable.
-import { useEffect, useMemo, useRef, useState } from "react";
-import { type Hub, type Layout, STYLE_LABEL, firstName, intentLabel, layout } from "~/lib/talent/model";
+// The Talent network. TALENT-NET (12 Nov 2026, the owner: "the graph should be like a neural network, where if i click
+// then go deeper to see each student"): layered columns left to right, everyone the search found, their career
+// families, the open family's roles, the open role's best students. Circle size and line thickness are student counts;
+// the open path is lit. Click a family to open its roles, a role to see its students (best first, as the list ranks
+// them, with "show more"), a student to open the profile; the breadcrumb goes back. Student dots keep the colour of
+// intent or, switched, the work style the resume read found (TALENT-ALL). Plain SVG, light only like the admin. On a
+// narrow screen only the open node and its children show. Layout: app/lib/talent/net-layout.ts.
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type LNode, netLayout } from "~/lib/talent/net-layout";
+import { STYLE_LABEL, firstName, intentLabel } from "~/lib/talent/model";
 import type { TalentEnvelope, WireResult } from "~/lib/talent/wire";
 
-const WIDE = { w: 1000, h: 620, chars: 22 };
-const NARROW = { w: 460, h: 600, chars: 14 };
-const FONT = 14;
-const NAME_FONT = 13;
 export const INTENT_COLOR: Record<string, string> = { active: "#7c3aed", open: "#f59e0b" };
 export const OTHER_COLOR = "#a3a3a3";
 export const intentColor = (i: string | null) => INTENT_COLOR[i ?? ""] ?? OTHER_COLOR;
@@ -20,52 +19,25 @@ export type ColorBy = "intent" | "style";
 export const dotColor = (r: Pick<WireResult, "intent" | "traits">, by: ColorBy) =>
   by === "style" ? STYLE_COLOR[r.traits?.style ?? ""] ?? OTHER_COLOR : intentColor(r.intent);
 
-const short = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-const hubWidth = (h: Hub, chars: number) => 32 + Math.min(h.label.length, chars) * 7.8 + String(h.n).length * 8;
+const INK = "#171717";
+const MUTED = "#737373";
+const LIT = "#7c3aed";
+const SOFT = "#c4b5fd";
+const PAGE = 12;
+const pct = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : "0%");
+const fmt = (n: number) => n.toLocaleString("en-IN");
+const nameOf = (r: WireResult) => (/^a studojo student$/i.test(r.name) ? "Student" : firstName(r.name));
 
-interface Box { x0: number; y0: number; x1: number; y1: number }
-const hits = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-
-/**
- * First names for the best matches, placed right, left, above or below their dot, wherever they cover no other dot, no
- * chip and no name already placed; a name with no free place is left off (the tooltip and the list have it). The
- * selected student always gets one.
- */
-function placeNames(ids: string[], pos: Layout, names: Map<string, string>, r: (id: string) => number, chips: Box[], forced: string | null, w: number, h: number) {
-  const out = new Map<string, { x: number; y: number; anchor: "start" | "end" | "middle" }>();
-  const placed: Box[] = [];
-  const dots = Object.entries(pos.students).map(([id, p]) => ({ id, box: { x0: p.x - r(id), y0: p.y - r(id), x1: p.x + r(id), y1: p.y + r(id) } }));
-  const order = forced ? [forced, ...ids.filter((i) => i !== forced)] : ids;
-  for (const id of order) {
-    const p = pos.students[id];
-    const name = names.get(id);
-    if (!p || !name) continue;
-    const tw = name.length * NAME_FONT * 0.56 + 4;
-    const rad = r(id);
-    const tries = [
-      { x: p.x + rad + 4, y: p.y + 4.5, anchor: "start" as const, box: { x0: p.x + rad + 3, y0: p.y - 8, x1: p.x + rad + 5 + tw, y1: p.y + 7 } },
-      { x: p.x - rad - 4, y: p.y + 4.5, anchor: "end" as const, box: { x0: p.x - rad - 5 - tw, y0: p.y - 8, x1: p.x - rad - 3, y1: p.y + 7 } },
-      { x: p.x, y: p.y - rad - 5, anchor: "middle" as const, box: { x0: p.x - tw / 2, y0: p.y - rad - 18, x1: p.x + tw / 2, y1: p.y - rad - 3 } },
-      { x: p.x, y: p.y + rad + 14, anchor: "middle" as const, box: { x0: p.x - tw / 2, y0: p.y + rad + 2, x1: p.x + tw / 2, y1: p.y + rad + 17 } },
-    ];
-    const ok = tries.find((t) =>
-      t.box.x0 >= 0 && t.box.x1 <= w && t.box.y0 >= 0 && t.box.y1 <= h &&
-      !placed.some((b) => hits(b, t.box)) && !chips.some((b) => hits(b, t.box)) && !dots.some((d) => d.id !== id && hits(d.box, t.box)));
-    const pick = ok ?? (id === forced ? tries[0] : null);
-    if (!pick) continue;
-    placed.push(pick.box);
-    out.set(id, { x: pick.x, y: pick.y, anchor: pick.anchor });
-  }
-  return out;
-}
-
-export function TalentGraph({ data, selected, onSelect, onHub, dim, colorBy }: {
+export function TalentNet({ data, fam, role, selected, colorBy, dim, onFam, onRole, onStudent }: {
   data: TalentEnvelope;
+  fam: string;
+  role: string;
   selected: string | null;
-  onSelect: (id: string) => void;
-  onHub: (h: Hub) => void;
-  dim: boolean;
   colorBy: ColorBy;
+  dim: boolean;
+  onFam: (key: string) => void; // "" closes the family
+  onRole: (key: string) => void; // "" closes the role
+  onStudent: (id: string) => void;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [narrow, setNarrow] = useState(false);
@@ -75,146 +47,183 @@ export function TalentGraph({ data, selected, onSelect, onHub, dim, colorBy }: {
     const ro = new ResizeObserver(([e]) => setNarrow(e.contentRect.width < 620));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [data.graph.links.length > 0]); // the empty state and the graph are different elements
-  const { w: W, h: H, chars } = narrow ? NARROW : WIDE;
+  }, []);
 
-  const [hover, setHover] = useState<{ kind: "s" | "h"; key: string } | null>(null);
-  const searching = data.terms.length > 0;
+  const [shown, setShown] = useState(PAGE);
+  useEffect(() => setShown(PAGE), [role, data.terms.length, data.total]);
+  const [allRoles, setAllRoles] = useState(false);
+  useEffect(() => setAllRoles(false), [fam]);
+  const [hover, setHover] = useState<string | null>(null);
+
+  // The results are the open role's students only once the API has answered for that role.
+  const ready = data.fam === fam && data.role === role;
   const byId = useMemo(() => new Map(data.results.map((r) => [r.id, r])), [data]);
-  const maxScore = useMemo(() => Math.max(1, ...data.results.map((r) => r.score)), [data]);
-  const radius = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of data.results) m.set(r.id, searching ? 6 + 7 * (r.score / maxScore) : 7);
-    return (id: string) => m.get(id) ?? 7;
-  }, [data, searching, maxScore]);
-  const widths = useMemo(() => new Map(data.graph.hubs.map((h) => [h.key, hubWidth(h, chars)])), [data, chars]);
-  const pos: Layout = useMemo(() => {
-    const rank: Record<string, number> = {};
-    data.graph.links.forEach((l, i) => (rank[l.id] = i));
-    return layout(data.graph, rank, W, H, radius, (k) => (widths.get(k) ?? 120) / 2);
-  }, [data, radius, widths, W, H]);
-  const labels = useMemo(() => {
-    const chips = data.graph.hubs.map((h) => {
-      const q = pos.hubs[h.key];
-      const half = (widths.get(h.key) ?? 120) / 2;
-      return { x0: q.x - half, y0: q.y - 17, x1: q.x + half + 3, y1: q.y + 18 };
-    });
-    const names = new Map(data.results.map((r) => [r.id, firstName(r.name)]));
-    const ids = data.graph.links.slice(0, searching ? (narrow ? 8 : 14) : 0).map((l) => l.id);
-    return placeNames(ids, pos, names, radius, chips, selected && pos.students[selected] ? selected : null, W, H);
-  }, [data, pos, widths, radius, searching, narrow, selected, W, H]);
+  const famNet = data.net.families.find((f) => f.key === fam) ?? null;
+  const roleNet = famNet?.roles.find((r) => r.key === role) ?? null;
+  const students = ready && roleNet ? data.results.slice(0, shown).map((r) => ({ id: r.id, name: nameOf(r) })) : [];
+  const canShowMore = ready && students.length < data.results.length;
+  const L = useMemo(
+    () => netLayout(data.net, { fam: famNet ? fam : null, role: roleNet ? role : null }, students, roleNet?.n ?? 0, { narrow, allRoles, more: canShowMore }),
+    [data, fam, role, narrow, allRoles, shown, ready], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
-  const lit = (id: string, hubs: string[]) => {
-    if (!hover) return selected ? id === selected : true;
-    return hover.kind === "s" ? hover.key === id : hubs.includes(hover.key);
+  const act = (n: LNode) => {
+    if (n.kind === "pool") onFam("");
+    else if (n.kind === "fam") onFam(n.open ? "" : n.key);
+    else if (n.kind === "role") onRole(n.open ? "" : n.key);
+    else if (n.kind === "more") setAllRoles((v) => !v);
+    else if (n.kind === "show") setShown((v) => v + PAGE);
+    else onStudent(n.key);
   };
-  const hovered = hover?.kind === "s" ? byId.get(hover.key) : undefined;
-  const hp = hovered ? pos.students[hovered.id] : undefined;
-
-  if (!data.graph.links.length) {
-    return (
-      <div ref={wrap} className="flex h-[420px] items-center justify-center rounded-xl bg-neutral-50 p-6 text-center text-sm text-neutral-500">
-        {data.total ? "These students share no skill or role often enough to draw. The list below has them." : "No student matches this search. Try fewer words or loosen a filter."}
-      </div>
-    );
-  }
+  // On a narrow screen the open node on the left goes up a level.
+  const up = (n: LNode) => (narrow && n.open && n.x < 60 ? (n.kind === "role" ? onRole("") : n.kind === "fam" ? onFam("") : null) : act(n));
+  const hovered = L.nodes.find((n) => n.id === hover) ?? null;
 
   return (
-    <div ref={wrap} className={`relative fade ${dim ? "opacity-50" : ""}`}>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full select-none" role="group" aria-label="Students and what they match">
-        <ellipse cx={W / 2} cy={H / 2} rx={W * 0.38} ry={H * 0.36} fill="none" stroke="#ede9fe" strokeWidth={1.5} strokeDasharray="4 6" />
-        {/* edges first, under everything */}
-        {data.graph.links.map((l) => {
-          const p = pos.students[l.id];
-          const on = lit(l.id, l.hubs) && (hover || selected);
-          return l.hubs.map((k) => {
-            const q = pos.hubs[k];
-            const hubOn = hover?.kind === "h" ? hover.key === k : true;
-            const strong = !!on && hubOn;
+    <div ref={wrap} className={`relative fade ${dim ? "opacity-60" : ""}`}>
+      <nav aria-label="Where you are in the network" className="mb-2 flex flex-wrap items-center gap-1 text-sm">
+        <Crumb on={!famNet} onClick={() => onFam("")}>All {fmt(data.net.n)}</Crumb>
+        {famNet && <><span className="text-neutral-400">›</span><Crumb on={!roleNet} onClick={() => onRole("")}>{famNet.label} {fmt(famNet.n)}</Crumb></>}
+        {roleNet && <><span className="text-neutral-400">›</span><Crumb on>{roleNet.label} {fmt(roleNet.n)}</Crumb></>}
+        {fam && !famNet && <span className="ml-1 text-xs text-neutral-500">No student in this family for this search.</span>}
+      </nav>
+      {data.net.n === 0 ? (
+        <div className="flex h-[360px] items-center justify-center rounded-xl bg-neutral-50 p-6 text-center text-sm text-neutral-500">
+          No student matches this search. Try fewer words or loosen a filter.
+        </div>
+      ) : (
+        <svg viewBox={`0 0 ${L.w} ${L.h}`} className="block h-auto w-full select-none" role="group" aria-label="Students by career family and role">
+          {L.cols.map((c) => (
+            <g key={`c${c.x}`}>
+              {c.title && <text x={c.x - 8} y={22} fontSize={12} fontWeight={700} fill={MUTED} letterSpacing={0.6}>{c.title.toUpperCase()}</text>}
+              {c.hint && <text x={c.x - 8} y={L.h / 2} fontSize={14} fill={MUTED}>{c.hint}</text>}
+            </g>
+          ))}
+          {L.edges.map((e) => {
+            const anyOpen = !!famNet;
+            const hot = hover === e.to;
             return (
-              <line key={`${l.id}-${k}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y}
-                stroke={strong ? "#7c3aed" : "#d4d4d4"} strokeWidth={strong ? 1.75 : 1}
-                strokeOpacity={hover || selected ? (strong ? 0.9 : 0.2) : searching ? 0.6 : 0.4} />
+              <path key={e.id} d={e.d} fill="none" strokeLinecap="round" strokeWidth={e.w}
+                stroke={hot || (e.on && anyOpen) ? LIT : e.on ? SOFT : "#d4d4d4"} strokeOpacity={hot ? 0.9 : e.on ? (anyOpen ? 0.55 : 0.6) : 0.35} />
             );
-          });
-        })}
-        {/* hubs */}
-        {data.graph.hubs.map((h) => {
-          const q = pos.hubs[h.key];
-          const w = widths.get(h.key) ?? 120;
-          const on = hover?.kind === "h" && hover.key === h.key;
-          const fill = h.kind === "skill" ? "#ffffff" : "#f5f3ff";
-          return (
-            <g key={h.key} transform={`translate(${q.x - w / 2},${q.y - 16})`} tabIndex={0} role="button" className="cursor-pointer outline-none"
-              aria-label={`${h.label}: ${h.n} students.${searching ? "" : " Search for it."}`}
-              onMouseEnter={() => setHover({ kind: "h", key: h.key })} onMouseLeave={() => setHover(null)}
-              onFocus={() => setHover({ kind: "h", key: h.key })} onBlur={() => setHover(null)}
-              onClick={() => onHub(h)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onHub(h); } }}>
-              <rect x={3} y={3} width={w} height={32} rx={9} fill="#171717" />
-              <rect x={on ? -1 : 0} y={on ? -1 : 0} width={w} height={32} rx={9} fill={on ? "#ede9fe" : fill} stroke="#171717" strokeWidth={1.5} />
-              <text x={12} y={21} fontSize={FONT} fontWeight={700} fill="#171717">{short(h.label, chars)}</text>
-              <text x={w - 10} y={21} fontSize={FONT - 1} fontWeight={600} fill="#525252" textAnchor="end" className="tnum">{h.n}</text>
-            </g>
-          );
-        })}
-        {/* students */}
-        {data.graph.links.map((l) => {
-          const r = byId.get(l.id);
-          if (!r) return null;
-          const p = pos.students[l.id];
-          const rad = radius(l.id);
-          const on = lit(l.id, l.hubs);
-          const sel = selected === l.id;
-          return (
-            <g key={l.id} tabIndex={0} role="button" className="cursor-pointer outline-none" opacity={on ? 1 : 0.3}
-              aria-label={`${r.name}. ${r.headline ?? ""}. ${intentLabel(r.intent)}. Open profile.`}
-              onMouseEnter={() => setHover({ kind: "s", key: l.id })} onMouseLeave={() => setHover(null)}
-              onFocus={() => setHover({ kind: "s", key: l.id })} onBlur={() => setHover(null)}
-              onClick={() => onSelect(l.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(l.id); } }}>
-              <circle cx={p.x} cy={p.y} r={Math.max(12, rad + 5)} fill="transparent" />
-              {sel && <circle cx={p.x} cy={p.y} r={rad + 4} fill="none" stroke="#171717" strokeWidth={2} />}
-              <circle cx={p.x} cy={p.y} r={rad} fill={dotColor(r, colorBy)} stroke="#ffffff" strokeWidth={2} />
-            </g>
-          );
-        })}
-        {/* names last, over the edges and dots, never under them */}
-        {[...labels.entries()].map(([id, t]) => {
-          const r = byId.get(id);
-          const l = data.graph.links.find((x) => x.id === id);
-          if (!r || !l) return null;
-          return (
-            <text key={`n-${id}`} x={t.x} y={t.y} textAnchor={t.anchor} fontSize={NAME_FONT} fontWeight={600} fill="#171717"
-              stroke="#ffffff" strokeWidth={3} paintOrder="stroke" pointerEvents="none" opacity={lit(id, l.hubs) ? 1 : 0.3}>
-              {firstName(r.name)}
-            </text>
-          );
-        })}
-      </svg>
-      {hovered && hp && <Tip r={hovered} x={hp.x / W} y={hp.y / H} terms={data.terms.length} colorBy={colorBy} />}
+          })}
+          {L.nodes.map((n) => (
+            <NodeMark key={n.id} n={n} r={n.kind === "student" ? byId.get(n.key) : undefined} colorBy={colorBy} selected={selected === n.key}
+              hot={hover === n.id} onHover={setHover} onAct={() => up(n)} />
+          ))}
+        </svg>
+      )}
+      {hovered && <Tip n={hovered} data={data} w={L.w} h={L.h} r={hovered.kind === "student" ? byId.get(hovered.key) : undefined} colorBy={colorBy} />}
+      {roleNet && ready && students.length >= data.results.length && roleNet.n > data.results.length && (
+        <p className="mt-1 text-xs text-neutral-500">The graph shows the best {data.results.length} of {fmt(roleNet.n)}; the list below has the same {data.results.length}.</p>
+      )}
     </div>
   );
 }
 
-function Tip({ r, x, y, terms, colorBy }: { r: WireResult; x: number; y: number; terms: number; colorBy: ColorBy }) {
-  const flip = x > 0.55;
+function Crumb({ on, onClick, children }: { on: boolean; onClick?: () => void; children: ReactNode }) {
+  return on ? (
+    <span aria-current="location" className="rounded-md border-[1.5px] border-neutral-900 bg-violet-50 px-2 py-0.5 font-semibold text-neutral-950">{children}</span>
+  ) : (
+    <button type="button" onClick={onClick} className="rounded-md px-2 py-0.5 font-semibold text-purple-700 hover:bg-violet-50 hover:underline">{children}</button>
+  );
+}
+
+function NodeMark({ n, r, colorBy, selected, hot, onHover, onAct }: {
+  n: LNode; r: WireResult | undefined; colorBy: ColorBy; selected: boolean; hot: boolean; onHover: (id: string | null) => void; onAct: () => void;
+}) {
+  const faded = !n.on && !hot;
+  const words = n.kind === "student" ? `${n.label}. ${r?.headline ?? ""}. Open profile.` : n.kind === "more" || n.kind === "show" ? n.label
+    : `${n.label}: ${n.count} students. ${n.open ? "Close." : "Open."}`;
+  const hitX = n.x - n.r - 4;
+  const hitW = Math.max(n.end - hitX + 4, 2 * n.r + 8);
+  const fill = n.kind === "pool" ? "#8b5cf6" : n.open ? LIT : n.key === "none" ? "#ffffff" : n.key === "other" ? "#f5f5f5" : hot ? "#ddd6fe" : "#ede9fe";
   return (
-    <div className="pointer-events-none absolute z-10 w-60 max-w-[70%] rounded-xl border-2 border-neutral-900 bg-white p-3 text-xs shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]"
-      style={{ left: `${x * 100}%`, top: `${y * 100}%`, transform: `translate(${flip ? "calc(-100% - 14px)" : "14px"}, -50%)` }}>
-      <div className="text-sm font-bold text-neutral-950">{r.name}</div>
-      {r.headline && <div className="mt-0.5 line-clamp-2 text-neutral-600">{r.headline}</div>}
-      <div className="mt-1.5 flex items-center gap-1.5 text-neutral-700">
-        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: dotColor(r, colorBy) }} />
-        {colorBy === "style" ? STYLE_LABEL[r.traits?.style ?? ""] ?? "Work style not read" : r.source === "call" ? intentLabel(r.intent) : "Old product"}
-        {terms > 0 && <span className="ml-auto font-semibold text-neutral-950">{r.matched} of {terms} matched</span>}
-      </div>
+    <g tabIndex={0} role="button" aria-label={words} className="cursor-pointer outline-none" opacity={faded ? 0.55 : 1}
+      onMouseEnter={() => onHover(n.id)} onMouseLeave={() => onHover(null)} onFocus={() => onHover(n.id)} onBlur={() => onHover(null)}
+      onClick={onAct} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onAct(); } }}>
+      <rect x={hitX} y={n.y - 13} width={hitW} height={26} rx={6} fill={hot && n.kind !== "student" ? "#f5f3ff" : "transparent"} />
+      {n.kind === "student" ? (
+        <>
+          {selected && <circle cx={n.x} cy={n.y} r={n.r + 4} fill="none" stroke={INK} strokeWidth={2} />}
+          <circle cx={n.x} cy={n.y} r={n.r} fill={r ? dotColor(r, colorBy) : OTHER_COLOR} stroke="#ffffff" strokeWidth={2} />
+          <text x={n.x + n.r + 6} y={n.y + 4.5} fontSize={13} fontWeight={selected ? 800 : 600} fill={INK} stroke="#ffffff" strokeWidth={3} paintOrder="stroke">{n.label}</text>
+        </>
+      ) : n.kind === "more" || n.kind === "show" ? (
+        <>
+          <circle cx={n.x} cy={n.y} r={n.r + 3} fill="#ffffff" stroke={LIT} strokeWidth={1.5} strokeDasharray="2 2" />
+          <text x={n.x + 12} y={n.y + 4.5} fontSize={13} fontWeight={700} fill={LIT}>{n.label}</text>
+        </>
+      ) : (
+        <>
+          {n.kind === "pool" && <circle cx={n.x} cy={n.y} r={n.r + 5} fill="none" stroke="#ddd6fe" strokeWidth={4} />}
+          <circle cx={n.x} cy={n.y} r={n.r} fill={fill} stroke={INK} strokeWidth={1.5} strokeDasharray={n.key === "none" ? "3 2" : undefined} />
+          {n.kind === "pool" ? (
+            n.label && (
+              <text x={n.x} y={n.y + n.r + 18} fontSize={13} fontWeight={700} fill={INK} textAnchor="middle">
+                {n.count}
+              </text>
+            )
+          ) : (
+            n.label && (
+              <text x={n.x + n.r + 8} y={n.y + 5} fontSize={14} fontWeight={n.open ? 800 : 650} fill={INK} stroke="#ffffff" strokeWidth={3} paintOrder="stroke">
+                {n.label}
+                <tspan dx={6} fontSize={13} fontWeight={600} fill={MUTED} className="tnum">{n.count}</tspan>
+              </text>
+            )
+          )}
+        </>
+      )}
+    </g>
+  );
+}
+
+/** What a node is, on hover or focus: a family's share and biggest roles, a role's count, a student's why line. */
+function Tip({ n, data, w, h, r, colorBy }: { n: LNode; data: TalentEnvelope; w: number; h: number; r: WireResult | undefined; colorBy: ColorBy }) {
+  const x = n.x / w;
+  const flip = x > 0.55;
+  const fam = n.kind === "fam" ? data.net.families.find((f) => f.key === n.key) : undefined;
+  const role = n.kind === "role" ? data.net.families.flatMap((f) => f.roles.map((x) => ({ ...x, fam: f.label }))).find((x) => x.key === n.key) : undefined;
+  if (n.kind === "more" || n.kind === "show" || n.kind === "pool") return null;
+  return (
+    <div className="pointer-events-none absolute z-10 w-64 max-w-[75%] rounded-xl border-2 border-neutral-900 bg-white p-3 text-xs shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]"
+      style={{ left: `${x * 100}%`, top: `calc(${(n.y / h) * 100}% + 34px)`, transform: `translate(${flip ? "calc(-100% + 10px)" : "-10px"}, 0)` }}>
+      {fam && (
+        <>
+          <div className="text-sm font-bold text-neutral-950">{fam.label}</div>
+          <div className="mt-0.5 text-neutral-600">{fmt(fam.n)} students, {pct(fam.n, data.net.n)} of {fmt(data.net.n)}</div>
+          {fam.roles.length > 0 && <div className="mt-1.5 text-neutral-700">{fam.roles.slice(0, 3).map((x) => `${x.label} ${fmt(x.n)}`).join(" · ")}</div>}
+          <div className="mt-1.5 font-semibold text-purple-700">{n.open ? "Click to close" : "Click to open its roles"}</div>
+        </>
+      )}
+      {role && (
+        <>
+          <div className="text-sm font-bold text-neutral-950">{role.label}</div>
+          <div className="mt-0.5 text-neutral-600">{fmt(role.n)} students in {role.fam}</div>
+          <div className="mt-1.5 font-semibold text-purple-700">{n.open ? "Click to close" : "Click to see the best of them"}</div>
+        </>
+      )}
+      {r && (
+        <>
+          <div className="text-sm font-bold text-neutral-950">{r.name}</div>
+          {r.headline && <div className="mt-0.5 line-clamp-2 text-neutral-600">{r.headline}</div>}
+          <div className="mt-1.5 text-neutral-700">{r.place.why}</div>
+          <div className="mt-1.5 flex items-center gap-1.5 text-neutral-700">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: dotColor(r, colorBy) }} />
+            {colorBy === "style" ? STYLE_LABEL[r.traits?.style ?? ""] ?? "Work style not read" : r.source === "call" ? intentLabel(r.intent) : "Old product"}
+            {data.terms.length > 0 && <span className="ml-auto font-semibold text-neutral-950">{r.matched} of {data.terms.length} matched</span>}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-export function GraphLegend({ searching, colorBy }: { searching: boolean; colorBy: ColorBy }) {
+export function GraphLegend({ colorBy }: { colorBy: ColorBy }) {
   const dot = (c: string) => <span className="inline-block h-3 w-3 rounded-full border-2 border-white ring-1 ring-neutral-200" style={{ background: c }} />;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-neutral-600">
+      <span>Circle size and line thickness: number of students. Click a family, then a role, then a student.</span>
       {colorBy === "style" ? (
         <>
           {Object.entries(STYLE_COLOR).map(([k, c]) => <span key={k} className="flex items-center gap-1.5">{dot(c)} {STYLE_LABEL[k]}</span>)}
@@ -225,18 +234,6 @@ export function GraphLegend({ searching, colorBy }: { searching: boolean; colorB
           <span className="flex items-center gap-1.5">{dot(INTENT_COLOR.active)} Actively looking</span>
           <span className="flex items-center gap-1.5">{dot(INTENT_COLOR.open)} Open to offers</span>
           <span className="flex items-center gap-1.5">{dot(OTHER_COLOR)} Not looking, did not say, or old product</span>
-        </>
-      )}
-      {searching ? (
-        <>
-          <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-9 rounded-md border-[1.5px] border-neutral-900 bg-violet-50" /> A word from your search</span>
-          <span>Bigger dot: stronger match · middle of the ring: matches everything</span>
-        </>
-      ) : (
-        <>
-          <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-9 rounded-md border-[1.5px] border-neutral-900 bg-violet-50" /> A role they want</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-9 rounded-md border-[1.5px] border-neutral-900 bg-white" /> A skill on their resume</span>
-          <span>Click a chip to search for it</span>
         </>
       )}
     </div>

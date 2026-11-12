@@ -40,8 +40,11 @@ jobs:
       # tracks a visit plays as, the journey markers, and the wiring (admin gate, the Journeys link, storage refs).
       - run: node --test scripts/recordings-model.test.mjs
       # TALENT (12 Nov 2026): the /talent search: the words a search is read into, where a student matches, the hard
-      # filters (city with Delhi NCR as one market, budget in the student's unit), the ranking, the graph and its layout.
+      # filters (city with Delhi NCR as one market, budget in the student's unit), the ranking.
       - run: node --test scripts/talent-model.test.mjs
+      # TALENT-NET (12 Nov 2026): every student in one career family and canonical role (synonyms, refusals, the order
+      # of evidence, not enough data), the network's counts and its layout.
+      - run: node --test scripts/talent-families.test.mjs
       # UTM links (2 Nov 2026): the naming scheme, utm_id = slug first, utm_*
       # as the fallback, IST ranges, internal accounts and bots apart.
       - run: node --test scripts/utm-attribution.test.mjs

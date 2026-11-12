@@ -18,6 +18,8 @@ export async function fetchTalent(f: Filters, o: { internal?: boolean; fresh?: b
   if (f.src !== "all") qs.set("src", f.src);
   if (f.optin) qs.set("optin", "1");
   if (f.traits.length) qs.set("traits", f.traits.join(","));
+  if (f.fam) qs.set("fam", f.fam);
+  if (f.fam && f.role) qs.set("role", f.role);
   if (o.internal) qs.set("internal", "1");
   if (o.fresh) qs.set("fresh", "1");
   const res = await fetch(`/api/talent?${qs}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} });
