@@ -6,17 +6,30 @@
  *     [&budget=<key>][&relocate=0][&src=call|old][&optin=1][&traits=<key>,<key>][&fam=<family>][&role=<family>/<role>]
  *     [&internal=1][&fresh=1]
  * TALENT-NET (12 Nov 2026): fam and role open a family and a role of the network; they narrow the list, not the network.
+ * TALENT-FIND (12 Nov 2026, the owner: "add a student search"): GET /api/talent?find=<name or email> lists up to 12
+ * students to choose from; GET /api/talent?student=<id> is one student's whole profile, for the panel.
  */
 import type { Route } from "./+types/api.talent";
 import { requireAdmin } from "~/lib/auth-helper.server";
 import { FAMILY_ORDER } from "~/lib/talent/families";
 import { BUDGETS, DEFAULT_FILTERS, type ExpFilter, type Filters, type SourceFilter, TRAITS, type TypeFilter, cityKey } from "~/lib/talent/model";
-import { talentSearch } from "~/lib/talent/talent.server";
+import { talentFind, talentSearch, talentStudent } from "~/lib/talent/talent.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const admin = await requireAdmin(request);
   if (!admin) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const p = new URL(request.url).searchParams;
+  const internalAsked = p.get("internal") === "1";
+  try {
+    if (p.has("find")) return Response.json(await talentFind((p.get("find") || "").slice(0, 120), internalAsked), { headers: { "Cache-Control": "no-store" } });
+    if (p.has("student")) {
+      const result = await talentStudent((p.get("student") || "").slice(0, 80), internalAsked);
+      return result ? Response.json({ result }, { headers: { "Cache-Control": "no-store" } }) : Response.json({ error: "Not found" }, { status: 404 });
+    }
+  } catch (err: any) {
+    console.error("[api/talent]", err);
+    return Response.json({ error: err?.message || "Failed to load" }, { status: 500 });
+  }
   const type = p.get("type") || "any";
   const exp = p.get("exp") || "any";
   const grad = Number(p.get("grad"));

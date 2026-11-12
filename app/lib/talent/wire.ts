@@ -28,6 +28,20 @@ export interface WireResult extends Omit<Candidate, "claims" | "canon"> {
   place: WirePlace;
 }
 
+/** TALENT-FIND: one student a name search found, enough to choose them (never their email or phone). */
+export interface WireFound {
+  id: string;
+  name: string;
+  college: string | null;
+  course: string | null;
+  source: "call" | "old";
+  optedIn: boolean;
+  family: string;
+  familyLabel: string;
+  role: string;
+  roleLabel: string;
+}
+
 export interface TalentEnvelope {
   env: string;
   /** The student tables are in this database. */

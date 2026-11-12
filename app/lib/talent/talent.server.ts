@@ -17,9 +17,9 @@ import db from "~/lib/db.server";
 import { internalReason, testUsers } from "~/lib/stu/data.server";
 import { canonOf, countsOf, famLabel, netOf, placeOf, roleLabelOf, within } from "./families";
 import {
-  type Candidate, type Claim, type Filters, type Result, cityKey, cityLabel, fromOld, parseTerms, saidFrom, search, skillsOf, vocabOf,
+  type Candidate, type Claim, type Filters, type Result, cityKey, cityLabel, findStudents, fromOld, parseTerms, saidFrom, search, skillsOf, vocabOf,
 } from "./model";
-import type { TalentEnvelope, WirePlace, WireResult } from "./wire";
+import type { TalentEnvelope, WireFound, WirePlace, WireResult } from "./wire";
 
 const CAP = 60;
 const TTL_MS = 10 * 60_000;
@@ -259,4 +259,26 @@ export async function talentSearch(f: Filters, internal: boolean, fresh: boolean
     grads,
     ms: Date.now() - t0,
   };
+}
+
+/** TALENT-FIND (12 Nov 2026, the owner: "add a student search"): students by name or exact email, as rows to choose from. */
+export async function talentFind(text: string, internal: boolean): Promise<{ found: WireFound[]; ms: number }> {
+  const t0 = Date.now();
+  const pool = await loadPool(false);
+  const people = pool.all.filter((c) => internal || !c.internal);
+  const found = findStudents(people, text, 12).map((c): WireFound => {
+    const p = placeOf(c, skillsOf(c));
+    return {
+      id: c.id, name: c.name, college: c.college, course: c.course, source: c.source, optedIn: c.optedIn,
+      family: p.family, familyLabel: famLabel(p.family), role: p.role, roleLabel: p.roleName,
+    };
+  });
+  return { found, ms: Date.now() - t0 };
+}
+
+/** TALENT-FIND: one student's whole profile, as a search result with nothing matched, for the panel. */
+export async function talentStudent(id: string, internal: boolean): Promise<WireResult | null> {
+  const pool = await loadPool(false);
+  const c = pool.all.find((x) => x.id === id && (internal || !x.internal));
+  return c ? wire({ c, skills: skillsOf(c), hits: [], matched: 0, score: 0 }) : null;
 }

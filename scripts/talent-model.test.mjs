@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  DEFAULT_FILTERS, TRAITS, askIn, scrubContacts, briefOf, cityKey, expText, fromOld, matchTerm, parseTerms, passes, quizFrom, roleKey, saidFrom,
+  DEFAULT_FILTERS, TRAITS, askIn, findStudents, scrubContacts, briefOf, cityKey, expText, fromOld, matchTerm, parseTerms, passes, quizFrom, roleKey, saidFrom,
   search, shortlistText, skillKey, skillName, skillsOf, traitsFrom, vocabOf,
 } from "../app/lib/talent/model.ts";
 
@@ -297,4 +297,21 @@ test("TALENT-ALL contacts: emails and Indian mobile numbers hidden in their word
   assert.equal(scrubContacts("Grew it from 2,000 to 40,000 followers in 2024 with 6000000 views"), "Grew it from 2,000 to 40,000 followers in 2024 with 6000000 views");
   const q = quizFrom({}, null, { best_project: "Built a bot, demo at made.up@example.com" }, null);
   assert.equal(q.bestProject, "Built a bot, demo at (email hidden)");
+});
+
+// TALENT-FIND (12 Nov 2026, the owner: "add a student search"): made-up names only.
+test("findStudents: every word starts a word of the name, any order; exact email; whole name and the call first", () => {
+  const pool = [
+    { id: "a", name: "Priya Example", email: "priya.example@mail.test", source: "old" },
+    { id: "b", name: "Priyanka Sample", email: "p.sample@mail.test", source: "call" },
+    { id: "c", name: "Arjun Priya Demo", email: "arjun@mail.test", source: "old" },
+    { id: "d", name: "Meera O'Neil", email: "meera@mail.test", source: "old" },
+  ];
+  assert.deepEqual(findStudents(pool, "priya").map((c) => c.id), ["b", "c", "a"], "the call first, then A to Z");
+  assert.deepEqual(findStudents(pool, "exa pri").map((c) => c.id), ["a"], "any order, starts of words");
+  assert.deepEqual(findStudents(pool, "Priya Example").map((c) => c.id), ["a"]);
+  assert.deepEqual(findStudents(pool, "  P.SAMPLE@mail.test ").map((c) => c.id), ["b"], "an email matches whole, any case");
+  assert.deepEqual(findStudents(pool, "o'neil").map((c) => c.id), ["d"], "punctuation in a name");
+  assert.deepEqual(findStudents(pool, "p"), [], "one letter finds no one");
+  assert.deepEqual(findStudents(pool, "riya"), [], "the middle of a word is no match");
 });

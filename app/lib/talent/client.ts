@@ -2,7 +2,7 @@
 // admin API call does; the studojo.com session cookie never reaches the admin host.
 import { getToken } from "~/lib/api";
 import type { Filters } from "./model";
-import type { TalentEnvelope } from "./wire";
+import type { TalentEnvelope, WireFound, WireResult } from "./wire";
 
 export async function fetchTalent(f: Filters, o: { internal?: boolean; fresh?: boolean } = {}): Promise<TalentEnvelope> {
   const token = await getToken();
@@ -26,4 +26,27 @@ export async function fetchTalent(f: Filters, o: { internal?: boolean; fresh?: b
   const body = await res.json().catch(() => ({}));
   if (!res.ok || body?.error) throw new Error(body?.error || `HTTP ${res.status}`);
   return body as TalentEnvelope;
+}
+
+/** TALENT-FIND: one GET of /api/talent with the admin's bearer token. */
+async function getTalent<T>(qs: URLSearchParams): Promise<T> {
+  const token = await getToken();
+  const res = await fetch(`/api/talent?${qs}`, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body?.error) throw new Error(body?.error || `HTTP ${res.status}`);
+  return body as T;
+}
+
+/** TALENT-FIND (12 Nov 2026, the owner: "add a student search"): students by name or exact email. */
+export async function findTalent(text: string, internal = false): Promise<WireFound[]> {
+  const qs = new URLSearchParams({ find: text });
+  if (internal) qs.set("internal", "1");
+  return (await getTalent<{ found: WireFound[] }>(qs)).found;
+}
+
+/** TALENT-FIND: one student's whole profile, for the panel. */
+export async function fetchStudent(id: string, internal = false): Promise<WireResult> {
+  const qs = new URLSearchParams({ student: id });
+  if (internal) qs.set("internal", "1");
+  return (await getTalent<{ result: WireResult }>(qs)).result;
 }
