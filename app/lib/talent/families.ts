@@ -2,10 +2,11 @@
 // of students, the graph should be like a neural network, where if i click then go deeper to see each student"). Every
 // student gets one career family and one canonical role from a fixed taxonomy, a few secondary ones, and the reason in
 // plain words ("Wanted role: Business Analyst"). Synonyms fold (SDE, software developer and programmer are one Software
-// engineer; backend, frontend and full stack stay roles under Software engineering). Evidence, strongest first: the
-// roles they want, the roles they are open to (or the resume read says fit), their title and headline, past roles, the
-// course, then the skills. Anything they rule out never places them in that family; a student we cannot read goes to
-// "Not enough data", never a guess. Then the network the page draws: families, roles, counts.
+// engineer; backend, frontend and full stack stay roles under Software engineering). Evidence is read in tiers and the
+// first that says something decides (TALENT-NET-2, after the coordinator's prod dry run): their first wanted role, the
+// roles they are open to, their title, headline and past roles, the course, then the skills. The old product's AI read
+// of the resume never decides, it is a second fit. Anything they rule out never places them in that family; a student
+// we cannot read goes to "Not enough data", never a guess. Then the network the page draws: families, roles, counts.
 // The only import is a type, so node --test runs it as is (scripts/talent-families.test.mjs).
 import type { Candidate } from "./model";
 
@@ -205,7 +206,7 @@ const FILLER = new Set(["and", "or", "of", "the", "in", "for", "a", "an", "with"
 
 /** Lower case, apostrophes out ("founder's" is "founders"), & to and, punctuation to spaces, keeping c++ and c#. */
 export const toks = (s: string): string[] =>
-  s.toLowerCase().replace(/[‘’'`]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9+#]+/g, " ").split(" ").filter((w) => w && !FILLER.has(w));
+  s.normalize("NFKC").toLowerCase().replace(/[‘’'`]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9+#]+/g, " ").split(" ").filter((w) => w && !FILLER.has(w));
 
 interface Entry { fam: Fam | null; role: string | null; w: number; ux?: boolean }
 interface Dict { map: Map<string, Entry>; max: Map<string, number> }
@@ -289,6 +290,7 @@ const COURSE_DICT = dictOf([
   [{ fam: "finance", role: "finance/banking", w: 1.5 }, "banking insurance, actuarial science, banking"],
   [{ fam: "finance", role: "finance/audit", w: 1.5 }, "ca, chartered accountancy, cma, acca"],
   [{ fam: "finance", role: null, w: 0.75 }, "commerce, b com, bcom, m com, mcom, bcom hons, b com hons, b com h, economics"],
+  [{ fam: "consulting", role: null, w: 1.5 }, "strategy, strategic management, business strategy, consulting, management consulting"],
   [{ fam: "ops", role: null, w: 1.5 }, "operations, operations management, retail management"],
   [{ fam: "ops", role: "ops/scm", w: 1.5 }, "supply chain, supply chain management, logistics, logistics management"],
   [{ fam: "hr", role: null, w: 1.5 }, "human resource, human resources, human resource management, hrm, hr, personnel management"],
@@ -305,14 +307,14 @@ const COURSE_DICT = dictOf([
   [{ fam: "science", role: "science/psychology", w: 1.5 }, "psychology, applied psychology"],
   [{ fam: "legal", role: "legal/lawyer", w: 1.5 }, "llb, ba llb, bba llb, b llb, llm, law, legal studies, integrated law"],
   [{ fam: "education", role: "education/teacher", w: 1.5 }, "b ed, m ed, education, elementary education, d el ed, deled"],
-  [{ fam: null, role: null, w: 0 }, "b tech, btech, b e, be, bba, mba, pgdm, ba, bsc, b sc, ma, msc, m sc, bms, bbm, me, m tech, mtech, phd"],
+  [{ fam: null, role: null, w: 0 }, "b tech, btech, b e, be, bba, mba, pgdm, ba, bsc, b sc, ma, msc, m sc, bms, bbm, me, m tech, mtech, phd, business, business administration, business management, management, management studies, business studies, high school, school, class 12, 12th"],
 ]);
 
 /** Resume skills that point to one family (a common one like Excel, Python or Canva points nowhere). */
 const SKILL_DICT = dictOf([
   [{ fam: "software", role: null, w: 1 }, "javascript, typescript, react, react js, reactjs, node js, nodejs, next js, express js, angular, vue, vue js, html, css, java, c++, c#, rust, kotlin, swift, php, ruby, django, flask, spring boot, spring, hibernate, mongodb, postgresql, redis, graphql, rest apis, rest api, git, github, docker, kubernetes, jenkins, ci cd, linux, data structures, algorithms, dsa, oop, system design, flutter, android, android studio, react native, tailwind, tailwind css, bootstrap, jquery, firebase, asp net, laravel, selenium, jest, cypress, azure, terraform, ansible, microservices, unity, unreal engine, golang"],
   [{ fam: "data", role: null, w: 1 }, "sql, power bi, tableau, data analysis, data visualization, data visualisation, pandas, numpy, statistics, r, spss, sas, looker, looker studio, google data studio, bigquery, dax, power query, etl, data cleaning, data mining, data modelling, data modeling, matplotlib, seaborn, snowflake, databricks, spark, pyspark, hadoop, airflow, dbt, data warehousing, mis, vba, alteryx, qlik, qlikview, metabase, stata"],
-  [{ fam: "ai", role: null, w: 1 }, "machine learning, deep learning, tensorflow, pytorch, keras, scikit learn, nlp, computer vision, opencv, generative ai, ai, llm, langchain, llamaindex, hugging face, huggingface, transformers, prompt engineering, rag, openai api, neural networks, xgboost, mlops, yolo, gen ai, vector database, crewai, langgraph"],
+  [{ fam: "ai", role: null, w: 1 }, "machine learning, ml, deep learning, tensorflow, pytorch, keras, scikit learn, nlp, computer vision, opencv, generative ai, llm, langchain, llamaindex, hugging face, huggingface, transformers, prompt engineering, rag, openai api, neural networks, xgboost, mlops, yolo, gen ai, vector database, crewai, langgraph"],
   [{ fam: "product", role: null, w: 1 }, "product management, product roadmap, roadmapping, prd, user stories, product strategy, mixpanel, amplitude, product analytics"],
   [{ fam: "design", role: null, w: 1 }, "figma, adobe xd, photoshop, adobe photoshop, illustrator, adobe illustrator, indesign, adobe indesign, coreldraw, ui ux, ui design, ux design, user research, wireframing, prototyping, typography, blender, maya, after effects, adobe after effects, cinema 4d, 3ds max, sketchup, rhino, keyshot, zbrush, procreate, adobe creative suite"],
   [{ fam: "marketing", role: null, w: 1 }, "seo, sem, social media marketing, digital marketing, google ads, meta ads, facebook ads, google analytics, ga4, email marketing, hubspot, mailchimp, marketing, performance marketing, brand management, market research, marketing strategy, affiliate marketing, influencer marketing, semrush, ahrefs, google tag manager, meta business suite, social media management, campaign management, marketing automation"],
@@ -389,33 +391,26 @@ function otherRole(text: string): { key: string; label: string } | null {
 
 export type Src = "wanted" | "adjacent" | "title" | "headline" | "past" | "course" | "skills";
 
-/** How much each kind of evidence weighs (the owner's order: wanted, open to, title/headline, course, skills). */
-export const WEIGHT = {
-  wanted: 5, wantedStep: 0.5, wantedMin: 3,
-  adjacent: 3, adjacentStep: 0.3, adjacentMin: 2,
-  title: 2.5, headline: 2, oldHeadline: 1.25, past: 1.5, pastCap: 3,
-  skill: 0.4, skillCap: 1.2,
-};
-/** A family needs this much to place a student: one role they named, a specific course, or three of its skills. */
+/**
+ * TALENT-NET-2 (12 Nov 2026, the coordinator's prod dry run: "the first wanted role must decide"; "an AI-read guess alone
+ * isn't enough"): evidence is read in tiers, and the first tier that says something decides; a later tier never
+ * outvotes an earlier one. Inside the title tier, the pieces add up by these weights.
+ */
+export const WEIGHT = { title: 2.5, headline: 2, past: 1.5, pastCap: 3 };
+/** The title tier places a student at this much: one title, headline or past role. */
 export const PLACE_MIN = 1.2;
+/** Skills alone place a family (with "Role not said") at this many of its skills, more than any other family has. */
+export const SKILLS_MIN = 4;
+/** A broad course (B.Com, statistics, English) places its family only with this many of its skills beside it. */
+export const BROAD_COURSE_SKILLS = 2;
 
 export interface Placed { family: Fam; role: string }
 export interface Place extends Placed {
   roleName: string;
-  /** Up to three more: other roles in the family, then other families. */
+  /** Up to three more: their other wanted roles first, then what else they named, then our AI's resume read. */
   also: Placed[];
   /** Why they sit here, in plain words. */
   why: string;
-}
-
-interface Tally {
-  score: number;
-  best: { w: number; src: Src; text: string } | null;
-  roles: Map<string, number>;
-  seq: number;
-  past: number;
-  course: number;
-  skills: string[];
 }
 
 const clipTo = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
@@ -423,13 +418,18 @@ const clipTo = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).tr
 const placeMemo = new WeakMap<Candidate, Place>();
 
 /**
- * Where one student sits. Every piece of evidence adds its weight to the families it names (once per family per piece,
- * so "Data Analyst / Business Analyst" counts data once), a role it names gets the same weight, and the strongest
- * family at PLACE_MIN or more wins; on a tie, the one with the strongest single piece, then the one named first. The
- * role is the family's strongest named role, or "Role not said" when only the course or skills placed them. A family
- * they rule out (said.refuses) takes nothing. Role words no family fits go to Other roles; nothing readable, or too
- * little, goes to Not enough data. `skills` are the student's resume skills (model.ts skillsOf). Worked out once per
- * student (the pool copy is cached).
+ * Where one student sits, in tiers; the first tier that names a family decides it and the role:
+ * 1. their own wanted roles: the first one that maps to a family they do not rule out decides family and role;
+ * 2. the roles they said on the call they are open to: the first that maps;
+ * 3. their title, the call's headline and past roles, added up (title 2.5, headline 2, past roles 1.5 up to 3);
+ * 4. the course (then the degree): the first specific one ("Computer Science", "BBA in Strategy"); a broad one (B.Com)
+ *    only with two of that family's skills beside it. The role is the course's when it is a profession (a core branch,
+ *    law, CA, medicine), else "Role not said";
+ * 5. skills alone: four of one family's skills, more than any other family, with "Role not said".
+ * In tiers 1 to 3, role words no family fits go to Other roles. The old product's AI read of the resume (its likely
+ * roles and archetype headline) never decides; it is a second fit. A family they rule out never places them, not even
+ * as a second fit; a specific refused role rules out that role only. Nothing readable, or too little, goes to Not
+ * enough data. `skills` are the student's resume skills (model.ts skillsOf). Worked out once per student.
  */
 export function placeOf(c: Candidate, skills: { key: string; label: string }[]): Place {
   const hit = placeMemo.get(c);
@@ -438,6 +438,8 @@ export function placeOf(c: Candidate, skills: { key: string; label: string }[]):
   placeMemo.set(c, p);
   return p;
 }
+
+interface Named { family: Fam; role: string | null; text: string; src: Src }
 
 function place(c: Candidate, skills: { key: string; label: string }[]): Place {
   const blocked = new Map<Fam, string>(); // the whole family, and the refusal that said so
@@ -448,127 +450,146 @@ function place(c: Candidate, skills: { key: string; label: string }[]): Place {
       if (m.role && !blockedRole.has(m.role)) blockedRole.set(m.role, r);
     }
   }
-  const hasUx = skills.some((s) => UX_SKILLS.has(s.key));
-  const tallies = new Map<Fam, Tally>();
   const hitBlocked = new Set<string>(); // the refusals that took evidence away
-  let seq = 0;
-  const tally = (f: Fam): Tally => {
-    let t = tallies.get(f);
-    if (!t) tallies.set(f, (t = { score: 0, best: null, roles: new Map(), seq: seq++, past: 0, course: 0, skills: [] }));
-    return t;
-  };
-  const credit = (t: Tally, w: number, src: Src, text: string) => {
-    t.score += w;
-    if (!t.best || w > t.best.w) t.best = { w, src, text };
-  };
   const refused = (fam: Fam, role: string | null): boolean => {
     const why = blocked.get(fam) ?? (role ? blockedRole.get(role) : undefined);
     if (why) hitBlocked.add(why);
     return !!why;
   };
+  const hasUx = skills.some((s) => UX_SKILLS.has(s.key));
 
-  /** A text that names a role: wanted, open to, title, headline, a past role. */
-  const roleText = (text: string, w: number, src: Src, otherOk: boolean) => {
-    const ms = scan(text, ROLE_DICT);
-    const seen = new Set<Fam>();
-    let any = false;
-    for (const m of ms) {
+  /** The families and roles a text names, in order, without what they rule out; `named` is whether it named any. */
+  const read = (text: string, src: Src): { hits: Named[]; named: boolean } => {
+    const hits: Named[] = [];
+    let named = false;
+    for (const m of scan(text, ROLE_DICT)) {
       if (!m.fam) continue;
-      any = true;
+      named = true;
       if (refused(m.fam, m.role)) continue;
-      const t = tally(m.fam);
-      let gain = w;
-      if (src === "past") gain = Math.max(0, Math.min(w, WEIGHT.pastCap - t.past));
-      if (!seen.has(m.fam)) {
-        seen.add(m.fam);
-        if (src === "past") t.past += gain;
-        credit(t, gain, src, text);
-      }
-      const role = m.ux && hasUx && /product design/.test(m.phrase) ? "design/uiux" : m.role;
-      if (role) t.roles.set(role, (t.roles.get(role) ?? 0) + gain);
+      hits.push({ family: m.fam, role: m.ux && hasUx && /product design/.test(m.phrase) ? "design/uiux" : m.role, text, src });
     }
-    if (!any && otherOk) {
-      const o = otherRole(text);
-      if (o) {
-        const t = tally("other");
-        credit(t, w, src, text);
-        t.roles.set(o.key, (t.roles.get(o.key) ?? 0) + w);
-      }
-    }
+    return { hits, named };
   };
 
-  c.rolesWanted.forEach((r, i) => roleText(r, Math.max(WEIGHT.wantedMin, WEIGHT.wanted - WEIGHT.wantedStep * i), "wanted", true));
-  c.rolesAdjacent.forEach((r, i) => roleText(r, Math.max(WEIGHT.adjacentMin, WEIGHT.adjacent - WEIGHT.adjacentStep * i), "adjacent", true));
-  if (c.title) roleText(c.title, WEIGHT.title, "title", true);
-  if (c.headline) roleText(c.headline, c.source === "old" ? WEIGHT.oldHeadline : WEIGHT.headline, "headline", false);
-  for (const k of c.claims) if (k.kind === "role" && k.text) roleText(k.text, WEIGHT.past, "past", true);
+  const guess = c.source === "old"; // the old product's adjacent roles and headline are its AI's read of the resume
+  const wanted = c.rolesWanted.map((t) => read(t, "wanted"));
+  const open = guess ? [] : c.rolesAdjacent.map((t) => read(t, "adjacent"));
+  const saidIn: { text: string; src: Src }[] = [
+    ...(c.title ? [{ text: c.title, src: "title" as const }] : []),
+    ...(c.headline && !guess ? [{ text: c.headline, src: "headline" as const }] : []),
+    ...c.claims.filter((k) => k.kind === "role" && k.text).map((k) => ({ text: k.text, src: "past" as const })),
+  ];
+  const said = saidIn.map((x) => read(x.text, x.src));
+  const guessed = guess ? [...c.rolesAdjacent, ...(c.headline ? [c.headline] : [])].map((t) => read(t, "adjacent")) : [];
 
-  // The course and the degree: the strongest reading per family, counted once.
-  for (const text of [c.course, c.degree]) {
-    if (!text) continue;
-    for (const m of scan(text, COURSE_DICT)) {
-      if (!m.fam || refused(m.fam, m.role)) continue;
-      const t = tally(m.fam);
-      if (m.w > t.course) {
-        t.score += m.w - t.course;
-        t.course = m.w;
-        if (!t.best || m.w > t.best.w) t.best = { w: m.w, src: "course", text };
+  // Second fits, in the order they were said: other wanted roles, open to, title and past roles, then the AI read.
+  const seconds = [...wanted, ...open, ...said, ...guessed].flatMap((x) => x.hits);
+  const done = (family: Fam, role: string, why: string): Place => {
+    const also: Placed[] = [];
+    const famSeen = new Set<Fam>([family]);
+    const roleSeen = new Set<string>([role]);
+    for (const h of seconds) {
+      if (also.length >= 3) break;
+      if (h.family === family) {
+        if (h.role && !roleSeen.has(h.role)) {
+          roleSeen.add(h.role);
+          also.push({ family, role: h.role });
+        }
+      } else if (!famSeen.has(h.family)) {
+        famSeen.add(h.family);
+        also.push({ family: h.family, role: h.role ?? `${h.family}/unsaid` });
       }
-      if (m.role) t.roles.set(m.role, Math.max(t.roles.get(m.role) ?? 0, m.w));
     }
+    const note = hitBlocked.size ? `. Rules out: ${clipTo([...hitBlocked].join(", "), 60)}` : "";
+    return { family, role, roleName: roleLabelOf(role), also, why: `${why}${note}` };
+  };
+  const whyOf = (h: Named) => {
+    const x = clipTo(h.text.trim(), 70);
+    return h.src === "wanted" ? `Wanted role: ${x}` : h.src === "adjacent" ? `Open to: ${x}` : h.src === "title" ? `Now: ${x}`
+      : h.src === "headline" ? `Headline: ${x}` : `Worked as: ${x}`;
+  };
+  /** The first text of a tier that no family fits but names a role ("Pastry chef"), as Other roles. */
+  const otherIn = (items: { text: string; src: Src; named: boolean }[]): Place | null => {
+    for (const x of items) {
+      const o = x.named ? null : otherRole(x.text);
+      if (o) return done("other", o.key, whyOf({ family: "other", role: o.key, text: x.text, src: x.src }));
+    }
+    return null;
+  };
+
+  // 1 and 2: the first own wanted role that maps, then the first role they are open to.
+  const tiers: [typeof wanted, string[], Src][] = [[wanted, c.rolesWanted, "wanted"], [open, guess ? [] : c.rolesAdjacent, "adjacent"]];
+  for (const [reads, texts, src] of tiers) {
+    const first = reads.find((x) => x.hits.length)?.hits[0];
+    if (first) return done(first.family, first.role ?? `${first.family}/unsaid`, whyOf(first));
+    const other = otherIn(texts.map((text, i) => ({ text, src, named: reads[i].named })));
+    if (other) return other;
   }
 
-  // Skills: each one that points to a family, up to a cap.
+  // 3: title, headline and past roles, added up.
+  const score = new Map<Fam, { w: number; past: number; best: Named & { w: number }; roles: Map<string, number> }>();
+  for (const x of said) {
+    for (const fam of new Set(x.hits.map((h) => h.family))) {
+      const h = x.hits.find((y) => y.family === fam)!;
+      const s = score.get(fam) ?? { w: 0, past: 0, best: { ...h, w: 0 }, roles: new Map() };
+      let w = h.src === "title" ? WEIGHT.title : h.src === "headline" ? WEIGHT.headline : WEIGHT.past;
+      if (h.src === "past") {
+        w = Math.min(w, WEIGHT.pastCap - s.past);
+        s.past += w;
+      }
+      s.w += w;
+      if (w > s.best.w) s.best = { ...h, w };
+      if (h.role) s.roles.set(h.role, (s.roles.get(h.role) ?? 0) + w);
+      score.set(fam, s);
+    }
+  }
+  const top = [...score.entries()].sort((a, b) => b[1].w - a[1].w)[0];
+  if (top && top[1].w >= PLACE_MIN) {
+    const role = [...top[1].roles.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? `${top[0]}/unsaid`;
+    return done(top[0], role, whyOf(top[1].best));
+  }
+  // A title or past role no family fits (never a headline: it is a sentence, not a role).
+  const saidOther = otherIn(saidIn.map((x, i) => ({ ...x, named: said[i].named })).filter((x) => x.src !== "headline"));
+  if (saidOther) return saidOther;
+
+  // Skills that point to one family, counted per family (a common one like Excel or Python points nowhere).
+  const skillsBy = new Map<Fam, string[]>();
   for (const s of skills) {
     const m = scan(s.key, SKILL_DICT).find((x) => x.fam);
     if (!m?.fam || refused(m.fam, null)) continue;
-    const t = tally(m.fam);
-    if (t.skills.length * WEIGHT.skill >= WEIGHT.skillCap - 1e-9) continue;
-    t.skills.push(s.label);
-    t.score += WEIGHT.skill;
-    const w = t.skills.length * WEIGHT.skill;
-    if (!t.best || t.best.src === "skills" || w > t.best.w) t.best = { w, src: "skills", text: t.skills.join(", ") };
+    skillsBy.set(m.fam, [...(skillsBy.get(m.fam) ?? []), s.label]);
   }
 
-  const order = [...tallies.entries()].sort(([, a], [, b]) => b.score - a.score || (b.best?.w ?? 0) - (a.best?.w ?? 0) || a.seq - b.seq);
-  const ruleNote = hitBlocked.size ? `. Rules out: ${clipTo([...hitBlocked].join(", "), 60)}` : "";
-  const top = order.find(([, t]) => t.score >= PLACE_MIN - 1e-9);
-
-  if (!top) {
-    const weak = order[0];
-    if (weak) {
-      return { family: "none", role: "none/little", roleName: NONE_ROLES["none/little"], also: [], why: `Too little to tell: ${whyOf(c, weak[1])}${ruleNote}` };
+  // 4: the course, then the degree: the first specific reading, or a broad one with that family's skills beside it.
+  const courses = [c.course, c.degree].filter((x): x is string => !!x);
+  let broad: { m: Match; text: string } | null = null;
+  for (const text of courses) {
+    for (const m of scan(text, COURSE_DICT)) {
+      if (!m.fam || refused(m.fam, m.role)) continue;
+      if (m.w >= PLACE_MIN) return done(m.fam, m.role ?? `${m.fam}/unsaid`, `Course: ${clipTo(text, 70)}`);
+      broad ??= { m, text };
     }
-    if (hitBlocked.size) {
-      return { family: "none", role: "none/refused", roleName: NONE_ROLES["none/refused"], also: [], why: `Everything we found is in what they rule out${ruleNote}` };
-    }
-    return { family: "none", role: "none/empty", roleName: NONE_ROLES["none/empty"], also: [], why: "No wanted role, title, course or skill we recognise" };
+  }
+  const near = broad?.m.fam ? skillsBy.get(broad.m.fam) ?? [] : [];
+  if (broad?.m.fam && near.length >= BROAD_COURSE_SKILLS) {
+    return done(broad.m.fam, `${broad.m.fam}/unsaid`, `Course: ${clipTo(broad.text, 50)}, with skills: ${near.slice(0, 3).join(", ")}`);
   }
 
-  const [fam, t] = top;
-  const roles = [...t.roles.entries()].sort((a, b) => b[1] - a[1]);
-  const role = roles[0]?.[0] ?? `${fam}/unsaid`;
-  const also: Placed[] = [
-    ...roles.slice(1).filter(([, w]) => w >= 2).slice(0, 2).map(([r]) => ({ family: fam, role: r })),
-    ...order.filter(([f, x]) => f !== fam && f !== "other" && x.score >= PLACE_MIN - 1e-9).slice(0, 2)
-      .map(([f, x]) => ({ family: f, role: [...x.roles.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? `${f}/unsaid` })),
-  ].slice(0, 3);
-  return { family: fam, role, roleName: roleLabelOf(role), also, why: `${whyOf(c, t)}${ruleNote}` };
-}
-
-function whyOf(c: Candidate, t: Tally): string {
-  const b = t.best;
-  if (!b) return "";
-  const x = clipTo(b.text.trim(), 70);
-  switch (b.src) {
-    case "wanted": return `Wanted role: ${x}`;
-    case "adjacent": return c.source === "old" ? `Resume fits (AI read): ${x}` : `Open to: ${x}`;
-    case "title": return `Now: ${x}`;
-    case "headline": return `Headline: ${x}`;
-    case "past": return `Worked as: ${x}`;
-    case "course": return `Course: ${x}`;
-    case "skills": return `Skills: ${x}`;
+  // 5: skills alone.
+  const bySkills = [...skillsBy.entries()].sort((a, b) => b[1].length - a[1].length);
+  if (bySkills[0] && bySkills[0][1].length >= SKILLS_MIN && bySkills[0][1].length > (bySkills[1]?.[1].length ?? 0)) {
+    return done(bySkills[0][0], `${bySkills[0][0]}/unsaid`, `Skills: ${bySkills[0][1].slice(0, 4).join(", ")}`);
   }
+
+  // Not enough data: why, in plain words.
+  const note = hitBlocked.size ? `. Rules out: ${clipTo([...hitBlocked].join(", "), 60)}` : "";
+  const g = guessed.flatMap((x) => x.hits)[0];
+  const little = g ? `only our AI's read of the resume, which guessed ${clipTo(g.text.trim(), 50)}`
+    : broad ? `Course: ${clipTo(broad.text, 50)}` : bySkills[0] ? `Skills: ${bySkills[0][1].slice(0, 4).join(", ")}` : null;
+  const none = (role: string, why: string): Place => ({ family: "none", role, roleName: NONE_ROLES[role], also: [], why });
+  if (little) return none("none/little", `Too little to tell: ${little}${note}`);
+  if (hitBlocked.size) return none("none/refused", `Everything we found is in what they rule out${note}`);
+  return none("none/empty", "No wanted role, title, course or skill we recognise");
 }
 
 // ------------------------------------------------------------------- the network
