@@ -78,6 +78,11 @@ test("the longest phrase wins where it starts", () => {
   assert.equal(at({ rolesWanted: ["Accounts Executive"] }), "finance finance/accounts");
   assert.equal(at({ rolesWanted: ["Account Executive"] }), "sales sales/sales");
   assert.equal(at({ rolesWanted: ["Data Entry Operator"] }), "ops ops/admin", "data entry is not analytics");
+  // TALENT-NET-3 (12 Nov 2026, the coordinator's second prod dry run): research about an industry is market research,
+  // not science; a power electronics engineer is core engineering, the role a later UX wish never outvotes.
+  assert.equal(at({ rolesWanted: ["Industry Research Associate", "Market Researcher"] }), "marketing marketing/research");
+  assert.equal(at({ rolesWanted: ["Power Electronics Engineer", "UX Designer"] }), "core core/electronics");
+  assert.equal(at({ rolesWanted: ["Research Associate"] }), "science science/research", "plain research stays science");
   assert.deepEqual(familiesIn("B.Tech student who wants a fintech role"), [], "a degree and a sector name no family");
   assert.equal(at({ rolesWanted: ["Product Designer"], claims: [skill("Figma")] }), "design design/uiux", "with UI skills a product designer is UI/UX");
   assert.equal(at({ rolesWanted: ["Product Designer"], claims: [skill("SolidWorks")] }), "design design/industrial");
