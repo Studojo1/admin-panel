@@ -42,6 +42,9 @@ jobs:
       # RECORDINGS (5 Nov 2026): the /recordings filters, the furthest step in a visit, career-agent's chunk names, the
       # tracks a visit plays as, the journey markers, and the wiring (admin gate, the Journeys link, storage refs).
       - run: node --test scripts/recordings-model.test.mjs
+      # TALENT (12 Nov 2026): the /talent search: the words a search is read into, where a student matches, the hard
+      # filters (city with Delhi NCR as one market, budget in the student's unit), the ranking, the graph and its layout.
+      - run: node --test scripts/talent-model.test.mjs
       # UTM links (2 Nov 2026): the naming scheme, utm_id = slug first, utm_*
       # as the fallback, IST ranges, internal accounts and bots apart.
       - run: node --test scripts/utm-attribution.test.mjs

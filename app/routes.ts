@@ -37,6 +37,9 @@ export default [
   route("api/recordings", "routes/api.recordings.tsx"),
   route("api/recordings/:id", "routes/api.recordings.$id.tsx"),
   route("api/recordings/:id/chunk", "routes/api.recordings.$id.chunk.tsx"),
+  // Talent search (12 Nov 2026): students hiring managers may find, searched by role, skills and city, drawn as a graph.
+  route("talent", "routes/talent.tsx"),
+  route("api/talent", "routes/api.talent.tsx"),
   // Vendors and credits (LeadsForge, Apollo): balances, spend, run-out dates.
   route("vendors", "routes/vendors.tsx"),
   route("api/vendors", "routes/api.vendors.tsx"),
