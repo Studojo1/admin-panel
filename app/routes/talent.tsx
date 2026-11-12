@@ -4,19 +4,27 @@
 // graph shows who matches which part of it and the list ranks them. A profile opens beside the graph with what the call
 // and the resume gave us. Only students whose page lets hiring managers on Studojo find them are searched. A shortlist
 // copies as plain text for a hiring manager, with no email address or phone number in it.
-// The filters live in the URL (?q, city, type, exp, grad, active, budget, relocate, internal) and ?id opens a profile.
+// TALENT-ALL (12 Nov 2026, the owner: "i want all students data here including the old 8000 from the old product and
+// then also add one thing about the personality based stuff and stuff we cant find on a normal ATS"): the old product's
+// students are searched too, marked "not opted in" (they never chose to be found by hiring managers; the shortlist warns
+// before it copies them), and every profile has "What an ATS can't see": the call (why now, values, what they want from
+// a team, what they refuse), the resume read (work style, ownership, ambiguity, pace, numbers, shows their work) and the
+// quiz (career stage, clarity, risk, their best project in their words). Those traits filter too, and colour the graph.
+// The filters live in the URL (?q, city, type, exp, grad, active, budget, relocate, src, optin, traits, color, internal)
+// and ?id opens a profile.
 // Read only (/api/talent, app/lib/talent).
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { AdminHeader } from "~/components";
 import { KIT_CSS } from "~/components/stu/overview-kit";
 import { CARD } from "~/components/stu/ui";
-import { GraphLegend, TalentGraph, intentColor } from "~/components/talent/talent-graph";
+import { type ColorBy, GraphLegend, TalentGraph, dotColor, intentColor } from "~/components/talent/talent-graph";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { fetchTalent } from "~/lib/talent/client";
 import {
-  BUDGETS, DEFAULT_FILTERS, type Brief, type ExpFilter, type Filters, type Hub, MODE_LABEL, TYPE_LABEL, type TypeFilter,
-  askText, briefOf, expText, intentLabel, shortlistText,
+  AMBIGUITY_LABEL, BUDGETS, CLARITY_LABEL, DEFAULT_FILTERS, type Brief, type ExpFilter, type Filters, type Hub, MODE_LABEL, OWNERSHIP_LABEL,
+  PACE_LABEL, RISK_LABEL, SHAPE_LABEL, STYLE_LABEL, type SourceFilter, TRAITS, TYPE_LABEL, type TypeFilter, WISH_LABEL, askText, briefOf, expText,
+  intentLabel, shortlistText,
 } from "~/lib/talent/model";
 import type { TalentEnvelope, WireResult } from "~/lib/talent/wire";
 
@@ -26,7 +34,7 @@ export function meta() {
 
 const SELECT = "rounded-lg border-2 border-neutral-900 bg-white px-2 py-1.5 text-sm";
 const EXAMPLES = ["data analyst python sql", "social media manager mumbai", "full stack developer intern 2026", "founder's office bengaluru"];
-const SHORTLIST_KEY = "talent-shortlist-v1";
+const SHORTLIST_KEY = "talent-shortlist-v2";
 const TERM_KIND: Record<string, string> = { city: "City", grad: "Grad", type: "Type", mode: "Mode", exp: "Experience" };
 
 function readShortlist(): Brief[] {
@@ -59,8 +67,16 @@ export default function Talent() {
     active: params.get("active") === "1",
     budget: params.get("budget") || "",
     relocate: params.get("relocate") !== "0",
+    src: (["call", "old"].includes(params.get("src") || "") ? params.get("src") : "all") as SourceFilter,
+    optin: params.get("optin") === "1",
+    traits: (params.get("traits") || "").split(",").filter((k) => TRAITS.some((t) => t.key === k)),
   };
   const internal = params.get("internal") === "1";
+  const colorBy: ColorBy = params.get("color") === "style" ? "style" : "intent";
+  const toggleTrait = (k: string) => {
+    const next = filters.traits.includes(k) ? filters.traits.filter((x) => x !== k) : [...filters.traits, k];
+    setParam({ traits: next.join(",") || null, id: null });
+  };
   const open = params.get("id");
   const key = JSON.stringify([filters, internal]);
 
@@ -130,7 +146,8 @@ export default function Talent() {
   const chosen = results.find((r) => r.id === open) ?? null;
   const searching = (data?.terms.length ?? 0) > 0;
   const envName = data ? (data.env === "staging" ? "Staging" : "Production") : "";
-  const filtered = !!(filters.city || filters.type !== "any" || filters.exp !== "any" || filters.grad != null || filters.active || filters.budget);
+  const filtered = !!(filters.city || filters.type !== "any" || filters.exp !== "any" || filters.grad != null || filters.active || filters.budget ||
+    filters.src !== "all" || filters.optin || filters.traits.length);
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -143,8 +160,10 @@ export default function Talent() {
             <h1 className="font-['Clash_Display'] text-3xl font-medium tracking-tight text-neutral-950 md:text-4xl">Talent search</h1>
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-neutral-500">
               <span>
-                Students who finished their call and let hiring managers on Studojo find their page
-                {data ? `: ${data.pool.toLocaleString("en-IN")}` : ""}. Profiles come from the call and the resume, in their words; nothing here is checked by us.
+                {data
+                  ? `${data.pool.toLocaleString("en-IN")} students: ${data.called.toLocaleString("en-IN")} took the call and let hiring managers find them, ${(data.pool - data.called).toLocaleString("en-IN")} from the old product. `
+                  : ""}
+                Profiles come from the call, the resume and the quiz, in their words or read by our AI; nothing here is checked by us.
               </span>
               {envName && (
                 <span className={`rounded-full border-2 px-2 py-0.5 text-[11px] font-bold ${data?.env === "production" ? "border-emerald-600 text-emerald-700" : "border-amber-500 text-amber-700"}`}>{envName}</span>
@@ -211,6 +230,29 @@ export default function Talent() {
           )}
         </div>
 
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <select aria-label="Students" value={filters.src} onChange={(e) => setParam({ src: e.target.value === "all" ? null : e.target.value, id: null })} className={SELECT}>
+            <option value="all">Everyone</option>
+            <option value="call">Took the call</option>
+            <option value="old">Old product only</option>
+          </select>
+          <label className="flex items-center gap-1.5 rounded-lg border-2 border-neutral-900 bg-white px-2 py-1.5">
+            <input type="checkbox" checked={filters.optin} onChange={(e) => setParam({ optin: e.target.checked ? "1" : null, id: null })} /> Opted in to hiring managers only
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs" role="group" aria-label="What an ATS can't see">
+          <span className="mr-1 font-bold uppercase tracking-wide text-purple-700">What an ATS can't see:</span>
+          {TRAITS.map((t) => {
+            const on = filters.traits.includes(t.key);
+            return (
+              <button key={t.key} type="button" aria-pressed={on} title={t.hint} onClick={() => toggleTrait(t.key)}
+                className={`rounded-full border-[1.5px] px-2.5 py-1 font-semibold transition-colors ${on ? "border-neutral-900 bg-purple-500 text-white" : "border-neutral-300 bg-white text-neutral-700 hover:border-purple-500 hover:text-purple-700"}`}>
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
         {data && searching && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-neutral-600">
             <span>Read as:</span>
@@ -236,12 +278,16 @@ export default function Talent() {
                   <h2 className="text-base font-bold text-neutral-950">
                     {searching ? `${data.total.toLocaleString("en-IN")} student${data.total === 1 ? "" : "s"} match` : "The pool by skill and wanted role"}
                   </h2>
-                  <span className="text-xs text-neutral-500">
+                  <span className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
                     {data.total > data.results.length ? `The graph and list show the best ${data.results.length}` : `${data.graph.links.length} on the graph`}
+                    <span className="seg" role="group" aria-label="Colour dots by">
+                      <button type="button" aria-pressed={colorBy === "intent"} onClick={() => setParam({ color: null })}>Looking?</button>
+                      <button type="button" aria-pressed={colorBy === "style"} onClick={() => setParam({ color: "style" })}>Work style</button>
+                    </span>
                   </span>
                 </div>
-                <TalentGraph data={data} selected={open} onSelect={(id) => setParam({ id })} onHub={onHub} dim={loading} />
-                <div className="mt-3 border-t border-neutral-100 pt-3"><GraphLegend searching={searching} /></div>
+                <TalentGraph data={data} selected={open} onSelect={(id) => setParam({ id })} onHub={onHub} dim={loading} colorBy={colorBy} />
+                <div className="mt-3 border-t border-neutral-100 pt-3"><GraphLegend searching={searching} colorBy={colorBy} /></div>
               </div>
               <div className={`max-h-[860px] overflow-y-auto ${CARD}`}>
                 {chosen ? (
@@ -271,7 +317,7 @@ export default function Talent() {
                     <th className="px-3 py-2">Wants</th>
                     <th className="px-3 py-2">Experience</th>
                     <th className="px-3 py-2">City</th>
-                    <th className="px-3 py-2">{searching ? "Matched" : "Top skills"}</th>
+                    <th className="px-3 py-2">{searching ? "Matched" : "Style and skills"}</th>
                     <th className="px-3 py-2"><span className="sr-only">Shortlist</span></th>
                   </tr>
                 </thead>
@@ -281,13 +327,15 @@ export default function Talent() {
                       <td className="px-3 py-2.5 text-xs text-neutral-500 tnum">{i + 1}</td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-2">
-                          <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: intentColor(r.intent) }} title={intentLabel(r.intent)} />
+                          <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: dotColor(r, colorBy) }}
+                            title={colorBy === "style" ? STYLE_LABEL[r.traits?.style ?? ""] ?? "Work style not read" : intentLabel(r.intent)} />
                           <span className="font-semibold text-neutral-950">{r.name}</span>
+                          <SourceBadge r={r} />
                         </div>
-                        <div className="mt-0.5 line-clamp-1 max-w-[340px] text-xs text-neutral-500">{r.headline || [r.title, r.org].filter(Boolean).join(", ") || r.status || ""}</div>
+                        <div className="mt-0.5 line-clamp-1 max-w-[340px] text-xs text-neutral-500">{r.headline || [r.title, r.org].filter(Boolean).join(", ") || [r.course, r.college].filter(Boolean).join(", ") || r.status || ""}</div>
                       </td>
                       <td className="px-3 py-2.5 text-xs text-neutral-700">
-                        <div className="line-clamp-2 max-w-[220px]">{r.rolesWanted.slice(0, 2).join(", ") || "Not said"}</div>
+                        <div className="line-clamp-2 max-w-[220px]">{r.rolesWanted.slice(0, 2).join(", ") || (r.rolesAdjacent.length ? <span className="text-neutral-500">Fits: {r.rolesAdjacent.slice(0, 2).join(", ")}</span> : "Not said")}</div>
                         <div className="text-neutral-500">{r.types.map((t) => TYPE_LABEL[t] ?? t).join(", ")}</div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-xs text-neutral-700">{expText(r.expMonths)}{r.grad ? <div className="text-neutral-500">Grad {r.grad}</div> : null}</td>
@@ -296,7 +344,7 @@ export default function Talent() {
                         {searching ? (
                           <span className="font-semibold text-neutral-950">{r.matched} of {data.terms.length}<span className="ml-1 font-normal text-neutral-500">{r.hits.map((h) => h.term).join(", ")}</span></span>
                         ) : (
-                          <span className="text-neutral-600">{r.skills.slice(0, 4).map((s) => s.label).join(", ")}</span>
+                          <span className="text-neutral-600">{[r.traits?.style ? STYLE_LABEL[r.traits.style] : null, ...r.skills.slice(0, 3).map((s) => s.label)].filter(Boolean).join(", ")}</span>
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-right">
@@ -355,9 +403,10 @@ function Profile({ r, terms, onClose, listed, onToggle }: { r: WireResult; terms
     <div className="p-5">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="inline-block h-3 w-3 shrink-0 rounded-full" style={{ background: intentColor(r.intent) }} />
-            <span className="text-xs font-semibold text-neutral-600">{intentLabel(r.intent)}</span>
+            <span className="text-xs font-semibold text-neutral-600">{r.source === "call" ? intentLabel(r.intent) : "Old product, no call yet"}</span>
+            <SourceBadge r={r} />
           </div>
           <h2 className="mt-1 font-['Clash_Display'] text-2xl font-medium leading-tight text-neutral-950">{r.name}</h2>
           {r.headline && <p className="mt-1 text-sm text-neutral-700">{r.headline}</p>}
@@ -389,10 +438,12 @@ function Profile({ r, terms, onClose, listed, onToggle }: { r: WireResult; terms
         </Section>
       )}
 
+      <Beyond r={r} />
+
       <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3">
         <Fact k="Now" v={now || r.status} />
         <Fact k="Experience" v={expText(r.expMonths)} />
-        <Fact k="Education" v={[r.degree, r.degreeStatus === "pursuing" ? "pursuing" : null, r.grad ? `graduates ${r.grad}` : null].filter(Boolean).join(", ")} />
+        <Fact k="Education" v={[r.degree, r.college, r.degreeStatus === "pursuing" ? "pursuing" : null, r.grad ? `graduates ${r.grad}` : null].filter(Boolean).join(", ")} />
         <Fact k="Cities" v={[r.cities.slice(0, 4).join(", "), r.relocate === "yes" ? "will relocate" : r.relocate === "maybe" ? "might relocate" : null].filter(Boolean).join("; ")} />
         <Fact k="Wants" v={r.types.map((t) => TYPE_LABEL[t] ?? t).join(", ")} />
         <Fact k="Work mode" v={r.modes.map((m) => MODE_LABEL[m] ?? m).join(", ")} />
@@ -400,19 +451,18 @@ function Profile({ r, terms, onClose, listed, onToggle }: { r: WireResult; terms
         <Fact k="Can start" v={[r.from === "now" ? "Now" : r.from, r.notice ? `notice: ${r.notice}` : null].filter(Boolean).join(", ")} />
       </div>
 
-      {r.rolesWanted.length > 0 && (
-        <Section title="Roles they want">
+      {(r.rolesWanted.length > 0 || r.rolesAdjacent.length > 0) && (
+        <Section title={r.rolesWanted.length ? "Roles they want" : "Roles their resume fits (AI read)"}>
           <div className="flex flex-wrap gap-1.5">
             {r.rolesWanted.map((x) => <span key={x} className="rounded-full border-[1.5px] border-neutral-900 bg-violet-50 px-2 py-0.5 text-xs font-semibold">{x}</span>)}
             {r.rolesAdjacent.slice(0, 4).map((x) => <span key={x} className="rounded-full border border-neutral-300 px-2 py-0.5 text-xs text-neutral-600">{x}</span>)}
           </div>
           {r.sectors.length > 0 && <p className="mt-1.5 text-xs text-neutral-600">Sectors: {r.sectors.join(", ")}</p>}
-          {r.values.length > 0 && <p className="mt-0.5 text-xs text-neutral-600">What matters to them: {r.values.join(", ")}</p>}
         </Section>
       )}
 
       {r.summary && (
-        <Section title="From the call">
+        <Section title={r.source === "call" ? "From the call" : "Resume summary (AI read)"}>
           <p className="whitespace-pre-line text-sm leading-relaxed text-neutral-800">{r.summary}</p>
         </Section>
       )}
@@ -450,9 +500,9 @@ function Profile({ r, terms, onClose, listed, onToggle }: { r: WireResult; terms
         </Section>
       )}
 
-      {r.said.length > 0 && (
+      {r.saidSkills.length > 0 && (
         <Section title="Skills they described on the call">
-          <ul className="list-disc space-y-1 pl-4">{r.said.map((s, i) => <li key={i} className="text-sm text-neutral-800">{s}</li>)}</ul>
+          <ul className="list-disc space-y-1 pl-4">{r.saidSkills.map((s, i) => <li key={i} className="text-sm text-neutral-800">{s}</li>)}</ul>
         </Section>
       )}
 
@@ -462,7 +512,10 @@ function Profile({ r, terms, onClose, listed, onToggle }: { r: WireResult; terms
         </Section>
       )}
 
-      <p className="mt-6 text-[11px] text-neutral-400">Profile from {new Date(r.derivedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })}. In the student's own words, not checked by Studojo.</p>
+      <p className="mt-6 text-[11px] text-neutral-400">
+        {r.derivedAt ? `${r.source === "call" ? "Profile from the call of" : "Resume read on"} ${new Date(r.derivedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })}. ` : ""}
+        In the student's own words or read by our AI, not checked by Studojo.
+      </p>
     </div>
   );
 }
@@ -478,18 +531,116 @@ function Shortlist({ list, copied, onCopy, onRemove, onOpen, canOpen }: {
           {copied ? "Copied" : "Copy for the hiring manager"}
         </button>
       </div>
-      <p className="mt-1 text-xs text-neutral-500">Copies who they are, what they want and their skills as plain text. No email address or phone number. Kept in this browser only.</p>
+      <p className="mt-1 text-xs text-neutral-500">Copies who they are, what they want, their skills and work style as plain text. No email address or phone number. Kept in this browser only.</p>
+      {list.some((b) => !b.optedIn) && (
+        <p className="mt-2 rounded-lg border-2 border-amber-500 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+          {list.filter((b) => !b.optedIn).length} of {list.length} never chose to be found by hiring managers (old product):{" "}
+          {list.filter((b) => !b.optedIn).map((b) => b.name).join(", ")}. Ask them before you send this.
+        </p>
+      )}
       <ul className="mt-2 divide-y divide-neutral-100">
         {list.map((b) => (
           <li key={b.id} className="flex items-center gap-2 py-1.5 text-sm">
             <button type="button" onClick={() => onOpen(b.id)} disabled={!canOpen(b.id)} title={canOpen(b.id) ? "Open profile" : "Not in this search: clear the search to open"}
               className="min-w-0 flex-1 truncate text-left font-semibold text-neutral-900 enabled:hover:text-purple-700 disabled:cursor-default">
-              {b.name}<span className="ml-2 font-normal text-neutral-500">{b.headline}</span>
+              {b.name}{!b.optedIn && <span className="ml-1.5 text-[10px] font-bold uppercase text-amber-700">not opted in</span>}<span className="ml-2 font-normal text-neutral-500">{b.headline}</span>
             </button>
             <button type="button" onClick={() => onRemove(b.id)} aria-label={`Remove ${b.name}`} className="px-1 font-bold text-neutral-400 hover:text-red-600">×</button>
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/** Where a student came from, and whether they chose to be found by hiring managers. */
+function SourceBadge({ r }: { r: WireResult }) {
+  if (r.source === "call") return <span className="rounded border border-emerald-600 px-1 text-[10px] font-bold uppercase text-emerald-700" title="Took the Stu call and let hiring managers on Studojo find them">Call</span>;
+  return (
+    <span className="rounded border border-amber-500 px-1 text-[10px] font-bold uppercase text-amber-700"
+      title={r.optedIn ? "Old product; has opted in to hiring managers" : "Old product: never chose to be found by hiring managers. Ask before sharing."}>
+      {r.optedIn ? "Old product" : "Old product · not opted in"}
+    </span>
+  );
+}
+
+const words = (xs: string[]) => xs.map((x) => x.replace(/[-_]/g, " ")).join(", ");
+const lpa = (n: number) => `${Math.round((n / 100_000) * 10) / 10} LPA`;
+
+function Line({ k, children }: { k: string; children: ReactNode }) {
+  return (
+    <div className="text-sm text-neutral-800"><span className="text-xs font-semibold text-neutral-500">{k}: </span>{children}</div>
+  );
+}
+
+function Pills({ xs }: { xs: (string | null | undefined)[] }) {
+  const list = xs.filter((x): x is string => !!x);
+  if (!list.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {list.map((x) => <span key={x} className="rounded-full border-[1.5px] border-neutral-900 bg-white px-2 py-0.5 text-xs font-semibold">{x}</span>)}
+    </div>
+  );
+}
+
+/**
+ * TALENT-ALL: what an ATS cannot see. The call (why now, what matters, what they want from a team, what they rule out,
+ * whether their results carry numbers), the AI read of the resume (work style and the rest), the quiz (stage, clarity,
+ * risk, their best project in their words). Each block names where it came from.
+ */
+function Beyond({ r }: { r: WireResult }) {
+  const t = r.traits;
+  const q = r.quiz;
+  const s = r.said;
+  const nb = r.numbered;
+  const call = !!(s || r.values.length || nb.of >= 2);
+  if (!call && !t && !q) return null;
+  const quizLines = q && [q.stage, q.clarity, q.risk, q.size && q.size !== "any", q.companyStage, q.workMode, q.ctcMin, q.bestProject, q.outcome, q.dream.length, q.niche].some(Boolean);
+  return (
+    <div className="mt-5 rounded-xl border-2 border-neutral-900 bg-violet-50/60 p-4 shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]">
+      <h3 className="text-xs font-bold uppercase tracking-wide text-purple-700">What an ATS can't see</h3>
+
+      {call && (
+        <div className="mt-3 space-y-1.5">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">{r.source === "call" ? "From the call" : "In their words"}</div>
+          {s?.whyNow && <Line k="Why now">"{s.whyNow}"</Line>}
+          {r.values.length > 0 && <Line k="What matters to them">{r.values.join(", ")}</Line>}
+          {s?.wishes.map((w, i) => <Line key={i} k={`${WISH_LABEL[w.dim] ?? w.dim}${w.avoid ? " (avoid)" : ""}`}>"{w.text}"</Line>)}
+          {s && s.refuses.length > 0 && <Line k="Rules out">{s.refuses.join(", ")}</Line>}
+          {nb.of >= 2 && <Line k="Results with a number">{nb.n} of {nb.of} they told us about</Line>}
+        </div>
+      )}
+
+      {t && (
+        <div className="mt-4 space-y-2">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">Read from their resume by our AI, not checked</div>
+          {t.archetype && <div className="text-sm font-bold text-neutral-950">{t.archetype}</div>}
+          <Pills xs={[
+            t.style ? STYLE_LABEL[t.style] : null, t.ownership ? OWNERSHIP_LABEL[t.ownership] : null, t.ambiguity ? AMBIGUITY_LABEL[t.ambiguity] : null,
+            t.shape ? SHAPE_LABEL[t.shape] : null, t.pace ? PACE_LABEL[t.pace] : null, t.portfolio ? "Shows their work" : null, t.distributes ? "Builds and sells" : null,
+          ]} />
+          {t.numbers != null && <Line k="Resume bullets with a real number">{t.numbers}%</Line>}
+          {t.hook && <Line k="Strongest hook">{t.hook}</Line>}
+          {(t.stages.length > 0 || t.bestFit.length > 0) && <Line k="Best fit">{words([...t.stages, ...t.bestFit])}</Line>}
+          {t.avoid.length > 0 && <Line k="Poor fit">{words(t.avoid)}</Line>}
+          {t.archetypeWhy && <p className="text-xs leading-relaxed text-neutral-600">{t.archetypeWhy}</p>}
+        </div>
+      )}
+
+      {q && quizLines && (
+        <div className="mt-4 space-y-1.5">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">From the quiz</div>
+          <Pills xs={[q.clarity ? CLARITY_LABEL[q.clarity] : null, q.risk ? RISK_LABEL[q.risk] : null]} />
+          {q.stage && <Line k="Career stage">{q.stage}</Line>}
+          {(q.companyStage || (q.size && q.size !== "any")) && <Line k="Wants">{[q.companyStage, q.size && q.size !== "any" ? `${q.size} people` : null].filter(Boolean).join("; ")}</Line>}
+          {q.workMode && <Line k="Work mode">{q.workMode}</Line>}
+          {q.ctcMin != null && <Line k="Salary hoped for">{lpa(q.ctcMin)}{q.ctcMax ? ` to ${lpa(q.ctcMax)}` : "+"}</Line>}
+          {q.bestProject && <Line k="Best project, in their words">"{q.bestProject}"</Line>}
+          {q.outcome && <Line k="Proudest result, in their words">"{q.outcome}"</Line>}
+          {q.dream.length > 0 && <Line k="Dream companies">{q.dream.join(", ")}</Line>}
+          {q.niche && <Line k="Niche">{q.niche}</Line>}
+        </div>
+      )}
     </div>
   );
 }

@@ -3,11 +3,11 @@
  * experience, grad year, budget and intent, with the graph of who matches what. Read only, admin only.
  *
  * GET /api/talent?q=<words>[&city=<key>][&type=internship|full_time][&exp=fresher|1-3|3+][&grad=YYYY][&active=1]
- *     [&budget=<key>][&relocate=0][&internal=1][&fresh=1]
+ *     [&budget=<key>][&relocate=0][&src=call|old][&optin=1][&traits=<key>,<key>][&internal=1][&fresh=1]
  */
 import type { Route } from "./+types/api.talent";
 import { requireAdmin } from "~/lib/auth-helper.server";
-import { BUDGETS, DEFAULT_FILTERS, type ExpFilter, type Filters, type TypeFilter, cityKey } from "~/lib/talent/model";
+import { BUDGETS, DEFAULT_FILTERS, type ExpFilter, type Filters, type SourceFilter, TRAITS, type TypeFilter, cityKey } from "~/lib/talent/model";
 import { talentSearch } from "~/lib/talent/talent.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -28,6 +28,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     active: p.get("active") === "1",
     budget: BUDGETS.some((b) => b.key === budget) ? budget : "",
     relocate: p.get("relocate") !== "0",
+    src: (["call", "old"].includes(p.get("src") || "") ? p.get("src") : "all") as SourceFilter,
+    optin: p.get("optin") === "1",
+    traits: (p.get("traits") || "").split(",").filter((k) => TRAITS.some((t) => t.key === k)),
   };
   try {
     const out = await talentSearch(f, p.get("internal") === "1", p.get("fresh") === "1");

@@ -5,15 +5,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  DEFAULT_FILTERS, askIn, briefOf, cityKey, expText, graphOf, layout, matchTerm, parseTerms, passes, roleKey, search, shortlistText,
-  skillKey, skillName, skillsOf, vocabOf,
+  DEFAULT_FILTERS, TRAITS, askIn, scrubContacts, briefOf, cityKey, expText, fromOld, graphOf, layout, matchTerm, parseTerms, passes, quizFrom, roleKey, saidFrom,
+  search, shortlistText, skillKey, skillName, skillsOf, traitsFrom, vocabOf,
 } from "../app/lib/talent/model.ts";
 
 const skill = (name, src = "resume") => ({ kind: "skill", text: `${name}: listed on the resume: ${name}`, org: null, when: null, qty: null, src });
 const claim = (kind, text, over = {}) => ({ kind, text, org: null, when: null, qty: null, src: "call", ...over });
 let n = 0;
 const cand = (over = {}) => ({
-  id: `u${++n}`, name: "Test Person", email: "test@example.com", headline: null, summary: null, title: null, org: null, status: null,
+  id: `u${++n}`, source: "call", optedIn: true, college: null, course: null, year: null, traits: null, quiz: null, said: null,
+  name: "Test Person", email: "test@example.com", headline: null, summary: null, title: null, org: null, status: null,
   expMonths: null, cities: [], relocate: null, modes: [], types: [], payText: null, fixedMin: null, stipendMin: null, notice: null, from: null,
   intent: null, degreeStatus: null, degree: null, grad: null, rolesWanted: [], rolesAdjacent: [], sectors: [], values: [], derivedAt: 0, claims: [],
   ...over,
@@ -191,12 +192,14 @@ test("words: experience and the shortlist text carry no email or phone", () => {
   assert.equal(expText(8), "8 months");
   assert.equal(expText(18), "1.5 years");
   const c = cand({ name: "Asha Example", headline: "Analyst", email: "asha@example.com", cities: ["Pune"], rolesWanted: ["Data Analyst"], types: ["internship"], grad: 2026, expMonths: 6 });
-  const brief = briefOf({ ...c, skills: [{ key: "sql", label: "SQL" }] });
+  const brief = briefOf({ ...c, skills: [{ key: "sql", label: "SQL" }], traits: traitsFrom({ execution_style: "builder-first", strongest_hook: "Shipped a made-up app to 500 users." }) });
   assert.equal("email" in brief, false, "the shortlist keeps no email");
   const text = shortlistText([brief]);
   assert.match(text, /^1\. Asha Example: Analyst/);
   assert.match(text, /Wants: Data Analyst \(Internship\)/);
   assert.match(text, /Skills: SQL/);
+  assert.match(text, /Work style: Builder/);
+  assert.match(text, /Why them: Shipped a made-up app/);
   assert.doesNotMatch(text, /@|\+91|\d{10}/);
 });
 
@@ -217,4 +220,119 @@ test("wiring: the API is admin only, the page is routed and in the menu, the sho
   assert.match(server, /'link' = 'true'/, "only public pages");
   assert.match(server, /'managers' = 'true'/, "only students who let hiring managers find them");
   assert.match(server, /accessMode: "read only"/);
+});
+
+test("TALENT-ALL resume read: spellings fold, a sentence-long archetype is a reason, nothing read is null", () => {
+  const t = traitsFrom({ execution_style: "builder_first", breadth_vs_depth: "T_shaped", ownership_orientation: "end-to-end", ambiguity_tolerance: "High",
+    trajectory_speed: "unknown", achievement_density: 140, has_portfolio_signal: true, distribution_signal: false, company_stage_fit: ["seed", "seed", "series-a"],
+    archetype_label: "Finance professional experienced in portfolio operations and investment-analysis workflows within institutional environments." });
+  assert.equal(t.style, "builder-first");
+  assert.equal(t.shape, "t-shaped");
+  assert.equal(t.ambiguity, "high");
+  assert.equal(t.pace, null, "unknown is not a pace");
+  assert.equal(t.numbers, 100, "clamped to 0..100");
+  assert.equal(t.archetype, null);
+  assert.match(t.archetypeWhy, /^Finance professional/);
+  assert.deepEqual(t.stages, ["seed", "series-a"]);
+  assert.equal(traitsFrom({ top_skills: ["Python"], domain: "data" }), null, "skills alone are not a read");
+  assert.equal(traitsFrom(null), null);
+});
+
+test("TALENT-ALL quiz: clarity from either quiz, salary in lakh or rupees, dream companies split, nothing answered is null", () => {
+  const q = quizFrom({ risk_tolerance: "high", clarity: "low", salary_expectations: { currency: "INR", min_annual_ctc: 6, max_annual_ctc: 900000 } },
+    { clarity: "I know exactly, give me precise controls", career_stage: "Recent graduate (0-2 years exp.)", dream_companies: "Acme, Sample Corp" },
+    { best_project: "Made-up: a bot that books lab slots.", outcome: "" }, ["Demo Ventures"]);
+  assert.equal(q.clarity, "high", "the later quiz wins");
+  assert.equal(q.risk, "high");
+  assert.equal(q.ctcMin, 600000, "6 means 6 lakh");
+  assert.equal(q.ctcMax, 900000);
+  assert.deepEqual(q.dream, ["Demo Ventures", "Acme", "Sample Corp"]);
+  assert.equal(q.outcome, null);
+  assert.equal(quizFrom({}, null, {}, null), null);
+  assert.equal(quizFrom({ salary_expectations: { currency: "USD", min_annual_ctc: 50000 } }, null, null, null), null, "not rupees: not shown");
+});
+
+test("TALENT-ALL call: wishes in a fixed order, repeats once, values stay out (they are chips)", () => {
+  const s = saidFrom(" To work somewhere I own things ", [
+    { dim: "value", avoid: false, text: "learning" },
+    { dim: "other", avoid: false, text: "Wants a mentor" },
+    { dim: "culture", avoid: true, text: "No 12-hour days" },
+    { dim: "team", avoid: false, text: "Small team" },
+    { dim: "team", avoid: false, text: "small team" },
+  ], ["Sales", "Sales"]);
+  assert.equal(s.whyNow, "To work somewhere I own things");
+  assert.deepEqual(s.wishes.map((w) => w.dim), ["culture", "team", "other"]);
+  assert.equal(s.wishes[0].avoid, true);
+  assert.deepEqual(s.refuses, ["Sales"]);
+  assert.equal(saidFrom(null, [], []), null);
+});
+
+test("TALENT-ALL old product: a Candidate from the resume read, quiz and profile", () => {
+  const c = fromOld({
+    id: "o1", name: null, email: "x@example.com", created: 5, optedIn: false, summary: null, flex: { why_now: "Made-up reason." },
+    rp: { archetype_label: "Zero-to-One Builder", execution_style: "builder-first", experience_years: 1.5, top_skills: ["Python", "SQL"],
+      most_recent_stack: ["Python"], likely_roles: ["Data Analyst"], geography: { city: "Bangalore" }, candidate_pitch: "Made-up pitch." },
+    targetRoles: ["Growth Intern"], industries: ["fintech"], dream: null, answers: { job_type: "Internship", location: "Remote" },
+    prefs: { locations: ["Pune", "Remote"], work_mode: "flexible", industry_interests: ["fintech", "ai"] }, skills: ["Excel"],
+    college: "Sample College", course: "BBA", year: "Class of 2026",
+  });
+  assert.equal(c.source, "old");
+  assert.equal(c.optedIn, false);
+  assert.equal(c.name, "A Studojo student");
+  assert.equal(c.headline, "Zero-to-One Builder");
+  assert.equal(c.summary, "Made-up pitch.", "the pitch when there is no profile summary");
+  assert.equal(c.expMonths, 18);
+  assert.deepEqual(c.cities, ["Pune", "Bangalore"], "wanted first, remote is not a city");
+  assert.deepEqual(c.modes, ["flexible"]);
+  assert.deepEqual(c.types, ["internship"]);
+  assert.equal(c.grad, 2026);
+  assert.deepEqual(c.rolesWanted, ["Growth Intern"]);
+  assert.deepEqual(c.rolesAdjacent, ["Data Analyst"]);
+  assert.deepEqual(c.sectors, ["fintech", "ai"]);
+  assert.deepEqual(skillsOf(c).map((s) => s.label), ["Python", "SQL", "Excel"]);
+  assert.equal(c.said.whyNow, "Made-up reason.");
+  assert.equal(matchTerm(c, skillsOf(c), { key: "remote", label: "Remote", kind: "mode" }).detail, "Flexible");
+  assert.equal(matchTerm(c, skillsOf(c), { key: "sample college", label: "sample college", kind: "text" }).where, "College");
+  const bare = fromOld({ id: "o2", name: "Made Up", email: null, created: null, optedIn: false, summary: null, flex: null, rp: null, targetRoles: null,
+    industries: null, dream: null, answers: null, prefs: null, skills: null, college: "Sample College", course: null, year: "Second year" });
+  assert.equal(bare.traits, null);
+  assert.equal(bare.quiz, null);
+  assert.equal(bare.grad, null);
+});
+
+test("TALENT-ALL filters: source, opted in, and traits that need the signal present", () => {
+  const builder = cand({ traits: traitsFrom({ execution_style: "builder-first", ownership_orientation: "end-to-end", achievement_density: 60 }) });
+  const old = cand({ source: "old", optedIn: false, quiz: quizFrom({ risk_tolerance: "high", company_size: "1-50" }, null, null, null) });
+  const counted = cand({ claims: [claim("outcome", "Grew a made-up page to 4,000 followers"), claim("outcome", "Ran the fest", { qty: "3 days" }), claim("outcome", "Helped out")] });
+  const none = cand();
+  const keys = (f) => [builder, old, counted, none].filter((c) => passes(c, F(f))).map((c) => c.id);
+  assert.deepEqual(keys({ src: "old" }), [old.id]);
+  assert.deepEqual(keys({ optin: true }), [builder.id, counted.id, none.id]);
+  assert.deepEqual(keys({ traits: ["builder", "owner"] }), [builder.id], "every trait required");
+  assert.deepEqual(keys({ traits: ["numbers"] }), [builder.id, counted.id], "60% of bullets, or 2 of 3 call results with a number");
+  assert.deepEqual(keys({ traits: ["risk", "startup"] }), [old.id]);
+  assert.deepEqual(keys({ traits: ["clear"] }), [], "a student we know nothing about is not shown for a trait");
+  assert.ok(TRAITS.every((t) => t.label && t.hint && !/[\u2013\u2014]/.test(t.label + t.hint)));
+});
+
+test("TALENT-ALL ranking: on a tie, opted-in students first", () => {
+  const a = cand({ id: "old-a", source: "old", optedIn: false, rolesWanted: ["Data Analyst"] });
+  const b = cand({ id: "call-b", rolesWanted: ["Data Analyst"] });
+  const t = [{ key: "data analyst", label: "data analyst", kind: "text" }];
+  assert.deepEqual(search([a, b], t, F()).map((r) => r.c.id), ["call-b", "old-a"]);
+});
+
+test("TALENT-ALL wiring: explicit opt-outs left out, no resume text or contact read from the old product", () => {
+  const server = readFileSync(new URL("../app/lib/talent/talent.server.ts", import.meta.url), "utf8");
+  assert.match(server, /if \(p\?\.has_page && !p\.opted\) continue/);
+  assert.doesNotMatch(server, /resume_text|personal_info'->'(email|phone)|personal_info->>'(email|phone)'/);
+  assert.match(server, /resume_profile - 'name' - 'location'/);
+});
+
+test("TALENT-ALL contacts: emails and Indian mobile numbers hidden in their words, counts and years kept", () => {
+  assert.equal(scrubContacts("Mail me at made.up@example.com or call 98765 43210."), "Mail me at (email hidden) or call (phone hidden).");
+  assert.equal(scrubContacts("+91-9876543210"), "(phone hidden)");
+  assert.equal(scrubContacts("Grew it from 2,000 to 40,000 followers in 2024 with 6000000 views"), "Grew it from 2,000 to 40,000 followers in 2024 with 6000000 views");
+  const q = quizFrom({}, null, { best_project: "Built a bot, demo at made.up@example.com" }, null);
+  assert.equal(q.bestProject, "Built a bot, demo at (email hidden)");
 });
