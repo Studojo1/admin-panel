@@ -10,19 +10,25 @@
 // before it copies them), and every profile has "What an ATS can't see": the call (why now, values, what they want from
 // a team, what they refuse), the resume read (work style, ownership, ambiguity, pace, numbers, shows their work) and the
 // quiz (career stage, clarity, risk, their best project in their words). Those traits filter too, and colour the graph.
-// The filters live in the URL (?q, city, type, exp, grad, active, budget, relocate, src, optin, traits, color, internal)
-// and ?id opens a profile.
+// TALENT-NET (12 Nov 2026, the owner: "need our mapping to be more accurate and on the top show a bar with total number
+// of students, the graph should be like a neural network, where if i click then go deeper to see each student"): a bar
+// of counts on top (everyone, the call against the old product, opted in, actively looking, then what the search
+// shows, and the split by career family), and the graph is a network: everyone, then career families, then roles,
+// then the best students of a role. Every student sits in one family and role (app/lib/talent/families.ts), with why.
+// The filters live in the URL (?q, city, type, exp, grad, active, budget, relocate, src, optin, traits, fam, role,
+// color, internal) and ?id opens a profile.
 // Read only (/api/talent, app/lib/talent).
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { AdminHeader } from "~/components";
 import { KIT_CSS } from "~/components/stu/overview-kit";
 import { CARD } from "~/components/stu/ui";
-import { type ColorBy, GraphLegend, TalentGraph, dotColor, intentColor } from "~/components/talent/talent-graph";
+import { type ColorBy, GraphLegend, TalentNet, dotColor, intentColor } from "~/components/talent/talent-graph";
 import { useAdminGuard } from "~/lib/auth-guard";
 import { fetchTalent } from "~/lib/talent/client";
+import { FAMILY_ORDER } from "~/lib/talent/families";
 import {
-  AMBIGUITY_LABEL, BUDGETS, CLARITY_LABEL, DEFAULT_FILTERS, type Brief, type ExpFilter, type Filters, type Hub, MODE_LABEL, OWNERSHIP_LABEL,
+  AMBIGUITY_LABEL, BUDGETS, CLARITY_LABEL, DEFAULT_FILTERS, type Brief, type ExpFilter, type Filters, MODE_LABEL, OWNERSHIP_LABEL,
   PACE_LABEL, RISK_LABEL, SHAPE_LABEL, STYLE_LABEL, type SourceFilter, TRAITS, TYPE_LABEL, type TypeFilter, WISH_LABEL, askText, briefOf, expText,
   intentLabel, shortlistText,
 } from "~/lib/talent/model";
@@ -70,7 +76,10 @@ export default function Talent() {
     src: (["call", "old"].includes(params.get("src") || "") ? params.get("src") : "all") as SourceFilter,
     optin: params.get("optin") === "1",
     traits: (params.get("traits") || "").split(",").filter((k) => TRAITS.some((t) => t.key === k)),
+    fam: FAMILY_ORDER.includes(params.get("fam") as never) ? (params.get("fam") as string) : "",
+    role: "",
   };
+  filters.role = filters.fam && (params.get("role") || "").startsWith(`${filters.fam}/`) ? (params.get("role") as string) : "";
   const internal = params.get("internal") === "1";
   const colorBy: ColorBy = params.get("color") === "style" ? "style" : "intent";
   const toggleTrait = (k: string) => {
@@ -131,11 +140,8 @@ export default function Talent() {
     }
   };
 
-  const onHub = (h: Hub) => {
-    if (h.kind === "term") return;
-    const words = filters.q.trim();
-    setParam({ q: words ? `${words}, ${h.label}` : h.label, id: null });
-  };
+  const openFam = (k: string) => setParam({ fam: k || null, role: null, id: null });
+  const openRole = (k: string) => setParam({ role: k || null, id: null });
 
   if (isPending || isAuthorized === null) {
     return <div className="flex min-h-screen items-center justify-center bg-neutral-50 text-neutral-500">Loading...</div>;
@@ -146,6 +152,8 @@ export default function Talent() {
   const chosen = results.find((r) => r.id === open) ?? null;
   const searching = (data?.terms.length ?? 0) > 0;
   const envName = data ? (data.env === "staging" ? "Staging" : "Production") : "";
+  const listFam = data?.net.families.find((f) => f.key === data.fam) ?? null;
+  const listRole = listFam?.roles.find((x) => x.key === data?.role) ?? null;
   const filtered = !!(filters.city || filters.type !== "any" || filters.exp !== "any" || filters.grad != null || filters.active || filters.budget ||
     filters.src !== "all" || filters.optin || filters.traits.length);
 
@@ -159,12 +167,7 @@ export default function Talent() {
             <div className="text-xs font-bold uppercase tracking-wide text-purple-700">Stu · For hiring managers</div>
             <h1 className="font-['Clash_Display'] text-3xl font-medium tracking-tight text-neutral-950 md:text-4xl">Talent search</h1>
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-neutral-500">
-              <span>
-                {data
-                  ? `${data.pool.toLocaleString("en-IN")} students: ${data.called.toLocaleString("en-IN")} took the call and let hiring managers find them, ${(data.pool - data.called).toLocaleString("en-IN")} from the old product. `
-                  : ""}
-                Profiles come from the call, the resume and the quiz, in their words or read by our AI; nothing here is checked by us.
-              </span>
+              <span>Profiles come from the call, the resume and the quiz, in their words or read by our AI; nothing here is checked by us.</span>
               {envName && (
                 <span className={`rounded-full border-2 px-2 py-0.5 text-[11px] font-bold ${data?.env === "production" ? "border-emerald-600 text-emerald-700" : "border-amber-500 text-amber-700"}`}>{envName}</span>
               )}
@@ -174,6 +177,8 @@ export default function Talent() {
             {loading ? "Loading..." : "Refresh"}
           </button>
         </div>
+
+        {data && data.live && <TopBar data={data} narrowed={searching || filtered || !!filters.fam} fam={filters.fam} onFam={openFam} />}
 
         <form className="mt-5 flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); setParam({ q: draft.trim() || null, id: null }); }}>
           <input type="search" value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="What the hiring manager needs"
@@ -225,7 +230,7 @@ export default function Talent() {
           <label className="flex items-center gap-1.5 rounded-lg border-2 border-neutral-900 bg-white px-2 py-1.5">
             <input type="checkbox" checked={internal} onChange={(e) => setParam({ internal: e.target.checked ? "1" : null })} /> Include internal
           </label>
-          {(filtered || filters.q) && (
+          {(filtered || filters.q || filters.fam) && (
             <button type="button" onClick={() => setParams(new URLSearchParams(), { replace: true })} className="font-semibold text-purple-700 hover:underline">Clear all</button>
           )}
         </div>
@@ -272,30 +277,32 @@ export default function Talent() {
 
         {data && data.live && (
           <>
-            <div className="mt-4 grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+            <div className="mt-4 grid gap-6 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
               <div className={`p-4 ${CARD}`}>
                 <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                   <h2 className="text-base font-bold text-neutral-950">
-                    {searching ? `${data.total.toLocaleString("en-IN")} student${data.total === 1 ? "" : "s"} match` : "The pool by skill and wanted role"}
+                    {searching || filtered ? `${data.total.toLocaleString("en-IN")} student${data.total === 1 ? "" : "s"} by career family and role` : "Everyone by career family and role"}
                   </h2>
                   <span className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
-                    {data.total > data.results.length ? `The graph and list show the best ${data.results.length}` : `${data.graph.links.length} on the graph`}
+                    Dots:
                     <span className="seg" role="group" aria-label="Colour dots by">
                       <button type="button" aria-pressed={colorBy === "intent"} onClick={() => setParam({ color: null })}>Looking?</button>
                       <button type="button" aria-pressed={colorBy === "style"} onClick={() => setParam({ color: "style" })}>Work style</button>
                     </span>
                   </span>
                 </div>
-                <TalentGraph data={data} selected={open} onSelect={(id) => setParam({ id })} onHub={onHub} dim={loading} colorBy={colorBy} />
-                <div className="mt-3 border-t border-neutral-100 pt-3"><GraphLegend searching={searching} colorBy={colorBy} /></div>
+                <TalentNet data={data} fam={filters.fam} role={filters.role} selected={open} colorBy={colorBy} dim={loading}
+                  onFam={openFam} onRole={openRole} onStudent={(id) => setParam({ id })} />
+                <div className="mt-3 border-t border-neutral-100 pt-3"><GraphLegend colorBy={colorBy} /></div>
               </div>
               <div className={`max-h-[860px] overflow-y-auto ${CARD}`}>
                 {chosen ? (
-                  <Profile r={chosen} terms={data.terms.length} onClose={() => setParam({ id: null })} listed={listed.has(chosen.id)} onToggle={() => toggle(chosen)} />
+                  <Profile r={chosen} terms={data.terms.length} onClose={() => setParam({ id: null })} listed={listed.has(chosen.id)} onToggle={() => toggle(chosen)}
+                    onPlace={(fam, role) => setParam({ fam, role, id: chosen.id })} />
                 ) : (
                   <div className="p-6 text-sm text-neutral-500">
                     <div className="font-semibold text-neutral-800">Pick a student</div>
-                    Click a dot on the graph or a row below to see their profile here.
+                    Open a family, then a role, and click a student on the graph, or click a row below, to see their profile here.
                     {shortlist.length > 0 && <Shortlist list={shortlist} copied={copied} onCopy={copy} onRemove={(id) => { const n = shortlist.filter((b) => b.id !== id); setShortlist(n); saveShortlist(n); }} onOpen={(id) => setParam({ id })} canOpen={(id) => results.some((r) => r.id === id)} />}
                   </div>
                 )}
@@ -308,7 +315,11 @@ export default function Talent() {
               </div>
             )}
 
-            <div className={`relative mt-6 overflow-x-auto ${CARD}`}>
+            <h2 className="mt-6 mb-2 text-base font-bold text-neutral-950">
+              {data.counts.shown.n > results.length ? `The best ${results.length} of ${data.counts.shown.n.toLocaleString("en-IN")}` : `${results.length} student${results.length === 1 ? "" : "s"}`}
+              {listFam ? <span className="font-semibold text-purple-700"> in {listFam.label}{listRole ? ` › ${listRole.label}` : ""}</span> : null}
+            </h2>
+            <div className={`relative overflow-x-auto ${CARD}`}>
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500">
                   <tr>
@@ -336,6 +347,7 @@ export default function Talent() {
                       </td>
                       <td className="px-3 py-2.5 text-xs text-neutral-700">
                         <div className="line-clamp-2 max-w-[220px]">{r.rolesWanted.slice(0, 2).join(", ") || (r.rolesAdjacent.length ? <span className="text-neutral-500">Fits: {r.rolesAdjacent.slice(0, 2).join(", ")}</span> : "Not said")}</div>
+                        <div className="mt-0.5 max-w-[220px] truncate text-[11px] font-semibold text-purple-700" title={r.place.why}>{r.place.familyLabel} · {r.place.roleLabel}</div>
                         <div className="text-neutral-500">{r.types.map((t) => TYPE_LABEL[t] ?? t).join(", ")}</div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-xs text-neutral-700">{expText(r.expMonths)}{r.grad ? <div className="text-neutral-500">Grad {r.grad}</div> : null}</td>
@@ -394,7 +406,9 @@ const srcChip = (src: string) => (
   <span className="ml-1.5 rounded border border-neutral-200 px-1 py-px text-[10px] font-semibold text-neutral-500">{src === "call" ? "Said on the call" : src === "resume" ? "Resume" : src}</span>
 );
 
-function Profile({ r, terms, onClose, listed, onToggle }: { r: WireResult; terms: number; onClose: () => void; listed: boolean; onToggle: () => void }) {
+function Profile({ r, terms, onClose, listed, onToggle, onPlace }: {
+  r: WireResult; terms: number; onClose: () => void; listed: boolean; onToggle: () => void; onPlace: (fam: string, role: string) => void;
+}) {
   const [contact, setContact] = useState(false);
   useEffect(() => setContact(false), [r.id]);
   const matchedSkills = new Set(r.hits.filter((h) => h.where === "Skill").map((h) => h.detail.toLowerCase()));
@@ -424,6 +438,8 @@ function Profile({ r, terms, onClose, listed, onToggle }: { r: WireResult; terms
           {contact ? r.email || "No email" : "Show email (staff only)"}
         </button>
       </div>
+
+      <Placed r={r} onPlace={onPlace} />
 
       {terms > 0 && r.hits.length > 0 && (
         <Section title={`Why they match: ${r.matched} of ${terms}`}>
@@ -640,6 +656,91 @@ function Beyond({ r }: { r: WireResult }) {
           {q.dream.length > 0 && <Line k="Dream companies">{q.dream.join(", ")}</Line>}
           {q.niche && <Line k="Niche">{q.niche}</Line>}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * TALENT-NET: the bar on top. Everyone Talent search reads, the call against the old product, who opted in to hiring
+ * managers, who is actively looking; then the same for what the search, filters and open family or role show; then the
+ * split by career family of everyone the search found (click a part to open that family in the network).
+ */
+function TopBar({ data, narrowed, fam, onFam }: { data: TalentEnvelope; narrowed: boolean; fam: string; onFam: (k: string) => void }) {
+  const a = data.counts.all;
+  const s = data.counts.shown;
+  const n = (x: number) => x.toLocaleString("en-IN");
+  return (
+    <section aria-label="Students in Talent search" className="mt-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Tile k="Students" v={n(a.n)} sub={data.hidden ? `${n(data.hidden)} internal accounts left out` : "everyone Talent search reads"} />
+        <Tile k="Took the call" v={n(a.call)} sub={`against ${n(a.old)} from the old product`} />
+        <Tile k="Opted in to hiring managers" v={n(a.optedIn)} sub={`${a.n ? Math.round((a.optedIn / a.n) * 100) : 0}% of everyone`} />
+        <Tile k="Actively looking" v={n(a.active)} sub="said so on the call" />
+      </div>
+      <p className="mt-3 text-sm text-neutral-700" aria-live="polite">
+        {narrowed ? (
+          <>
+            <b className="text-neutral-950">Showing {n(s.n)} of {n(a.n)}</b>: {n(s.call)} took the call, {n(s.old)} from the old product, {n(s.optedIn)} opted in,{" "}
+            {n(s.active)} actively looking.
+          </>
+        ) : "Showing everyone. Search, filter or open a family below to narrow it."}
+      </p>
+      <FamilyBar data={data} fam={fam} onFam={onFam} />
+    </section>
+  );
+}
+
+function Tile({ k, v, sub }: { k: string; v: string; sub: string }) {
+  return (
+    <div className={`px-4 py-3 ${CARD}`}>
+      <div className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">{k}</div>
+      <div className="tnum font-['Clash_Display'] text-3xl font-medium leading-tight text-neutral-950">{v}</div>
+      <div className="text-xs text-neutral-500">{sub}</div>
+    </div>
+  );
+}
+
+/** One thin bar, a part per career family, sized by students: one hue with gaps, the open family dark. */
+function FamilyBar({ data, fam, onFam }: { data: TalentEnvelope; fam: string; onFam: (k: string) => void }) {
+  const net = data.net;
+  if (!net.n) return null;
+  return (
+    <div className="mt-2">
+      <div className="mb-1 flex flex-wrap justify-between gap-2 text-[11px] text-neutral-500">
+        <span className="font-bold uppercase tracking-wide">{data.terms.length || data.total < data.pool ? "This search by career family" : "By career family"}</span>
+        <span>Click a part to open it</span>
+      </div>
+      <div className="flex h-7 w-full gap-[2px] overflow-hidden rounded-lg border-2 border-neutral-900 bg-white" role="group" aria-label="Students by career family">
+        {net.families.map((f) => {
+          const share = Math.round((f.n / net.n) * 100);
+          const on = fam === f.key;
+          const tone = on ? "bg-purple-600 text-white" : f.key === "none" ? "bg-neutral-200 text-neutral-700 hover:bg-neutral-300" : f.key === "other" ? "bg-neutral-100 text-neutral-700 hover:bg-neutral-200" : "bg-violet-200 text-neutral-900 hover:bg-violet-300";
+          return (
+            <button key={f.key} type="button" onClick={() => onFam(on ? "" : f.key)} aria-pressed={on}
+              title={`${f.label}: ${f.n.toLocaleString("en-IN")} students, ${share}%`} aria-label={`${f.label}: ${f.n} students, ${share}%`}
+              style={{ flexGrow: f.n, flexBasis: 0 }} className={`min-w-[3px] truncate px-1.5 text-left text-[11px] font-semibold ${tone}`}>
+              {f.n / net.n >= 0.07 ? `${f.short} ${share}%` : ""}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** TALENT-NET: where the student sits in the network and why; a click opens that family and role on the graph. */
+function Placed({ r, onPlace }: { r: WireResult; onPlace: (fam: string, role: string) => void }) {
+  const p = r.place;
+  return (
+    <div className="mt-3 rounded-xl border-[1.5px] border-neutral-300 bg-neutral-50 px-3 py-2">
+      <div className="text-sm">
+        <span className="mr-1.5 text-[11px] font-bold uppercase tracking-wide text-neutral-500">Placed in</span>
+        <button type="button" onClick={() => onPlace(p.family, p.role)} className="font-semibold text-purple-700 hover:underline">{p.familyLabel} › {p.roleLabel}</button>
+      </div>
+      <div className="mt-0.5 text-xs text-neutral-600">{p.why}</div>
+      {p.also.length > 0 && (
+        <div className="mt-0.5 text-xs text-neutral-600">Also fits: {p.also.map((a) => (a.family === p.family ? a.roleLabel : `${a.familyLabel} (${a.roleLabel})`)).join(", ")}</div>
       )}
     </div>
   );

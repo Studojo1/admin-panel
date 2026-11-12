@@ -1,7 +1,18 @@
 // What /api/talent sends the page (talent.server.ts builds it, client.ts reads it).
-import type { Candidate, Claim, GraphIn, Hit, Skill, Term } from "./model";
+import type { Counts, Fam, Net } from "./families";
+import type { Candidate, Claim, Hit, Skill, Term } from "./model";
 
-export interface WireResult extends Omit<Candidate, "claims"> {
+/** TALENT-NET: where a student sits in the network, and why. */
+export interface WirePlace {
+  family: Fam;
+  familyLabel: string;
+  role: string;
+  roleLabel: string;
+  why: string;
+  also: { family: Fam; familyLabel: string; role: string; roleLabel: string }[];
+}
+
+export interface WireResult extends Omit<Candidate, "claims" | "canon"> {
   skills: Skill[];
   roles: Claim[];
   outcomes: Claim[];
@@ -14,6 +25,7 @@ export interface WireResult extends Omit<Candidate, "claims"> {
   hits: Hit[];
   matched: number;
   score: number;
+  place: WirePlace;
 }
 
 export interface TalentEnvelope {
@@ -22,17 +34,19 @@ export interface TalentEnvelope {
   live: boolean;
   /** Students searched (internal accounts left out unless asked). */
   pool: number;
-  /** Of them, took the Stu call. */
-  called: number;
-  /** Of them, let hiring managers on Studojo find them. */
-  optedIn: number;
   /** Internal accounts left out. */
   hidden: number;
-  /** Students this search found; results holds the first 60. */
+  /** TALENT-NET: the top bar. Everyone searched, and what the search, filters and open family or role show. */
+  counts: { all: Counts; shown: Counts };
+  /** Students this search found (before the open family or role); results holds the first 60 of those shown. */
   total: number;
   terms: Term[];
   results: WireResult[];
-  graph: GraphIn;
+  /** The network of everyone this search found: families, roles, counts. */
+  net: Net;
+  /** The open family and role these results were narrowed to ("" for none). */
+  fam: string;
+  role: string;
   cities: { key: string; label: string; n: number }[];
   grads: number[];
   ms: number;

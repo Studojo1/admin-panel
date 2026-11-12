@@ -3,10 +3,13 @@
  * experience, grad year, budget and intent, with the graph of who matches what. Read only, admin only.
  *
  * GET /api/talent?q=<words>[&city=<key>][&type=internship|full_time][&exp=fresher|1-3|3+][&grad=YYYY][&active=1]
- *     [&budget=<key>][&relocate=0][&src=call|old][&optin=1][&traits=<key>,<key>][&internal=1][&fresh=1]
+ *     [&budget=<key>][&relocate=0][&src=call|old][&optin=1][&traits=<key>,<key>][&fam=<family>][&role=<family>/<role>]
+ *     [&internal=1][&fresh=1]
+ * TALENT-NET (12 Nov 2026): fam and role open a family and a role of the network; they narrow the list, not the network.
  */
 import type { Route } from "./+types/api.talent";
 import { requireAdmin } from "~/lib/auth-helper.server";
+import { FAMILY_ORDER } from "~/lib/talent/families";
 import { BUDGETS, DEFAULT_FILTERS, type ExpFilter, type Filters, type SourceFilter, TRAITS, type TypeFilter, cityKey } from "~/lib/talent/model";
 import { talentSearch } from "~/lib/talent/talent.server";
 
@@ -18,6 +21,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const exp = p.get("exp") || "any";
   const grad = Number(p.get("grad"));
   const budget = p.get("budget") || "";
+  const fam = FAMILY_ORDER.includes(p.get("fam") as never) ? (p.get("fam") as string) : "";
+  const role = (p.get("role") || "").slice(0, 80);
   const f: Filters = {
     ...DEFAULT_FILTERS,
     q: (p.get("q") || "").slice(0, 200),
@@ -31,6 +36,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     src: (["call", "old"].includes(p.get("src") || "") ? p.get("src") : "all") as SourceFilter,
     optin: p.get("optin") === "1",
     traits: (p.get("traits") || "").split(",").filter((k) => TRAITS.some((t) => t.key === k)),
+    fam,
+    role: fam && role.startsWith(`${fam}/`) ? role : "",
   };
   try {
     const out = await talentSearch(f, p.get("internal") === "1", p.get("fresh") === "1");

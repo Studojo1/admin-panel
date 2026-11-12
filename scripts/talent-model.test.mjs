@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  DEFAULT_FILTERS, TRAITS, askIn, scrubContacts, briefOf, cityKey, expText, fromOld, graphOf, layout, matchTerm, parseTerms, passes, quizFrom, roleKey, saidFrom,
+  DEFAULT_FILTERS, TRAITS, askIn, scrubContacts, briefOf, cityKey, expText, fromOld, matchTerm, parseTerms, passes, quizFrom, roleKey, saidFrom,
   search, shortlistText, skillKey, skillName, skillsOf, traitsFrom, vocabOf,
 } from "../app/lib/talent/model.ts";
 
@@ -139,51 +139,13 @@ test("ranking: more terms matched first, then strength, then actively looking, t
   assert.deepEqual(browse, ["b2", "b3", "b1"], "no search: actively looking, then the fuller profile");
 });
 
-test("graph with a search: a hub per matched term, each student linked to what it matched", () => {
-  const a = cand({ id: "a", rolesWanted: ["Data Analyst"], claims: [skill("Python")] });
-  const b = cand({ id: "b", claims: [skill("Python")] });
-  const terms = [{ key: "data analyst", label: "data analyst", kind: "text" }, { key: "python", label: "Python", kind: "text" }, { key: "rust", label: "rust", kind: "text" }];
-  const g = graphOf(search([a, b], terms, F()), terms, 60);
-  assert.deepEqual(g.hubs.map((h) => [h.label, h.n]), [["data analyst", 1], ["Python", 2]], "a term nobody matched has no hub");
-  assert.deepEqual(g.links.find((l) => l.id === "a").hubs, ["t:text:data analyst", "t:text:python"]);
-});
-
-test("graph with no search: top roles and skills as hubs, students with none stay off", () => {
-  const pool = [
-    cand({ id: "p1", rolesWanted: ["Data Analyst Intern"], claims: [skill("SQL"), skill("Python")] }),
-    cand({ id: "p2", rolesWanted: ["Data Analyst"], claims: [skill("SQL")] }),
-    cand({ id: "p3", rolesWanted: ["Chef"], claims: [skill("Knife work")] }),
-  ];
-  const g = graphOf(search(pool, [], F()), [], 60);
-  assert.deepEqual(g.hubs.map((h) => h.key), ["r:data analyst", "s:sql"], "only what two or more share");
-  assert.deepEqual(g.links.map((l) => l.id).sort(), ["p1", "p2"]);
-  assert.ok(g.links.every((l) => l.hubs.length <= 3));
-});
-
-test("layout: deterministic, in bounds, no two students overlap, a full match sits nearer the middle", () => {
-  const g = {
-    hubs: [{ key: "h1", label: "A", kind: "term", n: 3 }, { key: "h2", label: "B", kind: "term", n: 3 }, { key: "h3", label: "C", kind: "term", n: 3 }],
-    links: [
-      ...Array.from({ length: 25 }, (_, i) => ({ id: `full${i}`, hubs: ["h1", "h2", "h3"] })),
-      { id: "only1", hubs: ["h1"] },
-    ],
-  };
-  const rank = {};
-  g.links.forEach((l, i) => (rank[l.id] = i));
-  const r = () => 8;
-  const one = layout(g, rank, 1000, 620, r);
-  assert.deepEqual(layout(g, rank, 1000, 620, r), one, "same input, same picture");
-  const pts = Object.values(one.students);
-  for (const p of pts) assert.ok(p.x >= 8 && p.x <= 992 && p.y >= 8 && p.y <= 612);
-  let minGap = Infinity;
-  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) minGap = Math.min(minGap, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
-  assert.ok(minGap >= 15, `students overlap (closest ${minGap.toFixed(1)})`);
-  const d = (p) => Math.hypot(p.x - 500, p.y - 310);
-  assert.ok(d(one.students.full0) < d(one.students.only1), "matching all three sits nearer the centre than matching one");
-  const wideChips = layout(g, rank, 460, 600, r, () => 100);
-  for (const k of ["h1", "h2", "h3"]) assert.ok(wideChips.hubs[k].x >= 104 && wideChips.hubs[k].x <= 356, "a chip stays inside a narrow canvas");
-  const h1 = one.hubs.h1;
-  assert.ok(Math.hypot(one.students.only1.x - h1.x, one.students.only1.y - h1.y) < 200, "a single match sits near its hub");
+test("TALENT-NET: the canonical role and family are a place to match, below what they said", () => {
+  const sde = cand({ rolesWanted: ["SDE"], canon: ["Software engineering", "Software engineer"] });
+  const h = matchTerm(sde, [], { key: "software engineer", label: "software engineer", kind: "text" });
+  assert.equal(h.where, "Placed in");
+  assert.ok(h.w < 3, "weaker than a wanted role");
+  assert.ok(vocabOf([sde]).has("software engineer"), "the search box reads the canonical role as one term");
+  assert.equal(matchTerm(cand({ rolesWanted: ["SDE"] }), [], { key: "software engineer", label: "software engineer", kind: "text" }), null);
 });
 
 test("words: experience and the shortlist text carry no email or phone", () => {
