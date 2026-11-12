@@ -145,6 +145,31 @@ export interface Result {
   score: number;
 }
 
+/**
+ * TALENT-FIND (12 Nov 2026, the owner: "add a student search"): students by name, every word typed the start of a word of
+ * their name in any order ("pri sha" finds Priya Sharma), or by their exact email. Whole-name matches first, then the
+ * call's students, then names A to Z. Fewer than two letters finds no one.
+ */
+export function findStudents<T extends Pick<Candidate, "name" | "email" | "source">>(pool: readonly T[], text: string, limit = 12): T[] {
+  const q = text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+  if (q.length < 2) return [];
+  if (q.includes("@")) return pool.filter((c) => (c.email || "").toLowerCase().trim() === q).slice(0, limit);
+  const words = q.split(" ").map((w) => w.replace(/[^\p{L}\p{N}]+/gu, "")).filter(Boolean);
+  if (!words.length) return [];
+  // Each word of the name whole without its marks ("o'neil" as oneil) and in its pieces (o, neil).
+  const partsOf = (name: string) => name.normalize("NFKC").toLowerCase().split(/\s+/)
+    .flatMap((w) => [w.replace(/[^\p{L}\p{N}]+/gu, ""), ...w.split(/[^\p{L}\p{N}]+/u)]).filter(Boolean);
+  const hits = pool.filter((c) => {
+    const parts = partsOf(c.name || "");
+    return words.every((w) => parts.some((x) => x.startsWith(w)));
+  });
+  const plain = (name: string) => name.normalize("NFKC").toLowerCase().split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]+/gu, "")).filter(Boolean).join(" ");
+  const whole = (c: T) => (plain(c.name || "") === words.join(" ") ? 0 : 1);
+  return hits
+    .sort((a, b) => whole(a) - whole(b) || (a.source === b.source ? 0 : a.source === "call" ? -1 : 1) || (a.name || "").localeCompare(b.name || ""))
+    .slice(0, limit);
+}
+
 // ------------------------------------------------------------------- words
 
 const squash = (s: string) => s.toLowerCase().replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim();

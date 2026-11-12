@@ -25,14 +25,14 @@ import { KIT_CSS } from "~/components/stu/overview-kit";
 import { CARD } from "~/components/stu/ui";
 import { type ColorBy, GraphLegend, TalentNet, dotColor, intentColor } from "~/components/talent/talent-graph";
 import { useAdminGuard } from "~/lib/auth-guard";
-import { fetchTalent } from "~/lib/talent/client";
+import { fetchStudent, fetchTalent, findTalent } from "~/lib/talent/client";
 import { FAMILY_ORDER } from "~/lib/talent/families";
 import {
   AMBIGUITY_LABEL, BUDGETS, CLARITY_LABEL, DEFAULT_FILTERS, type Brief, type ExpFilter, type Filters, MODE_LABEL, OWNERSHIP_LABEL,
   PACE_LABEL, RISK_LABEL, SHAPE_LABEL, STYLE_LABEL, type SourceFilter, TRAITS, TYPE_LABEL, type TypeFilter, WISH_LABEL, askText, briefOf, expText,
   intentLabel, shortlistText,
 } from "~/lib/talent/model";
-import type { TalentEnvelope, WireResult } from "~/lib/talent/wire";
+import type { TalentEnvelope, WireFound, WireResult } from "~/lib/talent/wire";
 
 export function meta() {
   return [{ title: "Talent search · Studojo Admin" }];
@@ -121,6 +121,16 @@ export default function Talent() {
     if (isAuthorized) load();
   }, [isAuthorized, load]);
 
+  // TALENT-FIND (12 Nov 2026, the owner: "add a student search"): a student chosen by name may sit past the 60 the list
+  // holds; their whole profile is read once for the panel.
+  const [extra, setExtra] = useState<WireResult | null>(null);
+  useEffect(() => {
+    if (!isAuthorized || !open || !data || data.results.some((r) => r.id === open) || extra?.id === open) return;
+    let gone = false;
+    fetchStudent(open, internal).then((r) => { if (!gone) setExtra(r); }).catch(() => undefined);
+    return () => { gone = true; };
+  }, [isAuthorized, open, data, internal]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [shortlist, setShortlist] = useState<Brief[]>([]);
   useEffect(() => setShortlist(readShortlist()), []);
   const listed = useMemo(() => new Set(shortlist.map((b) => b.id)), [shortlist]);
@@ -149,7 +159,7 @@ export default function Talent() {
   if (!isAuthorized) return null;
 
   const results = data?.results ?? [];
-  const chosen = results.find((r) => r.id === open) ?? null;
+  const chosen = results.find((r) => r.id === open) ?? (extra && extra.id === open ? extra : null);
   const searching = (data?.terms.length ?? 0) > 0;
   const envName = data ? (data.env === "staging" ? "Staging" : "Production") : "";
   const listFam = data?.net.families.find((f) => f.key === data.fam) ?? null;
@@ -173,9 +183,12 @@ export default function Talent() {
               )}
             </p>
           </div>
-          <button type="button" onClick={() => load(true)} className="self-start rounded-lg border-2 border-neutral-900 bg-white px-3 py-1.5 text-sm font-semibold shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] hover:bg-neutral-50 lg:self-auto">
-            {loading ? "Loading..." : "Refresh"}
-          </button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+            <FindStudent internal={internal} onChoose={(s) => setParam({ q: null, fam: s.family, role: s.role, id: s.id })} />
+            <button type="button" onClick={() => load(true)} className="self-start rounded-lg border-2 border-neutral-900 bg-white px-3 py-1.5 text-sm font-semibold shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] hover:bg-neutral-50">
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
         </div>
 
         {data && data.live && <TopBar data={data} narrowed={searching || filtered || !!filters.fam} fam={filters.fam} onFam={openFam} />}
@@ -666,6 +679,59 @@ function Beyond({ r }: { r: WireResult }) {
  * managers, who is actively looking; then the same for what the search, filters and open family or role show; then the
  * split by career family of everyone the search found (click a part to open that family in the network).
  */
+/**
+ * TALENT-FIND (12 Nov 2026, the owner: "add a student search"): a student by name or exact email. Choosing one opens
+ * their family and role in the network and their profile in the panel.
+ */
+function FindStudent({ internal, onChoose }: { internal: boolean; onChoose: (s: WireFound) => void }) {
+  const [text, setText] = useState("");
+  const [found, setFound] = useState<WireFound[] | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    const t = text.trim();
+    if (t.length < 2) {
+      setFound(null);
+      return;
+    }
+    let gone = false;
+    const id = setTimeout(() => {
+      findTalent(t, internal)
+        .then((rows) => { if (!gone) { setFound(rows); setErr(""); } })
+        .catch((e: any) => { if (!gone) setErr(e?.message || "Search failed"); });
+    }, 250);
+    return () => { gone = true; clearTimeout(id); };
+  }, [text, internal]);
+  const choose = (s: WireFound) => {
+    onChoose(s);
+    setText("");
+    setFound(null);
+  };
+  return (
+    <div className="relative w-full sm:w-80">
+      <input type="search" value={text} onChange={(e) => setText(e.target.value)} aria-label="Find a student by name or email"
+        placeholder="Find a student by name or email"
+        onKeyDown={(e) => { if (e.key === "Enter" && found?.length) { e.preventDefault(); choose(found[0]); } if (e.key === "Escape") setText(""); }}
+        className="w-full rounded-lg border-2 border-neutral-900 bg-white px-3 py-1.5 text-sm shadow-[2px_2px_0px_0px_rgba(25,26,35,1)] outline-none focus:bg-violet-50/40" />
+      {(found || err) && (
+        <div className="absolute right-0 z-30 mt-1 max-h-80 w-full overflow-auto rounded-lg border-2 border-neutral-900 bg-white text-sm shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]">
+          {err && <div className="px-3 py-2 text-red-600">{err}</div>}
+          {found && !found.length && !err && <div className="px-3 py-2 text-neutral-500">No student by that name</div>}
+          {found?.map((s) => (
+            <button key={s.id} type="button" onClick={() => choose(s)} className="block w-full border-t border-neutral-100 px-3 py-2 text-left first:border-t-0 hover:bg-violet-50">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-neutral-900">{s.name || "No name"}</span>
+                <span className={`rounded-full px-1.5 text-[10px] font-bold ${s.source === "call" ? "bg-purple-100 text-purple-700" : "bg-neutral-100 text-neutral-600"}`}>{s.source === "call" ? "CALL" : "OLD"}</span>
+                {!s.optedIn && <span className="text-[10px] font-semibold text-amber-700">not opted in</span>}
+              </div>
+              <div className="truncate text-xs text-neutral-500">{[s.familyLabel, s.roleLabel].filter(Boolean).join(" · ")}{s.college ? ` · ${s.college}` : ""}</div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TopBar({ data, narrowed, fam, onFam }: { data: TalentEnvelope; narrowed: boolean; fam: string; onFam: (k: string) => void }) {
   const a = data.counts.all;
   const s = data.counts.shown;
