@@ -20,6 +20,7 @@ const NAV_LINKS: readonly { to: string; label: string; archive?: true; stu?: tru
   { to: "/visitors", label: "Stu: Visitors", stu: true },
   { to: "/recordings", label: "Stu: Recordings", stu: true },
   { to: "/talent", label: "Stu: Talent search", stu: true },
+  { to: "/customers", label: "Stu: Customers", stu: true },
   { to: "/vendors", label: "Vendors and credits" },
   { to: "/users", label: "Users" },
   { to: "/ops-alerts", label: "Ops Alerts" },

@@ -48,6 +48,9 @@ jobs:
       # TALENT-NET (12 Nov 2026): every student in one career family and canonical role (synonyms, refusals, the order
       # of evidence, not enough data), the network's counts and its layout.
       - run: node --test scripts/talent-families.test.mjs
+      # CUSTOMERS (13 Nov 2026): the /customers page: the rank, thanks and complaints in a customer's own messages, the
+      # tags, the views, the search and order, and pasted links.
+      - run: node --test scripts/customers-model.test.mjs
       # UTM links (2 Nov 2026): the naming scheme, utm_id = slug first, utm_*
       # as the fallback, IST ranges, internal accounts and bots apart.
       - run: node --test scripts/utm-attribution.test.mjs

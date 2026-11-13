@@ -8,7 +8,7 @@
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
     "check:api-auth": "node scripts/check-api-auth.mjs",
-    "test": "node --test scripts/check-api-auth.test.mjs scripts/health-watch.test.mjs scripts/email-pause.test.mjs scripts/stu-model.test.mjs scripts/stu-auditor.test.mjs scripts/stu-flags.test.mjs scripts/visitors-model.test.mjs scripts/talent-model.test.mjs scripts/talent-families.test.mjs scripts/recordings-model.test.mjs scripts/utm-attribution.test.mjs scripts/vendors-model.test.mjs scripts/support-stu.test.mjs scripts/ticket-label.test.mjs"
+    "test": "node --test scripts/check-api-auth.test.mjs scripts/health-watch.test.mjs scripts/email-pause.test.mjs scripts/stu-model.test.mjs scripts/stu-auditor.test.mjs scripts/stu-flags.test.mjs scripts/visitors-model.test.mjs scripts/talent-model.test.mjs scripts/talent-families.test.mjs scripts/customers-model.test.mjs scripts/recordings-model.test.mjs scripts/utm-attribution.test.mjs scripts/vendors-model.test.mjs scripts/support-stu.test.mjs scripts/ticket-label.test.mjs"
   },
   "dependencies": {
     "@react-router/node": "7.12.0",
