@@ -41,6 +41,10 @@ export default [
   // Talent search (12 Nov 2026): students hiring managers may find, searched by role, skills and city, drawn as a graph.
   route("talent", "routes/talent.tsx"),
   route("api/talent", "routes/api.talent.tsx"),
+  // Customers (13 Nov 2026): every Stu customer ranked by how likely they are doing well and happy, everything we hold on
+  // each, and the team's stars, notes and the companies it finds for them (placement push).
+  route("customers", "routes/customers.tsx"),
+  route("api/customers", "routes/api.customers.tsx"),
   // Vendors and credits (LeadsForge, Apollo): balances, spend, run-out dates.
   route("vendors", "routes/vendors.tsx"),
   route("api/vendors", "routes/api.vendors.tsx"),
