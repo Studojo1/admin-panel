@@ -201,7 +201,7 @@ export default function StuOverview() {
           </div>
         )}
 
-        <div id="kpis" className="scroll-mt-28"><Headline s={S("kpis")} drill={openDrill} range={range} today={today} end={end} /></div>
+        <div id="kpis" className="scroll-mt-28"><Headline s={S("kpis")} usage={S("usage")} drill={openDrill} range={range} today={today} end={end} /></div>
 
         {/* VISITORS (4 Nov 2026): real visitors against crawlers and bots, top sources, the biggest drop-off; tables on /visitors. */}
         <div id="visitors" className="mt-6 scroll-mt-28">
@@ -315,11 +315,14 @@ function change(cur: number, prev: number | null, inr: boolean | undefined, vs: 
   return `${diff > 0 ? "▲ +" : "▼ -"}${p} ${vs}`;
 }
 
-function Headline({ s, drill, range, today, end }: { s: SectionState; drill: Drill; range: RangeKey; today: string; end: string }) {
+function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usage: SectionState; drill: Drill; range: RangeKey; today: string; end: string }) {
   const body = s.env?.body as { tiles: KpiTile[]; testPayments: Cell; notBanked?: Cell; signupsSplit?: { fresh: Cell; existing: Cell }; prevStart: string; prevEnd: string } | undefined;
   const days = body ? Math.round((Date.parse(body.prevEnd) - Date.parse(body.prevStart)) / 86_400_000) + 1 : 1;
   const vs = days === 1 ? (range === "yesterday" || end !== today ? "vs the day before" : "vs yesterday") : `vs the ${days} days before`;
   const tile = (key: string) => body?.tiles.find((x) => x.key === key);
+  // ACTIVES (14 Nov 2026): the Active students card's second line is DAU, WAU and MAU to the range's last day (/usage).
+  const ub = usage.env?.body as { dau: Cell; wau: Cell; mau: Cell } | undefined;
+  const actives = ub ? `DAU ${fmtN(ub.dau.v)} · WAU ${fmtN(ub.wau.v)} · MAU ${fmtN(ub.mau.v)}` : null;
   return (
     <div className="mt-6">
       {s.error && !body && <div className="mb-3 rounded-xl border-2 border-red-500 bg-red-50 p-3 text-sm text-red-700">Could not read the numbers: {s.error}</div>}
@@ -344,7 +347,7 @@ function Headline({ s, drill, range, today, end }: { s: SectionState; drill: Dri
                 delay={k * 0.05}
                 title={`${t.sub ? `${t.sub}. ` : ""}Source: ${t.source}${people ? ". Click for the people." : ""}`}
                 onClick={people ? () => drill(t.label, t.cell, env) : undefined}
-                note={
+                note={h.key === "active" && actives ? actives :
                   <>
                     {t.cell.na ? "not tracked here yet" : change(t.cell.v, t.prev, t.inr, vs)}
                     {test > 0 && <><br />Excludes {test} test payment{test === 1 ? "" : "s"}</>}

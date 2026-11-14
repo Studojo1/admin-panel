@@ -12,6 +12,7 @@ import {
   maskEmail, overviewDropoffs, overviewFunnel, overviewSources, power, trends, usage,
 } from "./overview";
 import { CHANNELS } from "~/lib/utm-dictionary";
+import { activesSection } from "./actives-section";
 
 const channelName = (k: string) => CHANNELS.find((c) => c.key === k)?.label ?? k;
 
@@ -131,6 +132,7 @@ export async function overviewSection(section: OvSection, f: Filters, fresh: boo
     case "dropoffs": body = overviewDropoffs(d, f, refs); break;
     case "engagement": body = engagement(d, f, refs); break;
     case "feed": body = await feed(d, f, refs); break;
+    case "actives": body = activesSection(d, f, refs); break;
     case "alerts": {
       const list = alertsFromData(d, f, refs);
       const z = await zeroToday(d, f);
