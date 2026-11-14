@@ -30,7 +30,10 @@ export interface Signals {
   sent: number;
   /** Companies emailed (distinct domains). */
   companies: number;
-  /** How they paid ("pack", "autopay", "order"; "+" when more than one), or null. */
+  /**
+   * Paid, as the Stu pages count it (app/lib/stu/data.server.ts truth.paid: money in, not a test, not a free pack or a
+   * staff grant), with how ("pack", "autopay", "order"; "+" when more than one; "paid" when none of those says), or null.
+   */
   paid: string | null;
   /** Messages to Stu that thank or praise. */
   praise: number;
@@ -43,9 +46,11 @@ export interface Signals {
   build: number;
   /** Minutes on calls with Stu, all kinds. */
   callMin: number;
-  /** IST days with any Stu activity in the last 21 days. */
+  /** IST days in the last 21 (today included) the customer did something themselves (activeDays). */
   days21: number;
-  /** Last activity, epoch ms. */
+  /** IST day of the last thing the customer did themselves (activeDays), or null. */
+  lastDay: string | null;
+  /** Exact time of their last message to Stu or call with Stu, epoch ms, or null. Shown only when it is on lastDay. */
   lastSeen: number | null;
   /** Jobs Stu matched, and how many they saved or applied to. */
   matches: number;
@@ -55,7 +60,7 @@ export interface Signals {
 
 export const NO_SIGNALS: Signals = {
   posReplies: 0, replies: 0, sent: 0, companies: 0, paid: null, praise: 0, gripes: 0, refund: false,
-  desk: 0, build: 0, callMin: 0, days21: 0, lastSeen: null, matches: 0, saved: 0, applied: 0,
+  desk: 0, build: 0, callMin: 0, days21: 0, lastDay: null, lastSeen: null, matches: 0, saved: 0, applied: 0,
 };
 
 /**
@@ -125,6 +130,50 @@ export function toneCounts(msgs: readonly { text: string | null; at: number }[])
 }
 
 export const istDay = (ms: number): string => new Date(ms + 5.5 * 3_600_000).toISOString().slice(0, 10);
+/** An IST day n days on (n < 0: before), as app/lib/stu/model.ts addDays. */
+export const addDays = (day: string, n: number): string => {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * ADMIN-AUDIT (14 Nov 2026): a customer's activity is what the Stu pages count as active (app/lib/stu/model.ts
+ * activity(): active_day, feature_used but outreach, the desk, job, save, apply and plan events, chats in, WhatsApp
+ * taps, started calls), not our own writes (a profile update, an auto-added outreach row). From the IST days they were
+ * active: the last one, and how many of the last 21 (today included).
+ */
+export function activeDays(days: Iterable<string>, today: string): { lastDay: string | null; days21: number } {
+  const from = addDays(today, -20);
+  let lastDay: string | null = null;
+  let days21 = 0;
+  for (const d of new Set(days)) {
+    if (lastDay == null || d > lastDay) lastDay = d;
+    if (d >= from && d <= today) days21++;
+  }
+  return { lastDay, days21 };
+}
+
+/** Active on any of the last 7 IST days, today included: the Stu Overview's WAU window. */
+export const activeThisWeek = (s: Pick<Signals, "lastDay">, now: number): boolean =>
+  s.lastDay != null && s.lastDay >= addDays(istDay(now), -6);
+
+/** For ordering by last active: the exact time when it is on the last active day, else the start of that IST day. */
+export function lastAt(s: Pick<Signals, "lastDay" | "lastSeen">): number {
+  if (s.lastDay == null) return s.lastSeen ?? 0;
+  if (s.lastSeen != null && istDay(s.lastSeen) === s.lastDay) return s.lastSeen;
+  return Date.parse(`${s.lastDay}T00:00:00+05:30`);
+}
+
+/** "3 h ago" when the exact time is known, else by IST day: "today", "yesterday", "4 days ago"; "never". */
+export function lastActiveText(s: Pick<Signals, "lastDay" | "lastSeen">, now: number): string {
+  if (s.lastDay == null) return ago(s.lastSeen, now);
+  if (s.lastSeen != null && istDay(s.lastSeen) === s.lastDay) return ago(s.lastSeen, now);
+  const today = istDay(now);
+  if (s.lastDay >= today) return "today";
+  const n = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${s.lastDay}T00:00:00Z`)) / DAY);
+  return n === 1 ? "yesterday" : `${n} days ago`;
+}
 
 export type Tag = "yes" | "replied" | "paid" | "thanked" | "unhappy" | "refund" | "active" | "quiet" | "new";
 export const TAG_LABEL: Record<Tag, string> = {
@@ -149,7 +198,7 @@ export function tagsOf(s: Signals, signedUp: number, now: number): Tag[] {
   else if (s.gripes > 0) t.push("unhappy");
   if (s.praise > 0 && s.gripes === 0 && !s.refund) t.push("thanked");
   if (now - signedUp < 3 * DAY) t.push("new");
-  if (s.lastSeen != null && now - s.lastSeen < 7 * DAY) t.push("active");
+  if (activeThisWeek(s, now)) t.push("active");
   else t.push("quiet");
   return t;
 }
@@ -181,6 +230,8 @@ export interface CustomersEnvelope {
   at: number;
   ms: number;
   customers: WireCustomer[];
+  /** What could not be read or made this time (the team's notes tables, the Stu dataset); the page shows them. */
+  notes?: string[];
 }
 
 export type View = "all" | "starred" | "yes" | "paid" | "active" | "unhappy" | "picks";
@@ -222,7 +273,7 @@ export function inView(c: WireCustomer, view: View, now: number): boolean {
     case "paid":
       return !!c.s.paid;
     case "active":
-      return c.s.lastSeen != null && now - c.s.lastSeen < 7 * DAY;
+      return activeThisWeek(c.s, now);
     case "picks":
       return c.picks > 0;
     case "unhappy":
@@ -234,8 +285,8 @@ export function inView(c: WireCustomer, view: View, now: number): boolean {
 export function filterCustomers(all: readonly WireCustomer[], f: ListFilters, now: number): WireCustomer[] {
   const out = all.filter((c) => inView(c, f.view, now) && matchesText(c, f.q));
   const by: Record<Sort, (a: WireCustomer, b: WireCustomer) => number> = {
-    rank: (a, b) => Number(b.star) - Number(a.star) || b.score - a.score || (b.s.lastSeen ?? 0) - (a.s.lastSeen ?? 0),
-    recent: (a, b) => (b.s.lastSeen ?? 0) - (a.s.lastSeen ?? 0),
+    rank: (a, b) => Number(b.star) - Number(a.star) || b.score - a.score || lastAt(b.s) - lastAt(a.s),
+    recent: (a, b) => lastAt(b.s) - lastAt(a.s),
     new: (a, b) => b.signedUp - a.signedUp,
   };
   return out.sort(by[f.sort]);

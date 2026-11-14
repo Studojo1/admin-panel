@@ -8,7 +8,12 @@ async function phQuery(query: string) {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
     body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
   });
-  if (!res.ok) throw new Error(`PostHog ${res.status}`);
+  if (!res.ok) {
+    // ADMIN-AUDIT (14 Nov 2026): the people listed here come from PostHog, so with no PostHog key on this server
+    // (/api/posthog answers 503) the page has nobody to show; say so rather than "PostHog 503".
+    if (res.status === 503) throw new Error("PostHog is not set up on this server, and this page lists people from PostHog, so it has nobody to show.");
+    throw new Error(`PostHog ${res.status}`);
+  }
   return res.json();
 }
 async function phGet(type: string, params: Record<string, string>) {

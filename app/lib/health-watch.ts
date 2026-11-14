@@ -44,6 +44,14 @@ export function discoveryState(
   return succeededSince ? "watch" : "failing";
 }
 
+/**
+ * ADMIN-AUDIT (14 Nov 2026): lead discovery belongs to the outreach product retired on 2 Nov 2026, whose pages are an
+ * archive under /old. There the card raises no alert: "off", whatever discoveryState says (orders left at "generating
+ * leads" when it was retired stay there, so it read as failing forever).
+ */
+export type DiscoveryTone = DiscoveryState | "off";
+export const discoveryTone = (state: DiscoveryState, retired: boolean): DiscoveryTone => (retired ? "off" : state);
+
 /** One paying customer's campaigns and mailbox, across all their resumes. */
 export type CampaignFacts = {
   running: boolean;

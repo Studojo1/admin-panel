@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getToken } from "~/lib/api";
-import type { HealthWatch } from "~/lib/health-watch";
+import { type HealthWatch, discoveryTone } from "~/lib/health-watch";
 
 /**
  * "Needs attention" for the daily dashboard: what is broken right now, which
@@ -14,6 +14,10 @@ import type { HealthWatch } from "~/lib/health-watch";
  * All of it comes from Postgres through /api/health-watch. The card loads on
  * its own and fails soft, so a problem here never takes the rest of /daily
  * down with it.
+ *
+ * retired (ADMIN-AUDIT, 14 Nov 2026): the product is retired (/old/daily), so
+ * lead discovery shows as a plain grey line and no banner, and the header says
+ * the alerts are off. The lists stay, for the record.
  */
 
 const IST = "Asia/Kolkata";
@@ -57,7 +61,7 @@ const th = "px-5 py-2 text-left font-semibold text-neutral-700 border-b border-n
 const td = "px-5 py-2 border-b border-neutral-100 whitespace-nowrap";
 const summary = "cursor-pointer px-5 py-3 text-sm font-semibold text-neutral-900 hover:bg-neutral-50";
 
-export function NeedsAttention({ className = "" }: { className?: string }) {
+export function NeedsAttention({ className = "", retired = false }: { className?: string; retired?: boolean }) {
   const [data, setData] = useState<HealthWatch | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -72,11 +76,13 @@ export function NeedsAttention({ className = "" }: { className?: string }) {
   const d = data?.discovery;
   const p = data?.paid_nothing_sent;
   const lastRun = d?.last_success_at ? `Last successful run ${ago(d.last_success_at)}.` : "No successful run on record.";
+  const tone = d ? discoveryTone(d.state, retired) : null;
 
   return (
     <div className={`overflow-hidden ${card} ${className}`}>
       <div className="px-5 py-3 border-b-2 border-neutral-900 bg-neutral-50">
         <h2 className="font-['Clash_Display'] text-lg font-bold">Needs attention</h2>
+        {retired && <p className="text-xs text-neutral-500">Retired product, alerts off.</p>}
       </div>
       {failed ? (
         <p className="px-5 py-3 text-sm text-neutral-400">Could not load.</p>
@@ -84,16 +90,21 @@ export function NeedsAttention({ className = "" }: { className?: string }) {
         <p className="px-5 py-3 text-sm text-neutral-400">Checking…</p>
       ) : (
         <>
-          {d.state === "ok" ? (
+          {tone === "off" ? (
+            <p className="px-5 py-3 text-sm text-neutral-500">
+              Lead discovery was retired with the old product
+              {d.stuck_count > 0 ? `, with ${count(d.stuck_count, "student")} left at generating leads${d.stuck_since ? ` since ${niceDay(d.stuck_since)}` : ""}` : ""}. {lastRun}
+            </p>
+          ) : tone === "ok" ? (
             <p className="px-5 py-3 text-sm text-neutral-600">
               {d.completed_24h > 0
                 ? `Lead discovery is healthy. ${lastRun}`
                 : `Nobody is stuck at generating leads, but no run has finished in the last 24 hours. ${lastRun}`}
             </p>
           ) : (
-            <div className={`px-5 py-3 ${d.state === "failing" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-900"}`}>
+            <div className={`px-5 py-3 ${tone === "failing" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-900"}`}>
               <p className="text-sm font-bold">
-                {d.state === "failing" ? "Lead discovery is failing" : "Lead discovery needs a look"}: {count(d.stuck_count, "student")} stuck
+                {tone === "failing" ? "Lead discovery is failing" : "Lead discovery needs a look"}: {count(d.stuck_count, "student")} stuck
                 {d.stuck_since ? ` since ${niceDay(d.stuck_since)}` : ""}
               </p>
               <p className="text-xs mt-0.5">{lastRun} {fmt(d.completed_24h)} finished in the last 24 hours.</p>

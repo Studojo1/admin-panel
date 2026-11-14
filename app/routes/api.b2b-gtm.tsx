@@ -7,11 +7,11 @@ import { sql } from "drizzle-orm";
  * B2B GTM Motion tracker API.
  *
  * This repo has no migration framework, so the tables are created idempotently
- * on first touch. Cheap after the first call and identical on staging and prod.
+ * on first touch (ensureTables, below migrate). Identical on staging and prod.
  * All timestamps are timestamptz: the app writes tz-aware values and naive
  * `timestamp` columns reject them.
  */
-async function ensureTables() {
+async function migrate() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS b2b_companies (
       id SERIAL PRIMARY KEY,
@@ -135,6 +135,52 @@ async function ensureTables() {
   await db.execute(
     sql`CREATE INDEX IF NOT EXISTS b2b_contacts_company_idx ON b2b_contacts (company_id)`
   );
+}
+
+// What migrate() leaves behind: the columns it adds to older tables, its indexes, and no call note still carrying the
+// old import prefix. Keep in step with migrate() when it grows.
+const B2B_COLUMNS = [
+  ...["is_inactive", "left_note"].map((c) => `b2b_contacts.${c}`),
+  ...["kind", "objection_note", "attendees"].map((c) => `b2b_call_logs.${c}`),
+  ...[
+    "needs_leads", "leads_note", "leads_change", "leads_change_note", "wants_trial", "trial_note", "needs_my_followup",
+    "my_followup_note", "cash_collected", "deposit", "collected_at", "refunded", "added_by", "demo_at",
+  ].map((c) => `b2b_companies.${c}`),
+];
+const B2B_INDEXES = ["b2b_companies_next_action_idx", "b2b_call_logs_company_idx", "b2b_contacts_company_idx"];
+
+/** True when migrate() has nothing left to do. Reads only. */
+async function schemaIsCurrent(): Promise<boolean> {
+  const cols = new Set(
+    ((await db.execute(sql`
+      SELECT table_name || '.' || column_name AS c FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name IN ('b2b_companies', 'b2b_contacts', 'b2b_call_logs')`)).rows as any[]).map((r) => r.c),
+  );
+  if (!B2B_COLUMNS.every((c) => cols.has(c))) return false;
+  const idx = new Set(
+    ((await db.execute(sql`
+      SELECT indexname FROM pg_indexes
+       WHERE schemaname = current_schema() AND indexname IN ('b2b_companies_next_action_idx', 'b2b_call_logs_company_idx', 'b2b_contacts_company_idx')`)).rows as any[]).map((r) => r.indexname),
+  );
+  if (!B2B_INDEXES.every((i) => idx.has(i))) return false;
+  const left = (await db.execute(sql`SELECT EXISTS (SELECT 1 FROM b2b_call_logs WHERE note LIKE 'Imported from Excel: %') AS left`)).rows[0] as any;
+  return !left?.left;
+}
+
+/**
+ * ADMIN-AUDIT (14 Nov 2026): every request used to run all of migrate() (some 27 statements: each ALTER TABLE takes an
+ * exclusive lock on its table even when the column is there, and the note cleanup is an UPDATE). Now a read checks
+ * first and migrate() runs only when something is missing, once per server process, so a normal load only reads.
+ */
+let schemaReady: Promise<void> | null = null;
+function ensureTables(): Promise<void> {
+  schemaReady ??= (async () => {
+    if (!(await schemaIsCurrent())) await migrate();
+  })().catch((e) => {
+    schemaReady = null;
+    throw e;
+  });
+  return schemaReady;
 }
 
 /**
