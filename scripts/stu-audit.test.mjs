@@ -159,6 +159,22 @@ test("failed calls: one definition (failed calls plus mic denied and other call_
   assert.equal(metric("calls_failed").cell(d, f, days, new Set([0, 1, 2])).v, 2, "Daily counts the same attempts");
 });
 
+test("failed calls: a burst of retries from one person is one attempt, and the alert is on people", () => {
+  const j = at("2026-11-14");
+  const users = ["a", "b", "c", "d", "e", "f"].map((id) => person(id, j));
+  const call = (u) => [u, "onboarding", "finished", null, j, j, j + 600_000, 600, 0, 1, 1];
+  // a: 53 mic denied rows inside 9 minutes, then one more an hour later; the others called fine.
+  const storm = Array.from({ length: 53 }, (_, i) => [0, j + i * 10_000, "mic_denied"]);
+  const d = data(users, { calls: [call(1), call(2), call(3), call(4), call(5)], fails: [...storm, [0, j + 3_600_000, "mic_denied"]] });
+  const f = F("2026-11-14", "2026-11-14");
+  const r = Object.fromEntries(ratios(d, f).map((x) => [x.key, x]));
+  assert.equal(r.call_fail_calls.num.v, 2, "53 rows in one burst plus one an hour later are 2 attempts");
+  assert.equal(r.call_fail.num.v, 1, "one person");
+  assert.equal(metric("calls_failed").cell(d, f, new Set(["2026-11-14"]), new Set([0, 1, 2, 3, 4, 5])).v, 2, "Daily counts the same 2");
+  // The Overview alert (overview.ts alertsFromData) reads this people rate against its 20% line.
+  assert.ok(r.call_fail.value < 20, `1 of 6 people (${r.call_fail.value}%) is under the 20% line, whatever the rows`);
+});
+
 test("retention: a day N that is today is marked so far", () => {
   const users = [person("a", at("2026-11-13")), person("b", at("2026-11-12"))];
   const d = data(users, { act: [["active_day:web", 0, "2026-11-14", 1, 0], ["active_day:web", 1, "2026-11-13", 1, 0]] });

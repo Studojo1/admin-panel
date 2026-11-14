@@ -651,10 +651,33 @@ function callCell(d: StuData, days: Set<string>, scope: Set<number>, pred: CallP
   return cellOf(users, n);
 }
 
+/**
+ * ADMIN-AUDIT-STU 2 (14 Nov 2026): a burst of call_failed rows from one person (a blocked mic and retry tapped again and
+ * again: one student logged 53 in a week) is one failed attempt. A row within FAIL_BURST_MS of that person's previous
+ * counted row is the same attempt, so a retry storm no longer reads as 26% of calls failing.
+ */
+export const FAIL_BURST_MS = 10 * 60_000;
+const failAttemptsCache = new WeakMap<readonly WireFail[], WireFail[]>();
+export function failAttempts(fails: readonly WireFail[]): WireFail[] {
+  const hit = failAttemptsCache.get(fails);
+  if (hit) return hit;
+  const sorted = [...fails].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const out: WireFail[] = [];
+  const last = new Map<number, number>();
+  for (const f of sorted) {
+    const prev = last.get(f[0]);
+    if (prev != null && f[1] - prev < FAIL_BURST_MS) continue;
+    last.set(f[0], f[1]);
+    out.push(f);
+  }
+  failAttemptsCache.set(fails, out);
+  return out;
+}
+
 function failCell(d: StuData, days: Set<string>, scope: Set<number>, until?: number | null): Cell {
   const users: number[] = [];
   let n = 0;
-  for (const [u, t] of d.fails) {
+  for (const [u, t] of failAttempts(d.fails)) {
     if (!scope.has(u) || !days.has(istDay(t)) || !by(t, until)) continue;
     n++;
     users.push(u);
@@ -667,7 +690,7 @@ const both = (a: Cell, b: Cell): Cell => ({ v: a.v + b.v, users: uniq([...a.user
 const T = (s: string) => () => s;
 
 /** ADMIN-AUDIT-STU (14 Nov 2026): the one definition of a failed call attempt, for Daily, Ratios and Call health. */
-export const FAILED_ATTEMPTS = "failed call attempts: onboarding calls with status failed, plus every journey call_failed (mic denied, no mic, network, error)";
+export const FAILED_ATTEMPTS = "failed call attempts: onboarding calls with status failed, plus journey call_failed (mic denied, no mic, network, error), one a person per 10 minutes";
 const J = (d: StuData) => (d.journeyLive ? "journey log" : "journey log (not live yet)");
 
 export const DAILY_METRICS: DailyMetricDef[] = [
@@ -974,7 +997,7 @@ export function ratios(d: StuData, f: Filters): Ratio[] {
   const cohortCalls = d.calls.filter((c) => cohortSet.has(c[0]));
   const nonDesk = cohortCalls.filter(NON_DESK);
   const failedCalls = nonDesk.filter((c) => c[2] === "failed");
-  const failsJ = d.fails.filter(([u]) => cohortSet.has(u));
+  const failsJ = failAttempts(d.fails).filter(([u]) => cohortSet.has(u));
   // ADMIN-AUDIT-STU (14 Nov 2026): one definition (FAILED_ATTEMPTS) for calls and people: a mic denied or any other
   // call_failed is a failed attempt too. Attempts: calls made plus those call_failed rows.
   const failedAttempts = [...failedCalls.map((c) => c[0]), ...failsJ.map(([u]) => u)];
