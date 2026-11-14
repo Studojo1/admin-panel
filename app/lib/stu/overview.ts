@@ -459,9 +459,11 @@ export const CALL_FAIL_ALERT_PCT = 20;
 /** The alerts that need only the dataset; the zero-today check is added by the server (it reads the journey log by day). */
 export function alertsFromData(d: StuData, f: Filters, refs: Refs): Alert[] {
   const out: Alert[] = [];
-  const fail = ratios(d, f).find((x) => x.key === "call_fail_calls")!;
+  // ADMIN-AUDIT-STU 2 (14 Nov 2026): the alert is on people, not attempts: one student tapping retry on a blocked mic is
+  // one person, however many rows it logs.
+  const fail = ratios(d, f).find((x) => x.key === "call_fail")!;
   if (fail.value != null && fail.value > CALL_FAIL_ALERT_PCT) {
-    out.push({ key: "call_fail", level: "critical", text: `Failed call attempts at ${fail.value}% (${fail.num.v} of ${fail.den.v}, mic denied included), over the ${CALL_FAIL_ALERT_PCT}% line`, cell: refs.cell(fail.num), href: "/drop-offs" });
+    out.push({ key: "call_fail", level: "critical", text: `${fail.value}% of people who tried a call had a failed attempt (${fail.num.v} of ${fail.den.v}, mic denied included), over the ${CALL_FAIL_ALERT_PCT}% line`, cell: refs.cell(fail.num), href: "/drop-offs" });
   }
   return out;
 }

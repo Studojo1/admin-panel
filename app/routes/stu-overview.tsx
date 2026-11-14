@@ -369,6 +369,7 @@ function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usa
       {body && s.env && (
         <div className="mt-4 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 rounded-xl border-2 border-neutral-900 bg-white px-4 py-2.5 text-sm shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]">
           <span className="text-xs font-bold uppercase tracking-wide text-neutral-500" title={`Changes are ${vs}`}>Also in range</span>
+          <span className="text-xs text-neutral-500">changes {vs}</span>
           {ALSO.map((key) => {
             const t = tile(key);
             if (!t) return null;
