@@ -318,6 +318,9 @@ async function load(q: Q, from: number = countFrom(process.env.STU_COUNT_FROM)):
   for (const n of STEPS.find((s) => s.key === "opened_job")!.journey) actKinds[n] = "job_open";
   for (const n of STEPS.find((s) => s.key === "apply_click")!.journey) actKinds[n] = "apply";
   for (const n of STEPS.find((s) => s.key === "saw_plans")!.journey) actKinds[n] = "plan_view";
+  // ACTIVES (14 Nov 2026): a save the student made (career_matches.updated_at also moves when an outreach add marks a
+  // match applied, with no one there).
+  for (const n of STEPS.find((s) => s.key === "saved_job")!.journey) actKinds[n] = "job_saved";
   if (journey) {
     for (const r of await q(`
       SELECT user_id, step, ${ms("min(at)")} AS at FROM ${J}
@@ -341,13 +344,14 @@ async function load(q: Q, from: number = countFrom(process.env.STU_COUNT_FROM)):
     // Activity beacons (career-agent, 2 Nov 2026): active_day once a person a day,
     // feature_used once a person, feature and day (props.feature). Read whenever
     // the log has them; the activity model (model.ts activity) adds them to what
-    // the product tables show.
+    // the product tables show. ACTIVES (14 Nov 2026): active_day carries its props.via (web, whatsapp, imessage,
+    // voice) as "active_day:<via>", for the channel split.
     for (const r of await q(`
-      SELECT user_id, step, ${day("at")} AS day, left(coalesce(props->>'feature', ''), 30) AS feature, count(*)::int AS n FROM ${J}
+      SELECT user_id, step, ${day("at")} AS day, left(coalesce(props->>'feature', props->>'via', ''), 30) AS feature, count(*)::int AS n FROM ${J}
        WHERE user_id IS NOT NULL AND step = ANY(${lit(ACTIVITY_EVENTS)}) AND ${since}
        GROUP BY 1, 2, 3, 4 LIMIT 500000`)) {
       const i = U(r.user_id);
-      if (i >= 0) act.push([r.step === "active_day" ? "active_day" : `f:${r.feature || "other"}`, i, r.day, Number(r.n), 0]);
+      if (i >= 0) act.push([r.step === "active_day" ? (r.feature ? `active_day:${r.feature}` : "active_day") : `f:${r.feature || "other"}`, i, r.day, Number(r.n), 0]);
     }
     for (const r of await q(`
       SELECT user_id, ${ms("at")} AS at, coalesce(props->>'reason', props->>'error', '') AS reason FROM ${J}
@@ -516,8 +520,6 @@ async function load(q: Q, from: number = countFrom(process.env.STU_COUNT_FROM)):
     perDay.push(["chat_call", `SELECT user_id, ${day("started_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_voice_calls")} WHERE started_at IS NOT NULL AND mode IN ('desk', 'interview', 'returning') GROUP BY 1, 2`]);
   if (has("career_job_views"))
     perDay.push(["job_view", `SELECT user_id, ${day("viewed_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_job_views")} GROUP BY 1, 2`]);
-  if (has("career_matches"))
-    perDay.push(["save", `SELECT user_id, ${day("updated_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_matches")} WHERE state IN ('saved', 'applied') GROUP BY 1, 2`]);
   if (has("career_outreach"))
     perDay.push(["outreach_row", `SELECT user_id, ${day("created_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_outreach")} GROUP BY 1, 2`]);
   if (has("career_emails")) {

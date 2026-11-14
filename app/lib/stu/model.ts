@@ -386,15 +386,57 @@ export const FEATURE_LABELS: Record<string, string> = {
   call: "Call", outreach: "Outreach", email_send: "Sent email", resume: "Resume", plans: "Plans", whatsapp: "WhatsApp",
 };
 
-/** Product-table and journey rows (Act kinds) that show a person used a feature that day. */
-const ACT_FEATURE: Record<string, string> = {
-  desk: "desk", job_view: "jobs", job_open: "job_open", apply: "apply", save: "save", chat_desk: "chat", chat_wa: "whatsapp", wa_link: "whatsapp",
-  chat_call: "call", outreach_row: "outreach", email: "email_send", email_test: "email_send", plan_view: "plans", digest_tapped: "whatsapp",
+/**
+ * ACTIVES (14 Nov 2026, the owner: "i want better dau, mau and wau reporting"): the channels an active day was used
+ * on, as bits. Web: the site (desk, jobs, chat on the desk, plans). Messaging: WhatsApp or iMessage. Call: a voice call.
+ */
+export const CH_WEB = 1;
+export const CH_MSG = 2;
+export const CH_CALL = 4;
+
+/**
+ * ACTIVES: what each Act kind says about a person's day. f: the feature; ch: the channel bits it shows; seen: it only
+ * adds to a day already active and never makes one (career-agent writes these from an open desk by itself: job cards
+ * a feed poll mounts are recorded by api/fit, which career-agent leaves out of active_day too).
+ * Kinds not listed are not activity: rows our system makes, not the student (career_outreach rows the auto-add makes,
+ * career_emails the sequences send, career_matches states an outreach add sets, digests sent or read, payments).
+ */
+const ACT_SIGNAL: Record<string, { f: string; ch: number; seen?: true }> = {
+  desk: { f: "desk", ch: CH_WEB },
+  job_open: { f: "job_open", ch: CH_WEB },
+  apply: { f: "apply", ch: CH_WEB },
+  plan_view: { f: "plans", ch: CH_WEB },
+  job_saved: { f: "save", ch: CH_WEB },
+  job_view: { f: "jobs", ch: CH_WEB, seen: true },
+  chat_wa: { f: "whatsapp", ch: CH_MSG },
+  digest_tapped: { f: "whatsapp", ch: CH_MSG },
+  // The WhatsApp LINK code is sent from the web sign-up: activity that day, but it says nothing about the channel.
+  wa_link: { f: "whatsapp", ch: 0 },
+  chat_call: { f: "call", ch: CH_CALL },
 };
+
+/** ACTIVES: active_day's props.via to channel bits. */
+const VIA_CH: Record<string, number> = { web: CH_WEB, whatsapp: CH_MSG, imessage: CH_MSG, voice: CH_CALL };
+
+/**
+ * ACTIVES: a feature_used beacon to its signal, or null when it is not the student's doing. "outreach" is left out:
+ * career-agent's auto-add and campaign lanes write it with no one there. "chat" is the desk or WhatsApp (career-agent
+ * does not say which), so it adds no channel. "jobs" is also written by an open desk's poll (api/fit), so it is seen.
+ */
+function featureSignal(feature: string): { f: string; ch: number; seen?: true } | null {
+  if (feature === "outreach") return null;
+  if (feature === "chat" || feature === "other" || !feature) return { f: feature || "other", ch: 0 };
+  if (feature === "whatsapp") return { f: feature, ch: CH_MSG };
+  if (feature === "call") return { f: feature, ch: CH_CALL };
+  if (feature === "jobs") return { f: feature, ch: CH_WEB, seen: true };
+  return { f: feature, ch: CH_WEB };
+}
 
 export interface Activity {
   /** person index -> IST day -> features used that day (empty set: active, feature not known) */
   days: Map<number, Map<string, Set<string>>>;
+  /** ACTIVES: person index -> IST day -> channel bits (CH_WEB, CH_MSG, CH_CALL); 0: active, channel not known */
+  ch: Map<number, Map<string, number>>;
   /** the journey log has active_day / feature_used rows */
   beacons: boolean;
 }
@@ -402,45 +444,79 @@ export interface Activity {
 const activityCache = new WeakMap<StuData, Activity>();
 
 /**
- * Who was active on which IST day, and with which features. Active means any of:
- * the journey's active_day and feature_used beacons (when the log has them), the
- * desk, job, apply and plan events, and the product's own timestamped rows (chat
- * messages, calls, job views, saves, outreach, emails, WhatsApp digest taps). The
- * beacons add to the tables rather than replace them, so days before the beacons
- * went live still count.
+ * Who was active on which IST day, with which features and on which channels. ACTIVES (14 Nov 2026): active means the
+ * student did something themselves that day:
+ * - web: active_day with via web (career-agent: the first signed-in request of the day that is not a background poll),
+ *   feature_used (desk, job opened, apply, save, resume, plans, email send), the journey's desk, job opened, job saved,
+ *   apply and plans events, and chat messages on the desk;
+ * - messaging: active_day with via whatsapp or imessage, their own WhatsApp or iMessage messages, taps on a WhatsApp
+ *   digest;
+ * - call: a voice call that started (any mode), active_day with via voice.
+ * active_day's via is the first request of the day only, so a day's channels come from every signal above.
+ * The desk chat table holds WhatsApp turns too (one thread for both), so desk chat rows add web only when there are
+ * more of them that day than WhatsApp and iMessage messages in.
  */
 export function activity(d: StuData): Activity {
   const hit = activityCache.get(d);
   if (hit) return hit;
-  const days = new Map<number, Map<string, Set<string>>>();
-  const add = (u: number, day: string, feature: string) => {
-    if (u < 0) return;
-    let m = days.get(u);
-    if (!m) days.set(u, (m = new Map()));
+  interface Slot { f: Set<string>; ch: number; real: boolean; desk: number; msg: number }
+  const slots = new Map<number, Map<string, Slot>>();
+  const slot = (u: number, day: string): Slot | null => {
+    if (u < 0) return null;
+    let m = slots.get(u);
+    if (!m) slots.set(u, (m = new Map()));
     let s = m.get(day);
-    if (!s) m.set(day, (s = new Set()));
-    if (feature) s.add(feature);
+    if (!s) m.set(day, (s = { f: new Set(), ch: 0, real: false, desk: 0, msg: 0 }));
+    return s;
+  };
+  const add = (u: number, day: string, sig: { f: string; ch: number; seen?: true }) => {
+    const s = slot(u, day);
+    if (!s) return;
+    if (sig.f) s.f.add(sig.f);
+    s.ch |= sig.ch;
+    if (!sig.seen) s.real = true;
   };
   let beacons = false;
-  for (const [k, u, day] of d.act) {
-    if (k === "active_day") {
+  for (const [k, u, day, n] of d.act) {
+    if (k === "active_day" || k.startsWith("active_day:")) {
       beacons = true;
-      add(u, day, "");
+      add(u, day, { f: "", ch: VIA_CH[k.slice(11)] ?? 0 });
     } else if (k.startsWith("f:")) {
       beacons = true;
-      add(u, day, k.slice(2));
-    } else if (ACT_FEATURE[k]) add(u, day, ACT_FEATURE[k]);
+      const sig = featureSignal(k.slice(2));
+      if (sig) add(u, day, sig);
+    } else if (k === "chat_desk") {
+      add(u, day, { f: "chat", ch: 0 });
+      slot(u, day)!.desk += n || 1;
+    } else if (ACT_SIGNAL[k]) {
+      add(u, day, ACT_SIGNAL[k]);
+      if (k === "chat_wa" || k === "wa_link" || k === "digest_tapped") slot(u, day)!.msg += n || 1;
+    }
   }
-  for (const c of d.calls) if (c[5] != null) add(c[0], istDay(c[5]), "call");
-  const out = { days, beacons };
+  for (const c of d.calls) if (c[5] != null) add(c[0], istDay(c[5]), { f: "call", ch: CH_CALL });
+  const days = new Map<number, Map<string, Set<string>>>();
+  const ch = new Map<number, Map<string, number>>();
+  for (const [u, m] of slots) {
+    for (const [day, s] of m) {
+      if (!s.real) continue;
+      if (s.desk > s.msg) s.ch |= CH_WEB;
+      if (!days.has(u)) {
+        days.set(u, new Map());
+        ch.set(u, new Map());
+      }
+      days.get(u)!.set(day, s.f);
+      ch.get(u)!.set(day, s.ch);
+    }
+  }
+  const out = { days, ch, beacons };
   activityCache.set(d, out);
   return out;
 }
 
 export const activitySource = (d: StuData): string =>
   activity(d).beacons
-    ? "journey active_day and feature_used, plus the product tables (chats, calls, job views, saves, outreach, emails)"
-    : "product tables (chats, calls, job views, saves, outreach, emails) and journey desk, job, apply and plan events; active_day not in the log yet";
+    ? "student-made only: journey active_day (its via) and feature_used (not outreach, which the lanes write), desk, job, save, apply and plan events, chat messages in (desk, WhatsApp, iMessage), WhatsApp taps and started calls; job views only on a day already active; not outreach rows, sequence emails or match states (our system makes those)"
+    : "student-made only: chat messages in (desk, WhatsApp, iMessage), WhatsApp taps, started calls and the journey's desk, job, save, apply and plan events; active_day not in the log yet; not outreach rows, sequence emails or match states (our system makes those)";
 
 /** People in scope active on any of `days`. */
 export function activeCell(d: StuData, days: Set<string>, scope: Set<number>, which: "all" | "new" | "returning" = "all"): Cell {
@@ -604,7 +680,7 @@ export const DAILY_METRICS: DailyMetricDef[] = [
   { key: "calls_hung_early", label: "Hung up in first minute", group: "Call", source: T("career_voice_calls: under 60 s, not completed, not dropped"), cell: (d, _f, days, s) => callCell(d, days, s, (c) => NON_DESK(c) && callOutcome(c) === "hung_up_first_minute", (c) => c[5] ?? c[4]) },
   { key: "resumes", label: "Resumes in call", group: "Call", source: T("career_voice_calls: onboarding calls with a resume read (each call)"), cell: (d, _f, days, s) => callCell(d, days, s, (c) => c[1] === "onboarding" && c[9] === 1, (c) => c[5] ?? c[4]) },
   { key: "onboarded", label: "Onboarded", group: "Call", source: (d) => stepSource(d, "onboarded"), cell: (d, _f, days, s) => firstStepCell(d, "onboarded", days, s) },
-  { key: "active", label: "Active (any activity)", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s) },
+  { key: "active", label: "Active (did something)", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s) },
   { key: "active_new", label: "  of them new (joined that day)", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s, "new") },
   { key: "active_returning", label: "  of them returning", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s, "returning") },
   { key: "dau", label: "Daily actives (desk)", group: "Use", source: (d) => `${J(d)}: opened_desk, distinct people a day`, cell: (d, _f, days, s) => actCell(d, ["desk"], days, s, "users", !d.journeyLive) },

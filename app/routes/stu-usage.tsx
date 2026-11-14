@@ -1,6 +1,7 @@
 // Stu Usage (/usage, 2 Nov 2026): the detail that used to crowd the Overview, on
 // its own page under the Stu tabs. Engagement (DAU, WAU, MAU), power users, call
-// health, where people stop, retention, the 30-day trends and the live feed. Each
+// health, where people stop, retention, the 30-day trends and the live feed. ACTIVES (14 Nov 2026): the Active users
+// panel (DAU, WAU, MAU with the periods before, splits, cohorts, week over week) heads the page. Each
 // panel is one section of /api/stu/overview for the tabs' range, as on the
 // Overview, and every number opens the people behind it.
 import { useEffect, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import { useLocation } from "react-router";
 import { DrillModal, PageTitle, useStu } from "~/components/stu/ui";
 import { type Env, KIT_CSS, PALETTE, drillPeople, istTime, useSections } from "~/components/stu/overview-kit";
 import { Calls, Dropoffs, Engagement, Feed, Power, Trends, Usage } from "~/components/stu/usage-panels";
+import { Actives } from "~/components/stu/actives-panel";
 import type { Cell } from "~/lib/stu/model";
 import type { OvSection } from "~/lib/stu/overview";
 
@@ -15,7 +17,7 @@ export function meta() {
   return [{ title: "Usage · Stu · Studojo Admin" }];
 }
 
-const SECTIONS: readonly OvSection[] = ["usage", "power", "calls", "dropoffs", "engagement", "trends", "feed"];
+const SECTIONS: readonly OvSection[] = ["actives", "usage", "power", "calls", "dropoffs", "engagement", "trends", "feed"];
 
 export default function StuUsage() {
   const { filters } = useStu();
@@ -41,13 +43,14 @@ export default function StuUsage() {
       <style>{KIT_CSS}</style>
       <PageTitle
         title="Usage"
-        sub="How the people in range use Stu: engagement, power users, calls, where they stop, retention, the 30-day trends and the live feed."
+        sub="How the people in range use Stu: active users (DAU, WAU, MAU), engagement, power users, calls, where they stop, retention, the 30-day trends and the live feed."
       />
       <p className="-mt-2 mb-4 text-xs text-neutral-500">
         {generated ? `Read ${istTime(generated)} IST, again every 60 s.` : "Reading."}
         {filters.channel !== "all" ? " The channel filter does not apply on this page: it shows every channel." : ""}
       </p>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 [&>*]:min-w-0">
+        <div id="actives" className="scroll-mt-28 lg:col-span-12"><Actives s={S("actives")} drill={openDrill} t={t} /></div>
         <div id="engagement" className="scroll-mt-28 lg:col-span-7"><Usage s={S("usage")} drill={openDrill} t={t} /></div>
         <div id="power" className="scroll-mt-28 lg:col-span-5"><Power s={S("power")} drill={openDrill} t={t} qs={qs} /></div>
         <div id="calls" className="scroll-mt-28 lg:col-span-6"><Calls s={S("calls")} drill={openDrill} t={t} /></div>

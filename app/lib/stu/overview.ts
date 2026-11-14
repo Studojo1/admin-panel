@@ -11,7 +11,7 @@ import {
 
 export { funnelBasis } from "./model";
 
-export const OV_SECTIONS = ["insights", "usage", "power", "kpis", "funnel", "trends", "sources", "calls", "dropoffs", "engagement", "feed", "alerts"] as const;
+export const OV_SECTIONS = ["insights", "usage", "power", "kpis", "funnel", "trends", "sources", "calls", "dropoffs", "engagement", "feed", "alerts", "actives"] as const;
 export type OvSection = (typeof OV_SECTIONS)[number];
 
 /** A person as the drill-down list shows them. */
@@ -70,7 +70,7 @@ export const KPI_TILES = [
   { key: "visitors", label: "Visitors", metric: "visitors" },
   { key: "signups", label: "Sign-ups", metric: "signups" },
   { key: "onboarded", label: "Onboarded", metric: "onboarded", sub: "call done, profile ready" },
-  { key: "active", label: "Active students", metric: "active", sub: "any activity" },
+  { key: "active", label: "Active students", metric: "active", sub: "did something themselves" },
   { key: "job_opens", label: "Jobs opened", metric: "job_opens" },
   { key: "apply_clicks", label: "Apply clicks", metric: "apply_clicks" },
   { key: "outreach", label: "Outreach started", metric: "outreach_people", sub: "people, first time" },

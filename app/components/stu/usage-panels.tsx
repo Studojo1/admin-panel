@@ -276,7 +276,7 @@ export function Engagement({ s, drill, t }: { s: SectionState; drill: Drill; t: 
               {b.headline.map((h) => stat(`D${h.n} return`, h.value == null ? <span style={{ color: "var(--muted)" }}>n/a</span> : <N cell={h.back} env={env} drill={drill} title={`Back on day ${h.n}`} fmt={() => fmtPct(h.value)} />, `${fmtN(h.back.v)} of ${fmtN(h.eligible.v)}`))}
             </div>
             <div className="mt-3 grid grid-cols-4 gap-2" style={{ borderTop: "1px solid var(--grid)", paddingTop: 10 }}>
-              {stat("Active students", <N cell={b.active} env={env} drill={drill} title="Active in range" />, "any activity in range")}
+              {stat("Active students", <N cell={b.active} env={env} drill={drill} title="Active in range" />, "did something in range")}
               {stat("Chats per active", <span>{b.perActive.chats ?? "n/a"}</span>, `${fmtN(b.chats.v)} messages, ${fmtN(b.chatters.v)} chatted`)}
               {stat("Jobs opened per active", <span>{b.perActive.jobs ?? "n/a"}</span>, `${fmtN(b.jobOpens.v)} opens`)}
               {stat("Apply clicks per active", <span>{b.perActive.applies ?? "n/a"}</span>, `${fmtN(b.applies.v)} clicks, ${fmtN(b.saved.v)} saved`)}
@@ -367,7 +367,7 @@ export function Usage({ s, drill, t }: { s: SectionState; drill: Drill; t: Palet
   return (
     <Card
       title="Engagement"
-      sub="Active: any use of Stu that day (IST). DAU on the range's last day, WAU 7 days, MAU 30 days to it."
+      sub="Active: the student did something themselves that IST day (not rows our system makes). DAU on the range's last day, WAU 7 days, MAU 30 days to it."
       s={s}
       minH={360}
       right={<Seg label="Engagement view" value={view} onChange={setView} options={[{ v: "newret", l: "New, returning" }, { v: "stick", l: "Stickiness" }, { v: "dwm", l: "DAU, WAU, MAU" }]} />}

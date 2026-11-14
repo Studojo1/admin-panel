@@ -153,7 +153,7 @@ test("activity: product rows and calls count before the beacons; beacons add fea
   const call = [0, "onboarding", "ready", null, ms("2026-11-01T05:10:00Z"), ms("2026-11-01T05:10:00Z"), ms("2026-11-01T05:20:00Z"), 600, 0, 1, 1];
   const d = data([user({ id: "a" }), user({ id: "b" })], {
     calls: [call],
-    act: [["chat_desk", 0, "2026-11-02", 4, 0], ["job_view", 1, "2026-11-01", 2, 0], ["pay", 1, "2026-11-03", 1, 100], ["f:resume", 0, "2026-11-02", 1, 0], ["active_day", 1, "2026-11-04", 1, 0]],
+    act: [["chat_desk", 0, "2026-11-02", 4, 0], ["job_open", 1, "2026-11-01", 2, 0], ["pay", 1, "2026-11-03", 1, 100], ["f:resume", 0, "2026-11-02", 1, 0], ["active_day", 1, "2026-11-04", 1, 0]],
   });
   const a = activity(d);
   assert.equal(a.beacons, true);
@@ -164,6 +164,8 @@ test("activity: product rows and calls count before the beacons; beacons add fea
   assert.equal(activeCell(d, new Set(["2026-11-01"]), scope, "new").v, 2);
   assert.equal(activeCell(d, new Set(["2026-11-02", "2026-11-04"]), scope, "returning").v, 2);
   assert.equal(activity(data([user()])).beacons, false);
+  // ACTIVES (14 Nov 2026): job views alone are not a day (an open desk records them by itself).
+  assert.equal(activity(data([user()], { act: [["job_view", 0, "2026-11-01", 9, 0]] })).days.size, 0);
 });
 
 test("retention by sign-up day: one row per IST join day, any day offsets", () => {
@@ -323,9 +325,12 @@ test("activity: the WhatsApp LINK code is activity on WhatsApp, not a chat with 
 });
 
 test("retention: coming back is any activity, as Active students counts it", () => {
-  const d = data([user({ id: "a" })], { act: [["email", 0, "2026-11-02", 1, 0]] });
+  const d = data([user({ id: "a" })], { act: [["f:email_send", 0, "2026-11-02", 1, 0]] });
   const [row] = retention(d, F, false);
-  assert.equal(row.d.d1.back.v, 1, "an email on day 1 without opening the desk is coming back");
+  assert.equal(row.d.d1.back.v, 1, "an email they sent on day 1 without opening the desk is coming back");
+  // ACTIVES (14 Nov 2026): an email the sequences sent is not the student coming back.
+  const auto = data([user({ id: "a" })], { act: [["email", 0, "2026-11-02", 1, 0]] });
+  assert.equal(retention(auto, F, false)[0].d.d1.back.v, 0);
 });
 
 test("stickiness and days: only days on or after the count-from line", () => {
