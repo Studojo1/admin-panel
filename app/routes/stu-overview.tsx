@@ -316,7 +316,7 @@ function change(cur: number, prev: number | null, inr: boolean | undefined, vs: 
 }
 
 function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usage: SectionState; drill: Drill; range: RangeKey; today: string; end: string }) {
-  const body = s.env?.body as { tiles: KpiTile[]; testPayments: Cell; notBanked?: Cell; signupsSplit?: { fresh: Cell; existing: Cell }; prevStart: string; prevEnd: string } | undefined;
+  const body = s.env?.body as { tiles: KpiTile[]; testPayments: Cell; signupsSplit?: { fresh: Cell; existing: Cell }; prevStart: string; prevEnd: string } | undefined;
   const days = body ? Math.round((Date.parse(body.prevEnd) - Date.parse(body.prevStart)) / 86_400_000) + 1 : 1;
   const vs = days === 1 ? (range === "yesterday" || end !== today ? "vs the day before" : "vs yesterday") : `vs the ${days} days before`;
   const tile = (key: string) => body?.tiles.find((x) => x.key === key);
@@ -335,8 +335,6 @@ function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usa
           const env = s.env;
           const people = t.cell.users.length + (t.cell.visitors?.length ?? 0);
           const test = h.key === "revenue" && body!.testPayments.v > 0 ? body!.testPayments.v : 0;
-          // SETTLE-REVENUE (14 Nov 2026): autopay charged in the range that Razorpay has not paid out to the bank yet.
-          const waiting = h.key === "revenue" && body!.notBanked && !body!.notBanked.na ? body!.notBanked.v : 0;
           const split = h.key === "signups" && t.cell.v > 0 ? body!.signupsSplit : undefined;
           return (
             <div key={h.key} className={`fade ${k === 0 ? "col-span-2 sm:col-span-1" : ""}`} style={{ opacity: s.loading ? 0.6 : 1 }}>
@@ -351,7 +349,6 @@ function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usa
                   <>
                     {t.cell.na ? "not tracked here yet" : change(t.cell.v, t.prev, t.inr, vs)}
                     {test > 0 && <><br />Excludes {test} test payment{test === 1 ? "" : "s"}</>}
-                    {waiting > 0 && <><br /><span title="Autopay counts in revenue on the day Razorpay pays it out to the bank. The person counts as paid on the day charged.">{fmtInr(waiting)} autopay not in the bank yet</span></>}
                     {split && (
                       <>
                         <br />
@@ -385,12 +382,6 @@ function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usa
             <span className="whitespace-nowrap text-neutral-700">
               Test payments <N cell={body.testPayments} env={s.env} drill={drill} title="Test payments" className="font-bold text-neutral-950" />
               <span className="ml-1 text-xs text-neutral-500">left out of revenue</span>
-            </span>
-          )}
-          {body.notBanked && !body.notBanked.na && body.notBanked.v > 0 && (
-            <span className="whitespace-nowrap text-neutral-700">
-              Autopay not in the bank yet <N cell={body.notBanked} env={s.env} drill={drill} title="Autopay not in the bank yet" fmt={fmtInr} className="font-bold text-neutral-950" />
-              <span className="ml-1 text-xs text-neutral-500">in revenue once Razorpay pays it out</span>
             </span>
           )}
         </div>
@@ -476,12 +467,9 @@ function TrendChart({ trends, usage, kpis, start, end, drill }: { trends: Sectio
       { key: "active", label: "Active students", cells: days.map((d) => active.get(d) ?? ({ v: 0, users: [] } as Cell)), env: usage.env! },
     ];
     const paid = { label: "Paid (people)", cells: cellsOf("paid"), env: trends.env! };
-    // Revenue by day exists for the last 14 days (the KPI section); shown in the tooltip where known. SETTLE-REVENUE:
-    // autopay money is on the day it reached the bank; a charge not settled yet shows on the day charged, apart.
-    const kb = kpis.env?.body as { tiles: KpiTile[]; notBankedByDay?: { day: string; v: number }[] } | undefined;
-    const revSpark = kb?.tiles.find((x) => x.key === "revenue")?.spark ?? [];
+    // Revenue by day exists for the last 14 days (the KPI section); shown in the tooltip where known.
+    const revSpark = (kpis.env?.body as { tiles: KpiTile[] } | undefined)?.tiles.find((x) => x.key === "revenue")?.spark ?? [];
     const revenue = new Map(revSpark.map((p) => [p.day, p.v]));
-    const waiting = new Map((kb?.notBankedByDay ?? []).map((p) => [p.day, p.v]));
     const from = days.findIndex((d) => d >= start);
     const to = days.reduce((m, d, i) => (d <= end ? i : m), -1);
     const all = [...lines.map((l) => ({ ...l, kind: "line" as const })), { ...paid, key: "paid" as const, kind: "bar" as const }];
@@ -511,9 +499,7 @@ function TrendChart({ trends, usage, kpis, start, end, drill }: { trends: Sectio
             label: (c: any) => ` ${c.parsed.y == null ? "n/a" : fmtN(c.parsed.y)}  ${c.dataset.label}`,
             footer: (items: any[]) => {
               const day = days[items[0]?.dataIndex];
-              if (!revenue.has(day)) return "";
-              const w = waiting.get(day) ?? 0;
-              return [`Revenue ${fmtInr(revenue.get(day)!)}`, ...(w > 0 ? [`${fmtInr(w)} autopay not in the bank yet`] : [])];
+              return revenue.has(day) ? `Revenue ${fmtInr(revenue.get(day)!)}` : "";
             },
           },
         },

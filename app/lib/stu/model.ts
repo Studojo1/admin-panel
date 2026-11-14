@@ -142,15 +142,8 @@ export interface WireVisitor {
   first: Partial<Record<string, number>>;
 }
 
-/**
- * [kind, user index, IST day, count, amount in paise]. Money kinds: pay (a payment on its day; an autopay charge on the
- * day charged, with amount 0 once settlements are read), pay_cash (autopay money on the IST day Razorpay settled it to
- * the bank), pay_wait (an autopay charge not settled yet, on the day charged) and pay_test.
- */
+/** [kind, user index, IST day, count, amount in paise] */
 export type Act = [string, number, string, number, number];
-
-/** SETTLE-REVENUE (14 Nov 2026): the Act kinds whose amounts are revenue. Paid counts read "pay" alone. */
-export const REVENUE_KINDS: readonly string[] = ["pay", "pay_cash"];
 
 /** [user index, mode, status, error, created ms, started ms, ended ms, duration s, dropped, resume, completed] */
 export type WireCall = [number, string, string, string | null, number, number | null, number | null, number | null, 0 | 1, 0 | 1, 0 | 1];
@@ -175,11 +168,6 @@ export interface StuData {
   missing: string[];
   journeyLive: boolean;
   sourceLive: boolean;
-  /**
-   * SETTLE-REVENUE (14 Nov 2026): career_settlements is read here, so autopay money counts in revenue on the day it was
-   * settled (pay_cash) and a charge not settled yet is pay_wait. Off: autopay counts on the day charged.
-   */
-  settleLive?: boolean;
   /** earliest journey event, epoch ms */
   journeyStart: number | null;
   /** earliest journey event written live (not props.backfill), epoch ms; null while the log holds only the backfill */
@@ -556,13 +544,11 @@ function firstStepCell(d: StuData, key: string, days: Set<string>, scope: Set<nu
   return { ...cellOf(users), na };
 }
 
-function actCell(d: StuData, kinds: readonly string[], days: Set<string>, scope: Set<number>, how: "sum" | "users" | "amount", na = false): Cell {
+function actCell(d: StuData, kinds: string[], days: Set<string>, scope: Set<number>, how: "sum" | "users" | "amount", na = false): Cell {
   const users: number[] = [];
   let sum = 0;
   for (const [k, u, day, n, amt] of d.act) {
     if (!kinds.includes(k) || !scope.has(u) || !days.has(day)) continue;
-    // SETTLE-REVENUE: an amount lists only the people whose money it holds (an autopay charge day carries none).
-    if (how === "amount" && !amt) continue;
     users.push(u);
     sum += how === "amount" ? amt : n;
   }
@@ -711,13 +697,8 @@ export const DAILY_METRICS: DailyMetricDef[] = [
   { key: "replies", label: "Replies (real)", group: "Outreach", source: T("career_sequences.replied_at, not bounce, not dry run (each)"), cell: (d, _f, days, s) => actCell(d, ["reply"], days, s, "sum") },
   { key: "replies_test", label: "Replies (dry run / test)", group: "Outreach", kind: "test", source: T("career_sequences.replied_at on dry-run sequences"), cell: (d, _f, days, s) => actCell(d, ["reply_test"], days, s, "sum") },
   { key: "plan_views", label: "Plan views", group: "Pay", source: (d) => `${J(d)}: saw_plans (each)`, cell: (d, _f, days, s) => actCell(d, ["plan_view"], days, s, "sum", !d.journeyLive) },
-  { key: "paid_users", label: "Paid users (real)", group: "Pay", source: T("money in: career_credit_orders paid, not test, less refunds above zero; autopay charges (career_plan_grants autopay, not refunded, subscription not test, not also an order) on the day charged, in the bank or not; career_plans jobs, not test or grant"), cell: (d, _f, days, s) => actCell(d, ["pay"], days, s, "users") },
-  { key: "revenue", label: "Revenue (real, INR)", group: "Pay", kind: "inr", source: (d) => d.settleLive
-    ? "career_credit_orders amount_paise less refunds, paid and not test, on the day paid; plus each autopay charge at its subscription's amount on the IST day Razorpay paid it out to the bank (career_settlements.settled_at), never before"
-    : "career_credit_orders amount_paise less refunds, paid and not test; plus each autopay charge at its subscription's amount, on the day charged (no career_settlements here yet)", cell: (d, _f, days, s) => actCell(d, REVENUE_KINDS, days, s, "amount") },
-  { key: "autopay_waiting", label: "Autopay not in the bank yet (INR)", group: "Pay", kind: "inr", source: (d) => d.settleLive
-    ? "autopay charges (career_plan_grants autopay, not refunded, subscription not test) with no career_settlements row yet, on the day charged, at the subscription's amount; not in revenue until Razorpay pays them out"
-    : "not read here: no career_settlements yet, so autopay counts in revenue on the day charged", cell: (d, _f, days, s) => actCell(d, ["pay_wait"], days, s, "amount", !d.settleLive) },
+  { key: "paid_users", label: "Paid users (real)", group: "Pay", source: T("money in: career_credit_orders paid, not test, less refunds above zero; autopay charges (career_plan_grants autopay, not refunded, subscription not test, not also an order); career_plans jobs, not test or grant"), cell: (d, _f, days, s) => actCell(d, ["pay"], days, s, "users") },
+  { key: "revenue", label: "Revenue (real, INR)", group: "Pay", kind: "inr", source: T("career_credit_orders amount_paise less refunds, paid and not test; plus each autopay charge at its subscription's amount"), cell: (d, _f, days, s) => actCell(d, ["pay"], days, s, "amount") },
   { key: "test_payments", label: "Test payments", group: "Pay", kind: "test", source: T("career_credit_orders test, test autopay charges, career_plans source test (latest change), career_outreach_credits test_purchase"), cell: (d, _f, days, s) => actCell(d, ["pay_test"], days, s, "sum") },
 ];
 
@@ -1033,8 +1014,7 @@ export function sources(d: StuData, f: Filters, by: string) {
   }
   const set = new Set(cohort);
   const rev = new Map<number, number>();
-  // SETTLE-REVENUE: autopay money once in the bank, and only the people whose money it is.
-  for (const [k, u, , , amt] of d.act) if (REVENUE_KINDS.includes(k) && amt && set.has(u)) rev.set(u, (rev.get(u) ?? 0) + amt);
+  for (const [k, u, , , amt] of d.act) if (k === "pay" && set.has(u)) rev.set(u, (rev.get(u) ?? 0) + amt);
   const rows = [...groups.entries()].map(([key, us]) => {
     const steps = Object.fromEntries(SOURCE_STEPS.map((s) => [s, cellOf(us.filter((i) => stepAt(d, d.users[i], s) != null))]));
     const testPaid = cellOf(us.filter((i) => d.users[i].testPaid != null));

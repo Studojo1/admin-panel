@@ -46,7 +46,7 @@ const TABLES = [
   "career_job_views", "career_matches", "career_threads", "career_messages", "career_channel_links",
   "career_channel_messages", "career_planner_messages", "career_outreach", "career_campaigns", "career_mail_accounts",
   "career_emails", "career_sequences", "career_daily_sends", "career_plans", "career_credit_orders", "career_outreach_credits",
-  "career_plan_grants", "career_subscriptions", "career_settlements",
+  "career_plan_grants", "career_subscriptions",
 ];
 
 /**
@@ -252,11 +252,6 @@ async function load(q: Q, from: number = countFrom(process.env.STU_COUNT_FROM)):
   // coupon order is not a payment); a plan row only when it is not a test or a staff grant; and each autopay charge
   // (career-agent writes one career_plan_grants row per charge, source autopay, revoked when refunded), at the
   // subscription's amount, unless a credit order already holds that payment id.
-  // SETTLE-REVENUE (14 Nov 2026, the owner: "dont count the autopay cash until it hits bank account"): an autopay charge
-  // still makes the person Paid on the day charged, but its money counts in revenue only on the IST day Razorpay paid it
-  // out to the bank (career_settlements.settled_at; career-agent writes the row once the payment is settled). Until then
-  // it is "not in the bank yet". Pack orders keep counting on payment. With no career_settlements here, autopay money
-  // counts on the day charged, as before.
   const refunded = hasCol("career_credit_orders", "refunded_paise") ? "coalesce(refunded_paise, 0)" : "0";
   const money = `(amount_paise - ${refunded}) > 0`;
   const PLAN_NOT_PAID = lit(["test", "grant"]);
@@ -264,11 +259,8 @@ async function load(q: Q, from: number = countFrom(process.env.STU_COUNT_FROM)):
   const notAnOrder = hasCol("career_credit_orders", "razorpay_payment_id")
     ? ` AND NOT EXISTS (SELECT 1 FROM ${T("career_credit_orders")} o WHERE o.razorpay_payment_id = g.payment_id)`
     : "";
-  const charges = (test: boolean, join = "") => `${T("career_plan_grants")} g JOIN ${T("career_subscriptions")} s ON s.razorpay_subscription_id = g.subscription_id${join}
+  const charges = (test: boolean) => `${T("career_plan_grants")} g JOIN ${T("career_subscriptions")} s ON s.razorpay_subscription_id = g.subscription_id
        WHERE g.source = 'autopay' AND g.payment_id IS NOT NULL AND g.revoked_at IS NULL AND ${test ? "" : "NOT "}s.test${notAnOrder}`;
-  const settleOn = autopayOn && hasCol("career_settlements", "payment_id") && hasCol("career_settlements", "settled_at");
-  const settled = ` JOIN ${T("career_settlements")} x ON x.payment_id = g.payment_id AND x.settled_at IS NOT NULL`;
-  const unsettled = ` AND NOT EXISTS (SELECT 1 FROM ${T("career_settlements")} x WHERE x.payment_id = g.payment_id AND x.settled_at IS NOT NULL)`;
   {
     const parts: string[] = [];
     if (has("career_credit_orders")) parts.push(`SELECT user_id, coalesce(paid_at, created_at) AS at FROM ${T("career_credit_orders")} WHERE status IN ('paid', 'refunded') AND NOT test AND ${money}`);
@@ -543,13 +535,7 @@ async function load(q: Q, from: number = countFrom(process.env.STU_COUNT_FROM)):
     perDay.push(["pay_test", `SELECT user_id, ${day("updated_at")} AS day, count(*)::int AS n, 0 AS amt FROM ${T("career_plans")} WHERE plan <> 'free' AND source = 'test' GROUP BY 1, 2`]);
   }
   if (autopayOn) {
-    // SETTLE-REVENUE: with settlements here the charge day carries no money (Paid counts as before); the money is a
-    // pay_cash row on the IST day it was settled, and a charge not settled yet is a pay_wait row on the day charged.
-    perDay.push(["pay", `SELECT g.user_id, ${day("g.created_at")} AS day, count(*)::int AS n, ${settleOn ? "0" : "sum(s.amount_paise)::float8"} AS amt FROM ${charges(false)} GROUP BY 1, 2`]);
-    if (settleOn) {
-      perDay.push(["pay_cash", `SELECT g.user_id, ${day("x.settled_at")} AS day, count(*)::int AS n, sum(s.amount_paise)::float8 AS amt FROM ${charges(false, settled)} GROUP BY 1, 2`]);
-      perDay.push(["pay_wait", `SELECT g.user_id, ${day("g.created_at")} AS day, count(*)::int AS n, sum(s.amount_paise)::float8 AS amt FROM ${charges(false)}${unsettled} GROUP BY 1, 2`]);
-    }
+    perDay.push(["pay", `SELECT g.user_id, ${day("g.created_at")} AS day, count(*)::int AS n, sum(s.amount_paise)::float8 AS amt FROM ${charges(false)} GROUP BY 1, 2`]);
     perDay.push(["pay_test", `SELECT g.user_id, ${day("g.created_at")} AS day, count(*)::int AS n, sum(s.amount_paise)::float8 AS amt FROM ${charges(true)} GROUP BY 1, 2`]);
   }
   if (has("career_outreach_credits"))
@@ -566,7 +552,6 @@ async function load(q: Q, from: number = countFrom(process.env.STU_COUNT_FROM)):
     missing,
     journeyLive: journey,
     sourceLive: src,
-    settleLive: settleOn,
     journeyStart,
     journeyLiveStart,
     pageViewStart,
