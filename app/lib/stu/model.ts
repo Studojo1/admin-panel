@@ -503,8 +503,8 @@ export function activity(d: StuData): Activity {
 
 export const activitySource = (d: StuData): string =>
   activity(d).beacons
-    ? "student-made only: journey active_day (its via) and feature_used (not outreach, which the lanes write), desk, job, save, apply and plan events, chat messages in (desk, WhatsApp, iMessage), WhatsApp taps and started calls; job views only on a day already active; not outreach rows, sequence emails or match states (our system makes those)"
-    : "student-made only: chat messages in (desk, WhatsApp, iMessage), WhatsApp taps, started calls and the journey's desk, job, save, apply and plan events; active_day not in the log yet; not outreach rows, sequence emails or match states (our system makes those)";
+    ? "student-made only: active_day, feature_used, desk, job, save, apply and plan events, chats in, WhatsApp taps, calls; not outreach rows, sequence emails or match states"
+    : "student-made only: chats in, WhatsApp taps, calls, desk, job, save, apply and plan events (active_day not in the log yet); not outreach rows, sequence emails or match states";
 
 /** People in scope active on any of `days`. */
 export function activeCell(d: StuData, days: Set<string>, scope: Set<number>, which: "all" | "new" | "returning" = "all"): Cell {

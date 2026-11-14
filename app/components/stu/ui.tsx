@@ -61,7 +61,9 @@ export function CellMark({ cell }: { cell: Cell }) {
 }
 
 export function SourceNote({ children }: { children: React.ReactNode }) {
-  return <div className="mt-0.5 text-[10px] leading-tight text-neutral-400">source: {children}</div>;
+  // DAILY-WIDTH (14 Nov 2026): a note wraps at about 60 characters, so a long one never widens its column (the Daily
+  // table's metric column is nowrap and sticky; a 370 character note pushed every day column off the screen).
+  return <div className="mt-0.5 max-w-[360px] whitespace-normal text-[10px] leading-tight text-neutral-400">source: {children}</div>;
 }
 
 export function PageTitle({ title, sub }: { title: string; sub?: string }) {
