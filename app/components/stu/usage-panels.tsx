@@ -155,7 +155,7 @@ export function Calls({ s, drill, t }: { s: SectionState; drill: Drill; t: Palet
             <div className="grid grid-cols-4 gap-2">
               {fig("Started", <N cell={b.started} env={env} drill={drill} title="Calls started" />, `of ${fmtN(b.total.v)} calls`)}
               {fig("Completed", <N cell={oc("completed")} env={env} drill={drill} title="Calls completed" />, fmtPct(b.started.v ? Math.round((oc("completed").v / b.started.v) * 1000) / 10 : null) + " of started")}
-              {fig("Failed", <N cell={oc("failed")} env={env} drill={drill} title="Calls failed" />, `${fmtPct(b.failCalls.value)} of calls`)}
+              {fig("Failed attempts", <N cell={b.failCalls.num} env={env} drill={drill} title="Failed call attempts (status failed, mic denied, other call_failed)" />, `${fmtPct(b.failCalls.value)} of ${fmtN(b.failCalls.den.v)} attempts`)}
               {fig("Dropped", <N cell={oc("dropped")} env={env} drill={drill} title="Calls dropped" />, "connection went")}
             </div>
             <div className="mt-3"><StackBar segs={segs} onPick={(k) => { const o = b.outcomes.find((x) => x.key === k); if (o) drill(`Calls: ${o.label}`, o.cell, env); }} /></div>
@@ -169,9 +169,10 @@ export function Calls({ s, drill, t }: { s: SectionState; drill: Drill; t: Palet
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2" style={{ borderTop: "1px solid var(--grid)", paddingTop: 10 }}>
               {fig("Mic denied (people)", b.micDenied.value == null ? <span style={{ color: "var(--muted)" }}>n/a</span> : <N cell={b.micDenied.num} env={env} drill={drill} title="Mic denied" fmt={() => fmtPct(b.micDenied.value)} />, `${fmtN(b.micDenied.num.v)} of ${fmtN(b.micDenied.den.v)} who tried`)}
-              {fig("Failure rate (people)", <N cell={b.failPeople.num} env={env} drill={drill} title="People with a failed call" fmt={() => fmtPct(b.failPeople.value)} />, `${fmtN(b.failPeople.num.v)} of ${fmtN(b.failPeople.den.v)}`)}
+              {fig("Failure rate (people)", <N cell={b.failPeople.num} env={env} drill={drill} title="People with a failed attempt" fmt={() => fmtPct(b.failPeople.value)} />, `${fmtN(b.failPeople.num.v)} of ${fmtN(b.failPeople.den.v)} who tried`)}
               {fig("Median call length", <span>{b.medianSeconds != null ? fmtDur(b.medianSeconds * 1000) : "n/a"}</span>, "started calls")}
             </div>
+            <p className="mt-1.5 text-[10px]" style={{ color: "var(--muted)" }}>A failed attempt: a call that failed, or a mic denied or other call_failed before it began. Daily, Ratios and this card count it the same way.</p>
             <div className="mt-3 text-[11px] font-semibold" style={{ color: "var(--ink2)" }}>Why calls did not finish (people)</div>
             {b.reasons.length ? (
               <div className="mt-1 grid grid-cols-[minmax(0,1fr)_minmax(60px,35%)_auto] items-center gap-x-2 gap-y-1 text-xs">
@@ -246,8 +247,8 @@ export function Dropoffs({ s, drill, t, qs }: { s: SectionState; drill: Drill; t
 // --------------------------------------------------------------- engagement
 
 interface EngBody {
-  headline: { n: number; back: Cell; eligible: Cell; value: number | null }[];
-  heat: { day: string; size: Cell; d: { n: number; back: Cell; eligible: number; value: number | null }[] }[];
+  headline: { n: number; back: Cell; eligible: Cell; value: number | null; soFar?: boolean }[];
+  heat: { day: string; size: Cell; d: { n: number; back: Cell; eligible: number; value: number | null; soFar?: boolean }[] }[];
   active: Cell; chats: Cell; chatters: Cell; jobOpens: Cell; applies: Cell; saved: Cell;
   perActive: { chats: number | null; jobs: number | null; applies: number | null };
 }
@@ -273,7 +274,7 @@ export function Engagement({ s, drill, t }: { s: SectionState; drill: Drill; t: 
         return (
           <div>
             <div className="grid grid-cols-3 gap-2">
-              {b.headline.map((h) => stat(`D${h.n} return`, h.value == null ? <span style={{ color: "var(--muted)" }}>n/a</span> : <N cell={h.back} env={env} drill={drill} title={`Back on day ${h.n}`} fmt={() => fmtPct(h.value)} />, `${fmtN(h.back.v)} of ${fmtN(h.eligible.v)}`))}
+              {b.headline.map((h) => stat(`D${h.n} return${h.soFar ? " (so far)" : ""}`, h.value == null ? <span style={{ color: "var(--muted)" }}>n/a</span> : <N cell={h.back} env={env} drill={drill} title={`Back on day ${h.n}`} fmt={() => fmtPct(h.value)} />, `${fmtN(h.back.v)} of ${fmtN(h.eligible.v)}${h.soFar ? ", day N is today for some" : ""}`))}
             </div>
             <div className="mt-3 grid grid-cols-4 gap-2" style={{ borderTop: "1px solid var(--grid)", paddingTop: 10 }}>
               {stat("Active students", <N cell={b.active} env={env} drill={drill} title="Active in range" />, "did something in range")}
@@ -296,8 +297,8 @@ export function Engagement({ s, drill, t }: { s: SectionState; drill: Drill; t: 
                         {r.d.map((c) => {
                           const sh = shade(c.value);
                           return (
-                            <td key={c.n} className="h-[22px] min-w-[38px] rounded text-center" style={{ background: sh?.bg ?? "transparent", color: sh?.fg ?? t.muted }} title={c.value == null ? `D${c.n}: not yet` : `D${c.n}: ${c.back.v} of ${c.eligible} (${c.value}%)`}>
-                              {c.value == null ? "" : c.back.v > 0 ? <button type="button" className="h-full w-full" onClick={() => drill(`Joined ${r.day}, back on day ${c.n}`, c.back, env)}>{c.value}%</button> : `${c.value}%`}
+                            <td key={c.n} className="h-[22px] min-w-[38px] rounded text-center" style={{ background: sh?.bg ?? "transparent", color: sh?.fg ?? t.muted }} title={c.value == null ? `D${c.n}: not yet` : `D${c.n}: ${c.back.v} of ${c.eligible} (${c.value}%)${c.soFar ? ", so far: day N is today" : ""}`}>
+                              {c.value == null ? "" : c.back.v > 0 ? <button type="button" className="h-full w-full" onClick={() => drill(`Joined ${r.day}, back on day ${c.n}`, c.back, env)}>{c.value}%{c.soFar ? "*" : ""}</button> : `${c.value}%${c.soFar ? "*" : ""}`}
                             </td>
                           );
                         })}
@@ -307,6 +308,7 @@ export function Engagement({ s, drill, t }: { s: SectionState; drill: Drill; t: 
                 </table>
               </div>
             ) : <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>Nobody joined in this range.</p>}
+            {b.heat.some((r) => r.d.some((c) => c.soFar)) && <p className="mt-1 text-[10px]" style={{ color: "var(--muted)" }}>* so far: day N is today, which is not over.</p>}
           </div>
         );
       }}
@@ -354,8 +356,9 @@ export function Feed({ s, qs }: { s: SectionState; qs: string }) {
 // ------------------------------------------------------- usage: DAU, WAU, MAU
 
 interface UsageBody {
-  dau: Cell; wau: Cell; mau: Cell; avgDau: number; stickiness: number | null;
-  trend: { day: string; dau: Cell; wau: number; mau: number; stick: number | null; new: Cell; returning: Cell }[];
+  dau: Cell; wau: Cell; mau: Cell; avgDau: number; stickiness: number | null; mauFrom?: string | null;
+  /** before: a day before the count-from line, not counted (no data on the charts) */
+  trend: { day: string; dau: Cell; wau: number; mau: number; stick: number | null; new: Cell; returning: Cell; before?: boolean }[];
   repeat: Cell; cohort: Cell; repeatPct: number | null; repeaters: Cell; oneTime: Cell;
   features: { key: string; label: string; rep: Cell; one: Cell; repPct: number | null; onePct: number | null }[];
   source: string; beacons: boolean;
@@ -393,8 +396,8 @@ export function Usage({ s, drill, t }: { s: SectionState; drill: Drill; t: Palet
           const data = {
             labels,
             datasets: [
-              { label: "New (joined that day)", data: b.trend.map((x) => x.new.v), backgroundColor: t.series[0], borderRadius: { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 }, borderSkipped: false, maxBarThickness: 18, borderColor: t.surface, borderWidth: { top: 2 } },
-              { label: "Returning", data: b.trend.map((x) => x.returning.v), backgroundColor: t.series[1], borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: false, maxBarThickness: 18 },
+              { label: "New (joined that day)", data: b.trend.map((x) => (x.before ? null : x.new.v)), backgroundColor: t.series[0], borderRadius: { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 }, borderSkipped: false, maxBarThickness: 18, borderColor: t.surface, borderWidth: { top: 2 } },
+              { label: "Returning", data: b.trend.map((x) => (x.before ? null : x.returning.v)), backgroundColor: t.series[1], borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: false, maxBarThickness: 18 },
             ],
           };
           const cellsAt = (i: number, ds: number) => (ds === 0 ? b.trend[i].new : b.trend[i].returning);
@@ -423,9 +426,9 @@ export function Usage({ s, drill, t }: { s: SectionState; drill: Drill; t: Palet
           const data = {
             labels,
             datasets: [
-              { label: "DAU", data: b.trend.map((x) => x.dau.v), borderColor: t.series[0], backgroundColor: t.series[0] },
-              { label: "WAU", data: b.trend.map((x) => x.wau), borderColor: t.series[1], backgroundColor: t.series[1] },
-              { label: "MAU", data: b.trend.map((x) => x.mau), borderColor: t.series[2], backgroundColor: t.series[2] },
+              { label: "DAU", data: b.trend.map((x) => (x.before ? null : x.dau.v)), borderColor: t.series[0], backgroundColor: t.series[0] },
+              { label: "WAU", data: b.trend.map((x) => (x.before ? null : x.wau)), borderColor: t.series[1], backgroundColor: t.series[1] },
+              { label: "MAU", data: b.trend.map((x) => (x.before ? null : x.mau)), borderColor: t.series[2], backgroundColor: t.series[2] },
             ].map((x) => ({ ...x, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0 })),
           };
           chart = (
@@ -441,16 +444,16 @@ export function Usage({ s, drill, t }: { s: SectionState; drill: Drill; t: Palet
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
               {stat("DAU", <N cell={b.dau} env={env} drill={drill} title="Active on the last day" />, `avg ${b.avgDau} over 7 days`)}
               {stat("WAU", <N cell={b.wau} env={env} drill={drill} title="Active in 7 days" />, "7 days")}
-              {stat("MAU", <N cell={b.mau} env={env} drill={drill} title="Active in 30 days" />, "30 days")}
+              {stat("MAU", <N cell={b.mau} env={env} drill={drill} title="Active in 30 days" />, b.mauFrom ? `since ${dayLabel(b.mauFrom)}, counting starts then` : "30 days")}
               {stat("Stickiness", <span>{fmtPct(b.stickiness)}</span>, "avg DAU 7 days / MAU")}
-              {stat("Repeat users", <N cell={b.repeat} env={env} drill={drill} title="Joined in range, active on 2+ days" />, `${fmtPct(b.repeatPct)} of ${fmtN(b.cohort.v)} sign-ups, 2+ days`)}
+              {stat("Joined, came back", <N cell={b.repeat} env={env} drill={drill} title="Joined in range and came back on another day" />, `${fmtPct(b.repeatPct)} of ${fmtN(b.cohort.v)} who joined in range, back another day`)}
             </div>
             <div className="mt-3">{chart}</div>
             <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2" style={{ borderTop: "1px solid var(--grid)", paddingTop: 10 }}>
-              <div className="text-[11px] font-semibold" style={{ color: "var(--ink2)" }}>What repeat users use, against one-time users</div>
+              <div className="text-[11px] font-semibold" style={{ color: "var(--ink2)" }}>Active in range: what people active on 2+ days (ever) use, against one day only</div>
               <Legend items={[
-                { label: "Repeat (2+ days)", color: t.series[0], note: ` ${fmtN(b.repeaters.v)}` },
-                { label: "One day only", color: t.series[1], note: ` ${fmtN(b.oneTime.v)}` },
+                { label: "Active in range, active on 2+ days ever", color: t.series[0], note: ` ${fmtN(b.repeaters.v)}` },
+                { label: "Active in range, one day only", color: t.series[1], note: ` ${fmtN(b.oneTime.v)}` },
               ]} />
             </div>
             {b.features.length ? (
@@ -482,7 +485,7 @@ export function Usage({ s, drill, t }: { s: SectionState; drill: Drill; t: Palet
 
 // -------------------------------------------------------------- power users
 
-interface PowerBody { rule: string; cell: Cell; trend: { day: string; v: number }[]; rows: PowerRow[]; more: number; weekAgo: number | null; byChannel: [string, number][]; source: string }
+interface PowerBody { countFromDay?: string | null; rule: string; cell: Cell; trend: { day: string; v: number | null }[]; rows: PowerRow[]; more: number; weekAgo: number | null; byChannel: [string, number][]; source: string }
 
 export function Power({ s, drill, t, qs }: { s: SectionState; drill: Drill; t: Palette; qs: string }) {
   const body = s.env?.body as PowerBody | undefined;
@@ -504,7 +507,7 @@ export function Power({ s, drill, t, qs }: { s: SectionState; drill: Drill; t: P
                 {b.byChannel.length ? ` · ${b.byChannel.slice(0, 3).map(([c, n]) => `${channelLabel(c)} ${n}`).join(", ")}` : ""}
               </div>
             </div>
-            <div className="mt-2 text-[11px]" style={{ color: "var(--ink2)" }}>Power users each day, last 30 days</div>
+            <div className="mt-2 text-[11px]" style={{ color: "var(--ink2)" }}>Power users each day, last 30 days{b.countFromDay && b.trend[0]?.day < b.countFromDay ? ` (no line before ${dayLabel(b.countFromDay)}: counting starts then)` : ""}</div>
             <div className="h-[90px]"><Line data={data} options={chartOptions(t, {})} plugins={[crosshair]} /></div>
             {b.rows.length ? (
               <div className="mt-3 max-h-[260px] overflow-auto">

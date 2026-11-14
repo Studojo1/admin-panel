@@ -58,10 +58,17 @@ export interface PeriodTile {
   to: string;
   /** the period starts before counting started: it counts from countFromDay */
   partial: boolean;
+  /**
+   * ADMIN-AUDIT-STU (14 Nov 2026): the period ends today, which is not over. Activity is counted per IST day (no time of
+   * day), so it cannot be cut at this time: no comparison (prev is null), shown as "so far".
+   */
+  soFar?: boolean;
 }
 
 export interface RatioTile {
   value: number | null;
+  /** ADMIN-AUDIT-STU: today (not over) is in the number, so it is not compared (prev is null) */
+  soFar?: boolean;
   /** the same ratio a week earlier, or null when its 30 days reach before counting started */
   prev: number | null;
   num: Cell;
@@ -189,7 +196,11 @@ export function activesBody(f: Pick<Filters, "end">, x: ActivesInput, mark: (c: 
     const from = addDays(end, -(n - 1));
     const set = activeIn(from, end);
     const pFrom = addDays(end, -(2 * n - 1));
-    return { cell: C(set), set, prev: counted(pFrom) ? activeIn(pFrom, addDays(end, -n)).size : null, from, to: end, partial: !counted(from) };
+    const soFar = end >= x.today;
+    return {
+      cell: C(set), set, prev: !soFar && counted(pFrom) ? activeIn(pFrom, addDays(end, -n)).size : null, from, to: end, partial: !counted(from),
+      ...(soFar ? { soFar } : {}),
+    };
   };
   const dau = period(1);
   const wau = period(7);
@@ -213,9 +224,12 @@ export function activesBody(f: Pick<Filters, "end">, x: ActivesInput, mark: (c: 
   const weekAgoCounted = counted(addDays(weekAgo, -29));
   const avg = avgDauTo(end);
   const mauCell = mau.cell;
+  // ADMIN-AUDIT-STU: the 7-day average holds today when it is not over, so it is not set against a week of whole days.
+  const endSoFar = end >= x.today;
   const stickiness = {
     value: mau.set.size ? Math.round((avg.avg / mau.set.size) * 1000) / 10 : null,
-    prev: weekAgoCounted ? stickAt(weekAgo) : null,
+    prev: weekAgoCounted && !endSoFar ? stickAt(weekAgo) : null,
+    ...(endSoFar ? { soFar: true } : {}),
     num: dau.cell, den: mauCell, avgDau: Math.round(avg.avg * 10) / 10, avgDays: avg.n,
   };
   const wauMau = { value: pct(wau.set.size, mau.set.size), prev: weekAgoCounted ? wauMauAt(weekAgo) : null, num: wau.cell, den: mauCell };

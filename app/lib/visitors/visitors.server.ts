@@ -2,11 +2,12 @@
 // and every journey read is narrowed first: the range's rows by (step, at) through career_journey_events_step_idx,
 // then the first touch and the account links of just those visitor ids through career_journey_events_visitor_idx.
 // The Stu people (their steps, sign-up day, internal flag) come from the Stu dataset the other Stu pages share
-// (data.server.ts stuData, one-minute cache), so the exclusions and the step times match theirs. Crawler hits come
+// (data.server.ts stuData, stale-while-revalidate), so the exclusions and the step times match theirs. Crawler hits come
 // from public.site_bot_hits, written by the site (Studojo1/frontend journey.server.ts countBotHit); a database
 // without it shows them as not recorded. Nothing here names a person: the report holds counts only.
 import { sql, type SQL } from "drizzle-orm";
 import db from "~/lib/db.server";
+import { swrCache } from "~/lib/swr-cache";
 import { internalReason, stuData, testUsers } from "~/lib/stu/data.server";
 import { stepAt } from "~/lib/stu/model";
 import { type BotRow, type DeviceFilter, type Person, type SiteRow, type VisitorsEnvelope, PERSON_STEPS, SITE_STEPS, addDays, buildReport } from "./model";
@@ -28,7 +29,22 @@ const lit = (xs: readonly string[]) => `ARRAY[${xs.map((x) => `'${x.replace(/'/g
 /** Visitor ids are the site's stu_vid ([A-Za-z0-9_-], 8 to 64 characters), so a comma list is safe. */
 const VID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
+/**
+ * ADMIN-AUDIT-STU (14 Nov 2026): stale-while-revalidate per range, device and internal (app/lib/swr-cache.ts). A report
+ * under a minute old is served as is; up to 5 minutes old it is served at once and rebuilt in the background.
+ */
+const reports = swrCache<VisitorsEnvelope>({
+  freshMs: 60_000, maxStaleMs: 5 * 60_000, max: 60,
+  onError: (k, err) => console.error("[visitors] background rebuild failed, serving the last copy", k, err),
+});
+
 export async function visitorsReport(start: string, end: string, device: DeviceFilter, internal: boolean, fresh: boolean): Promise<VisitorsEnvelope> {
+  const t0 = Date.now();
+  const out = await reports.get(`${start}|${end}|${device}|${internal ? 1 : 0}`, () => buildVisitorsReport(start, end, device, internal, fresh), fresh);
+  return { ...out, ms: Date.now() - t0 };
+}
+
+async function buildVisitorsReport(start: string, end: string, device: DeviceFilter, internal: boolean, fresh: boolean): Promise<VisitorsEnvelope> {
   const t0 = Date.now();
   const from = `${start}T00:00:00+05:30`;
   const to = `${addDays(end, 1)}T00:00:00+05:30`;
@@ -99,7 +115,7 @@ export async function visitorsReport(start: string, end: string, device: DeviceF
     const prev = people[String(l.v)];
     // A visitor id linked to two accounts: internal wins, then the earlier one.
     if (!prev || (!prev.internal && u.internal) || (prev.joined != null && u.joined < prev.joined && !prev.internal)) {
-      people[String(l.v)] = { internal: Boolean(u.internal), joined: u.joined, steps };
+      people[String(l.v)] = { id: u.id, internal: Boolean(u.internal), joined: u.joined, steps };
     }
   }
   if (unknown.size) {
@@ -112,7 +128,7 @@ export async function visitorsReport(start: string, end: string, device: DeviceF
     for (const l of base.links) {
       const u = String(l.u);
       if (!unknown.has(u) || people[String(l.v)]) continue;
-      people[String(l.v)] = { internal: internalIds.has(u), joined: null, steps: {} };
+      people[String(l.v)] = { id: u, internal: internalIds.has(u), joined: null, steps: {} };
     }
   }
 

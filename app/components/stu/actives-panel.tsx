@@ -9,6 +9,7 @@ import {
 import { Chart } from "react-chartjs-2";
 import { type Cell, fmtN, fmtPct } from "~/lib/stu/model";
 import { type ActivesBody, type CohortRow, type PeriodTile, COHORT_RULE, COHORT_SPANS } from "~/lib/stu/actives";
+import { ACTIVES_STACKING, activesDatasets } from "~/lib/stu/actives-chart";
 import { type Drill, type Env, type Palette, type SectionState, Card, Legend, N, Seg, crosshair, dayLabel } from "./overview-kit";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, LineController, Tooltip);
@@ -16,7 +17,9 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 type Body = ActivesBody & { rule: string };
 
 /** Up or down against the period before, in plain words. */
-function vsText(cur: number, prev: number | null, what: string, from: string | null): { text: string; dir: 1 | -1 | 0 | null } {
+function vsText(cur: number, prev: number | null, what: string, from: string | null, soFar?: boolean): { text: string; dir: 1 | -1 | 0 | null } {
+  // ADMIN-AUDIT-STU (14 Nov 2026): today is not over and activity has no time of day, so no % against whole days.
+  if (soFar) return { text: "so far today: not compared with whole days", dir: null };
   if (prev == null) return { text: from ? `nothing to compare: counting starts ${dayLabel(from)}` : "nothing to compare yet", dir: null };
   const diff = cur - prev;
   if (diff === 0) return { text: `same as ${what} (${fmtN(prev)})`, dir: 0 };
@@ -24,7 +27,8 @@ function vsText(cur: number, prev: number | null, what: string, from: string | n
   return { text: `${diff > 0 ? "▲ up" : "▼ down"} ${p} vs ${what} (${fmtN(prev)})`, dir: diff > 0 ? 1 : -1 };
 }
 
-function ptsText(cur: number | null, prev: number | null): { text: string; dir: 1 | -1 | 0 | null } {
+function ptsText(cur: number | null, prev: number | null, soFar?: boolean): { text: string; dir: 1 | -1 | 0 | null } {
+  if (soFar) return { text: "so far today: not compared", dir: null };
   if (cur == null || prev == null) return { text: "a week before: not counted", dir: null };
   const diff = Math.round((cur - prev) * 10) / 10;
   if (diff === 0) return { text: `same as a week before`, dir: 0 };
@@ -43,6 +47,13 @@ function Tile({ label, value, note, change }: { label: string; value: React.Reac
     </div>
   );
 }
+
+/** IST day plus n days, for the MAU note. */
+const addDaysTxt = (day: string, n: number): string => {
+  const d = new Date(day + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
 
 const partialNote = (p: PeriodTile, cf: string | null) => (p.partial && cf ? `${dayLabel(p.from)} to ${dayLabel(p.to)}, counted from ${dayLabel(cf)}` : `${dayLabel(p.from)} to ${dayLabel(p.to)}`);
 
@@ -67,20 +78,27 @@ export function Actives({ s, drill, t }: { s: SectionState; drill: Drill; t: Pal
               <Tile
                 label={`DAU, ${endLabel}`}
                 value={<N cell={b.dau.cell} env={env} drill={drill} title={`Active on ${b.end}`} />}
-                change={vsText(b.dau.cell.v, b.dau.prev, "the day before", cf)}
+                change={vsText(b.dau.cell.v, b.dau.prev, "the day before", cf, b.dau.soFar)}
                 note={<>{fmtN(b.fresh.v)} joined that day</>}
               />
               <Tile
                 label="WAU, 7 days"
                 value={<N cell={b.wau.cell} env={env} drill={drill} title={`Active ${b.wau.from} to ${b.wau.to}`} />}
-                change={vsText(b.wau.cell.v, b.wau.prev, "the 7 days before", cf)}
+                change={vsText(b.wau.cell.v, b.wau.prev, "the 7 days before", cf, b.wau.soFar)}
                 note={partialNote(b.wau, cf)}
               />
               <Tile
                 label="MAU, 30 days"
                 value={<N cell={b.mau.cell} env={env} drill={drill} title={`Active ${b.mau.from} to ${b.mau.to}`} />}
-                change={vsText(b.mau.cell.v, b.mau.prev, "the 30 days before", cf)}
-                note={partialNote(b.mau, cf)}
+                change={vsText(b.mau.cell.v, b.mau.prev, "the 30 days before", cf, b.mau.soFar)}
+                note={<>
+                  {partialNote(b.mau, cf)}
+                  {b.mau.partial && cf && (
+                    <span className="block" title="Everyone who signs up is active on the day they join, so while MAU's 30 days reach back before counting started it is everyone active since then">
+                      Before {dayLabel(addDaysTxt(cf, 29))} this is everyone active since {dayLabel(cf)}, so it moves with sign-ups.
+                    </span>
+                  )}
+                </>}
               />
               <Tile
                 label={`Returning, ${endLabel}`}
@@ -90,7 +108,7 @@ export function Actives({ s, drill, t }: { s: SectionState; drill: Drill; t: Pal
               <Tile
                 label="Stickiness"
                 value={fmtPct(b.stickiness.value)}
-                change={ptsText(b.stickiness.value, b.stickiness.prev)}
+                change={ptsText(b.stickiness.value, b.stickiness.prev, b.stickiness.soFar)}
                 note={<>average DAU {b.stickiness.avgDau} over {b.stickiness.avgDays === 7 ? "7 days" : `${b.stickiness.avgDays} day${b.stickiness.avgDays === 1 ? "" : "s"}`} / MAU <N cell={b.mau.cell} env={env} drill={drill} title="MAU" /></>}
               />
               <Tile
@@ -135,15 +153,8 @@ function DailyChart({ b, env, drill, t }: { b: Body; env: Env; drill: Drill; t: 
   const days = b.chart;
   const colors = { returning: t.series[0], fresh: "#c4b5fd", wau: t.series[2], mau: t.series[3] };
   const dashed = (flags: boolean[]) => ({ borderDash: (c: any) => (flags[c.p1DataIndex] ? [4, 3] : undefined) });
-  const data = {
-    labels: days.map((x) => dayLabel(x.day)),
-    datasets: [
-      { type: "bar" as const, label: "Returning", data: days.map((x) => x.returning.v), backgroundColor: colors.returning, stack: "dau", maxBarThickness: 16, order: 2 },
-      { type: "bar" as const, label: "New (joined that day)", data: days.map((x) => x.new.v), backgroundColor: colors.fresh, stack: "dau", maxBarThickness: 16, borderRadius: { topLeft: 3, topRight: 3 }, borderSkipped: false, order: 2 },
-      { type: "line" as const, label: "WAU", data: days.map((x) => x.wau), borderColor: colors.wau, backgroundColor: colors.wau, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0, segment: dashed(days.map((x) => x.wauPartial)), order: 1 },
-      { type: "line" as const, label: "MAU", data: days.map((x) => x.mau), borderColor: colors.mau, backgroundColor: colors.mau, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0, segment: dashed(days.map((x) => x.mauPartial)), order: 1 },
-    ],
-  };
+  // ADMIN-AUDIT-STU (14 Nov 2026): the bars stack into DAU; WAU and MAU each sit on a stack of their own (actives-chart.ts).
+  const data = { labels: days.map((x) => dayLabel(x.day)), datasets: activesDatasets(days, colors, dashed) };
   const options: any = {
     responsive: true, maintainAspectRatio: false, animation: false,
     interaction: { mode: "index", intersect: false },
@@ -165,8 +176,8 @@ function DailyChart({ b, env, drill, t }: { b: Body; env: Env; drill: Drill; t: 
       },
     },
     scales: {
-      x: { stacked: true, grid: { display: false }, border: { color: t.axis }, ticks: { color: t.muted, maxTicksLimit: 8, maxRotation: 0, font: { size: 11 } } },
-      y: { stacked: false, beginAtZero: true, grid: { color: t.grid }, border: { display: false }, ticks: { color: t.muted, precision: 0, maxTicksLimit: 5, font: { size: 11 }, callback: (v: any) => fmtN(Number(v)) } },
+      x: { ...ACTIVES_STACKING.x, grid: { display: false }, border: { color: t.axis }, ticks: { color: t.muted, maxTicksLimit: 8, maxRotation: 0, font: { size: 11 } } },
+      y: { ...ACTIVES_STACKING.y, beginAtZero: true, grid: { color: t.grid }, border: { display: false }, ticks: { color: t.muted, precision: 0, maxTicksLimit: 5, font: { size: 11 }, callback: (v: any) => fmtN(Number(v)) } },
     },
     onClick: (evt: any, _els: any, chart: any) => {
       const hit = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true)[0] ?? chart.getElementsAtEventForMode(evt, "index", { intersect: false }, true)[0];

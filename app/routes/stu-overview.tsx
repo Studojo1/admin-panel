@@ -316,9 +316,11 @@ function change(cur: number, prev: number | null, inr: boolean | undefined, vs: 
 }
 
 function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usage: SectionState; drill: Drill; range: RangeKey; today: string; end: string }) {
-  const body = s.env?.body as { tiles: KpiTile[]; testPayments: Cell; signupsSplit?: { fresh: Cell; existing: Cell }; prevStart: string; prevEnd: string } | undefined;
+  const body = s.env?.body as { tiles: KpiTile[]; testPayments: Cell; signupsSplit?: { fresh: Cell; existing: Cell }; prevStart: string; prevEnd: string; vs?: string } | undefined;
   const days = body ? Math.round((Date.parse(body.prevEnd) - Date.parse(body.prevStart)) / 86_400_000) + 1 : 1;
-  const vs = days === 1 ? (range === "yesterday" || end !== today ? "vs the day before" : "vs yesterday") : `vs the ${days} days before`;
+  // ADMIN-AUDIT-STU (14 Nov 2026): the server says what the range is set against ("vs yesterday at this time" when it ends today).
+  const vs = body?.vs ?? (days === 1 ? (range === "yesterday" || end !== today ? "vs the day before" : "vs yesterday") : `vs the ${days} days before`);
+  const soFarText = days === 1 ? "so far today" : "so far, today is not over";
   const tile = (key: string) => body?.tiles.find((x) => x.key === key);
   // ACTIVES (14 Nov 2026): the Active students card's second line is DAU, WAU and MAU to the range's last day (/usage).
   const ub = usage.env?.body as { dau: Cell; wau: Cell; mau: Cell } | undefined;
@@ -347,7 +349,7 @@ function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usa
                 onClick={people ? () => drill(t.label, t.cell, env) : undefined}
                 note={h.key === "active" && actives ? actives :
                   <>
-                    {t.cell.na ? "not tracked here yet" : change(t.cell.v, t.prev, t.inr, vs)}
+                    {t.cell.na ? "not tracked here yet" : t.soFar ? <span title="Counted by IST day only, so it cannot be set against the same time yesterday; no % against a whole day">{soFarText}</span> : change(t.cell.v, t.prev, t.inr, vs)}
                     {test > 0 && <><br />Excludes {test} test payment{test === 1 ? "" : "s"}</>}
                     {split && (
                       <>
@@ -366,7 +368,7 @@ function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usa
       </div>
       {body && s.env && (
         <div className="mt-4 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 rounded-xl border-2 border-neutral-900 bg-white px-4 py-2.5 text-sm shadow-[3px_3px_0px_0px_rgba(25,26,35,1)]">
-          <span className="text-xs font-bold uppercase tracking-wide text-neutral-500">Also in range</span>
+          <span className="text-xs font-bold uppercase tracking-wide text-neutral-500" title={`Changes are ${vs}`}>Also in range</span>
           {ALSO.map((key) => {
             const t = tile(key);
             if (!t) return null;
@@ -374,7 +376,7 @@ function Headline({ s, usage, drill, range, today, end }: { s: SectionState; usa
             return (
               <span key={key} className="whitespace-nowrap text-neutral-700" title={t.sub ? `${t.sub}. Source: ${t.source}` : `Source: ${t.source}`}>
                 {t.label} <N cell={t.cell} env={s.env!} drill={drill} title={t.label} className="font-bold text-neutral-950" />
-                {c && !c.startsWith("no ") && <span className={`ml-1 text-xs ${t.cell.v >= (t.prev ?? 0) ? "text-emerald-700" : "text-red-600"}`}>{c}</span>}
+                {t.soFar ? <span className="ml-1 text-xs text-neutral-500">so far</span> : c && !c.startsWith("no ") && <span className={`ml-1 text-xs ${t.cell.v >= (t.prev ?? 0) ? "text-emerald-700" : "text-red-600"}`}>{c}</span>}
               </span>
             );
           })}
@@ -426,7 +428,7 @@ function Insights({ s, drill, qs }: { s: SectionState; drill: Drill; qs: string 
 
 // ------------------------------------------------------------------ chart
 
-interface TrendsBody { days: string[]; series: { key: string; label: string; na: boolean; cells: Cell[] }[] }
+interface TrendsBody { days: string[]; series: { key: string; label: string; na: boolean; cells: Cell[] }[]; countFromDay?: string | null }
 interface UsageTrend { trend: { day: string; dau: Cell }[] }
 
 /** Shades the days of the picked range. */
@@ -464,7 +466,7 @@ function TrendChart({ trends, usage, kpis, start, end, drill }: { trends: Sectio
     const lines: { key: keyof typeof SERIES; label: string; cells: Cell[]; env: Env }[] = [
       { key: "signups", label: "Sign-ups", cells: cellsOf("signups"), env: trends.env! },
       { key: "onboarded", label: "Onboarded", cells: cellsOf("onboarded"), env: trends.env! },
-      { key: "active", label: "Active students", cells: days.map((d) => active.get(d) ?? ({ v: 0, users: [] } as Cell)), env: usage.env! },
+      { key: "active", label: "Active students", cells: days.map((d) => active.get(d) ?? ({ v: 0, users: [], na: true } as Cell)), env: usage.env! },
     ];
     const paid = { label: "Paid (people)", cells: cellsOf("paid"), env: trends.env! };
     // Revenue by day exists for the last 14 days (the KPI section); shown in the tooltip where known.
@@ -531,6 +533,9 @@ function TrendChart({ trends, usage, kpis, start, end, drill }: { trends: Sectio
             {paid.label} <span className="text-neutral-500">{fmtN(total(paid.cells))} in 30 days</span>
           </span>
           {from >= 0 && <span className="flex items-center gap-1.5 text-neutral-500"><span className="inline-block h-3 w-4 rounded-sm" style={{ background: "rgba(168,85,247,0.18)" }} />your range</span>}
+          {tb!.countFromDay && days[0] < tb!.countFromDay && (
+            <span className="text-neutral-500">No line before {dayLabel(tb!.countFromDay)}: counting starts then (no data, not zero)</span>
+          )}
         </div>
         <div className="h-64 md:h-72"><Chart type="bar" data={data as any} options={options} plugins={[crosshair, rangeBand]} /></div>
       </div>
@@ -555,9 +560,9 @@ function TrendChart({ trends, usage, kpis, start, end, drill }: { trends: Sectio
 
 function ShortFunnel({ s, drill, qs }: { s: SectionState; drill: Drill; qs: string }) {
   return (
-    <Card title="Funnel" sub="People who joined in range; each step counts those who passed the main steps before it. % is of the main step it follows, never over 100%." s={s} minH={230}>
+    <Card title="Funnel" sub="Of people who joined in range (visitor bars: visitor ids in range); each step counts those who passed the main steps before it. % is of the main step it follows, never over 100%." s={s} minH={230}>
       {(env) => {
-        const body = env.body as { key: FunnelBar[]; cohort: number; paidLive?: boolean };
+        const body = env.body as { key: FunnelBar[]; cohort: number; paidLive?: boolean; earlierPaid?: EarlierPaid };
         // The shown bars, with their % worked out again among themselves (the same rules as the server's, funnelBasis).
         const bars = FUNNEL_STEPS.map((k) => body.key.find((b) => b.key === k)).filter((b): b is FunnelBar => Boolean(b)).map((b) => ({ ...b }));
         const dropKey = funnelBasis(bars, Boolean(body.paidLive));
@@ -604,10 +609,25 @@ function ShortFunnel({ s, drill, qs }: { s: SectionState; drill: Drill; qs: stri
               </span>
               <Link to={`/funnel?${qs}`} className="font-semibold text-purple-700 underline underline-offset-2">All steps →</Link>
             </div>
+            <EarlierPaidLine e={body.earlierPaid} env={env} drill={drill} />
           </div>
         );
       }}
     </Card>
+  );
+}
+
+// ---------------------------------------------- payers from before the range
+
+/** ADMIN-AUDIT-STU (14 Nov 2026): people who joined before the range and paid in it (in the tiles, not in the cohort panels). */
+interface EarlierPaid { cell: Cell; revenue: number }
+
+function EarlierPaidLine({ e, env, drill }: { e?: EarlierPaid; env: Env; drill: Drill }) {
+  if (!e || e.cell.v <= 0) return null;
+  return (
+    <p className="mt-2 text-xs text-neutral-500" title="The Paid and Revenue tiles count every real payment in the range; this panel counts only people who joined in it">
+      +<N cell={e.cell} env={env} drill={drill} title="Joined before the range, paid in it" className="font-semibold text-neutral-800" /> earlier sign-up{e.cell.v === 1 ? "" : "s"} paid {fmtInr(e.revenue)} in range (in the Paid and Revenue tiles, not here).
+    </p>
   );
 }
 
@@ -618,13 +638,14 @@ function TopSources({ s, drill, qs }: { s: SectionState; drill: Drill; qs: strin
   return (
     <Card
       title="Top sources"
-      sub="First touch of the people who joined in range. Channel reads the referrer too, so a Google search is not untagged."
+      sub="Of people who joined in range, by first touch; paid and revenue are theirs. Channel reads the referrer too, so a Google search is not untagged."
       s={s}
       minH={230}
       right={<Seg label="Split by" value={by} onChange={setBy} options={[{ v: "channel", l: "Channel" }, { v: "source", l: "utm tag" }, { v: "campaign", l: "Campaign" }]} />}
     >
       {(env) => {
         const split = (env.body as Partial<Record<"channel" | "source" | "campaign", { rows: SourceRow[]; total: number }>>)[by];
+        const earlier = (env.body as { earlierPaid?: EarlierPaid }).earlierPaid;
         const rows = split?.rows ?? [];
         if (!rows.length) return <p className="text-sm text-neutral-500">Nobody joined in this range.</p>;
         return (
@@ -653,6 +674,7 @@ function TopSources({ s, drill, qs }: { s: SectionState; drill: Drill; qs: strin
                 </tbody>
               </table>
             </div>
+            <EarlierPaidLine e={earlier} env={env} drill={drill} />
             <div className="mt-3 flex justify-end text-xs">
               <Link to={`/sources?${qs}`} className="font-semibold text-purple-700 underline underline-offset-2">Channels and more →</Link>
             </div>

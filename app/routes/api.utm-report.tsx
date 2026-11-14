@@ -2,6 +2,7 @@ import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 import { requireAdmin } from "~/lib/auth-helper.server";
 import { stuData } from "~/lib/stu/data.server";
+import { swrCache } from "~/lib/swr-cache";
 import { istDay, stepAt, todayIst } from "~/lib/stu/model";
 import {
   buildReport,
@@ -108,6 +109,12 @@ async function loadRaw(touch: "first" | "last") {
   });
 }
 
+/** ADMIN-AUDIT-STU (14 Nov 2026): the raw rows, stale-while-revalidate per touch (app/lib/swr-cache.ts): it took 8 s a read. */
+const rawCache = swrCache<Awaited<ReturnType<typeof loadRaw>>>({
+  freshMs: 60_000, maxStaleMs: 5 * 60_000, max: 2,
+  onError: (k, err) => console.error("[api/utm-report] background rebuild failed, serving the last copy", k, err),
+});
+
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireAdmin(request);
   if (!user) return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -121,7 +128,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const headers = { "Cache-Control": "no-store" };
 
   try {
-    const [d, raw] = await Promise.all([stuData(p("fresh") === "1"), loadRaw(touch)]);
+    const fresh = p("fresh") === "1";
+    const [d, raw] = await Promise.all([stuData(fresh), rawCache.get(touch, () => loadRaw(touch), fresh)]);
 
     const links: LinkKey[] = raw.links.map((r) => ({
       id: String(r.id),

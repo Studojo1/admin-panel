@@ -6,7 +6,7 @@
 // and the median time between the funnel bars it shows.
 import {
   type BasisBar, type Cell, type Filters, type StuData, type WireUser, ANON_STEPS, DAILY_METRICS, FEATURES, FEATURE_LABELS, activity, activitySource, fmtInr, istDay, NON_DESK, STEP_BY_KEY, USER_STEPS,
-  addDays, arriveCells, cellOf, cohortOf, dayRange, dropoffs, funnel, funnelBasis, liveDays, median, paidLive, pct, ratios, retention, signupSourceText, sources, stepAt, scopeUsers,
+  addDays, arriveCells, cellOf, cohortOf, compareBasis, compareText, dataNow, dayRange, dropoffs, funnel, funnelBasis, liveDays, median, paidLive, pct, ratios, retention, signupSourceText, sources, stepAt, scopeUsers,
 } from "./model";
 
 export { funnelBasis } from "./model";
@@ -85,11 +85,16 @@ export interface KpiTile {
   inr?: boolean;
   cell: Cell;
   prev: number | null;
+  /**
+   * ADMIN-AUDIT-STU (14 Nov 2026): the range ends today and this metric is counted per IST day only, so it cannot be
+   * cut at this time of day: shown as "so far", with no % against a whole day.
+   */
+  soFar?: boolean;
   spark: { day: string; v: number; inRange: boolean }[];
   source: string;
 }
 
-/** The range just before this one, the same number of days. */
+/** The range just before this one, the same number of days (not cut at a time: compareBasis does that). */
 export function previousRange(f: Filters): Filters {
   const n = dayRange(f.start, f.end).length;
   return { ...f, start: addDays(f.start, -n), end: addDays(f.start, -1) };
@@ -104,18 +109,22 @@ export const existingAccount = (d: StuData, u: WireUser): boolean => u.existing 
 export function kpis(d: StuData, f: Filters, refs: Refs) {
   const scope = new Set(scopeUsers(d, f));
   const days = new Set(dayRange(f.start, f.end));
-  const pf = previousRange(f);
+  // ADMIN-AUDIT-STU (14 Nov 2026): a range that ends today is compared with the period before cut at this time of day.
+  const cmp = compareBasis(f, dataNow(d));
+  const pf = cmp.pf;
   const prevDays = new Set(dayRange(pf.start, pf.end));
   const sparkDays = dayRange(addDays(f.end, -13), f.end);
   const tiles: KpiTile[] = KPI_TILES.map((t) => {
     const m = metric(t.metric);
     const cell = refs.cell(m.cell(d, f, days, scope));
-    const prev = m.cell(d, pf, prevDays, scope);
-    // No "vs" against a period before the reset, or against a visitor count that was not tracked all of that period.
-    const noPrev = prev.na || prev.old || prev.trackedFrom != null || beforeReset(d, pf);
+    const prev = m.cell(d, pf, prevDays, scope, cmp.until);
+    const soFar = cmp.soFar && !m.timed;
+    // No "vs" against a period before the reset, or against a visitor count that was not tracked all of that period,
+    // or (soFar) against whole days when the metric cannot be cut at this time.
+    const noPrev = soFar || prev.na || prev.old || prev.trackedFrom != null || beforeReset(d, pf);
     return {
       key: t.key, label: t.label, sub: "sub" in t ? t.sub : undefined, inr: "inr" in t ? t.inr : undefined,
-      cell, prev: noPrev ? null : prev.v,
+      cell, prev: noPrev ? null : prev.v, ...(soFar ? { soFar } : {}),
       spark: sparkDays.map((day) => ({ day, v: m.cell(d, f, new Set([day]), scope).v, inRange: days.has(day) })),
       source: m.source(d),
     };
@@ -125,7 +134,7 @@ export function kpis(d: StuData, f: Filters, refs: Refs) {
   const su = tiles.find((t) => t.key === "signups")!.cell;
   const existing = su.users.filter((i) => existingAccount(d, d.users[i]));
   const signupsSplit = { fresh: refs.cell(cellOf(su.users.filter((i) => !existingAccount(d, d.users[i])))), existing: refs.cell(cellOf(existing)) };
-  return { tiles, testPayments: test, signupsSplit, prevStart: pf.start, prevEnd: pf.end };
+  return { tiles, testPayments: test, signupsSplit, prevStart: pf.start, prevEnd: pf.end, until: cmp.until, vs: compareText(f, cmp) };
 }
 
 // ----------------------------------------------------------------------- funnel
@@ -190,7 +199,7 @@ export function overviewFunnel(d: StuData, f: Filters, refs: Refs) {
   };
   const anonBars: FunnelBar[] = ANON_STEPS.map((s) => ({
     key: s.key, n: s.n, label: s.label, phase: s.phase, anon: true, gate: false, cell: refs.cell(arrive[s.key]), pctPrev: null, medianMs: null,
-    fromKey: null, untracked: untracked(s.key),
+    fromKey: null, untracked: untracked(s.key), ...("partial" in s && s.partial ? { partial: true } : {}),
   }));
   const userRows = nested.rows.filter((r) => !r.test);
   const withPaid = paidLive(d);
@@ -222,7 +231,21 @@ export function overviewFunnel(d: StuData, f: Filters, refs: Refs) {
   };
   const key = build(FUNNEL_KEY_STEPS);
   const all = build(null);
-  return { key: key.bars, all: all.bars, dropKey: key.drop, dropAll: all.drop, cohort: cohort.length, paidLive: withPaid };
+  return { key: key.bars, all: all.bars, dropKey: key.drop, dropAll: all.drop, cohort: cohort.length, paidLive: withPaid, earlierPaid: earlierPayers(d, f, refs) };
+}
+
+/**
+ * ADMIN-AUDIT-STU (14 Nov 2026): the Paid and Revenue tiles count every real payment in the range; the Funnel and Top
+ * sources count only the people who joined in range. This is the difference: people who joined before the range and
+ * paid in it, and what they paid in it, so the panels reconcile with the tiles.
+ */
+export function earlierPayers(d: StuData, f: Filters, refs: Refs): { cell: Cell; revenue: number } {
+  const scope = new Set(scopeUsers(d, f));
+  const days = new Set(dayRange(f.start, f.end));
+  const cohort = new Set(cohortOf(d, f));
+  const rev = new Map<number, number>();
+  for (const [k, u, day, , amt] of d.act) if (k === "pay" && scope.has(u) && days.has(day) && !cohort.has(u)) rev.set(u, (rev.get(u) ?? 0) + amt);
+  return { cell: refs.cell(cellOf([...rev.keys()])), revenue: [...rev.values()].reduce((a, b) => a + b, 0) };
 }
 
 // ----------------------------------------------------------------------- trends
@@ -243,9 +266,14 @@ export const TREND_RATES = [
 export function trends(d: StuData, f: Filters, refs: Refs) {
   const days = dayRange(addDays(f.end, -29), f.end);
   const scope = new Set(scopeUsers(d, f));
+  // ADMIN-AUDIT-STU (14 Nov 2026): a day before the count-from line was not counted: no data, not a zero.
+  const from = d.countFrom != null ? istDay(d.countFrom) : null;
   const series = TREND_SERIES.map((s) => {
     const m = metric(s.metric);
-    return { key: s.key, label: s.label, na: false, cells: days.map((day) => refs.cell(m.cell(d, f, new Set([day]), scope))) };
+    return {
+      key: s.key, label: s.label, na: false,
+      cells: days.map((day) => (from && day < from ? { v: 0, users: [], na: true } : refs.cell(m.cell(d, f, new Set([day]), scope)))),
+    };
   });
   for (const s of series) s.na = s.cells.every((c) => c.na);
   const byKey = Object.fromEntries(series.map((s) => [s.key, s.cells.map((c) => c.v)]));
@@ -257,7 +285,7 @@ export function trends(d: StuData, f: Filters, refs: Refs) {
     const skip = days.map((_, k) => naKey[r.num][k] || naKey[r.den][k]);
     return { key: r.key, label: r.label, values: days.map((_, k) => pct(sum(byKey[r.num], k, skip), sum(byKey[r.den], k, skip))) };
   });
-  return { days, series, rates };
+  return { days, series, rates, countFromDay: from };
 }
 
 // ---------------------------------------------------------------------- sources
@@ -293,7 +321,7 @@ export function overviewSources(d: StuData, f: Filters, refs: Refs, channelName:
     return { rows: top, total: s.cohort.length };
   };
   // ADMIN-FIX (5 Nov 2026): channels first (they read the referrer, so a Google search is not "(none)"), as /sources.
-  return { channel: split("channel"), source: split("source"), campaign: split("campaign") };
+  return { channel: split("channel"), source: split("source"), campaign: split("campaign"), earlierPaid: earlierPayers(d, f, refs) };
 }
 
 // ------------------------------------------------------------------- call health
@@ -360,11 +388,14 @@ export function engagement(d: StuData, f: Filters, refs: Refs) {
   const headline = ([1, 7, 30] as const).map((n) => {
     const back = weeks.flatMap((w) => w.d[`d${n}`]?.back.users ?? []);
     const eligible = weeks.flatMap((w) => w.d[`d${n}`]?.eligible.users ?? []);
+    // ADMIN-AUDIT-STU (14 Nov 2026): day N is today for some of them: the day is not over, so it is "so far".
+    const soFar = weeks.some((w) => w.d[`d${n}`]?.soFar);
     return {
       n,
       back: refs.cell({ ...cellOf(back), na: !d.journeyLive }),
       eligible: refs.cell(cellOf(eligible)),
       value: d.journeyLive ? pct(back.length, eligible.length) : null,
+      ...(soFar ? { soFar } : {}),
     };
   });
   const heat = retention(d, f, false, "day", HEAT_DAYS).slice(0, 14).map((r) => ({
@@ -372,7 +403,7 @@ export function engagement(d: StuData, f: Filters, refs: Refs) {
     size: refs.cell(r.size),
     d: HEAT_DAYS.map((n) => {
       const x = r.d[`d${n}`];
-      return { n, back: refs.cell(x.back), eligible: x.eligible.v, value: x.value };
+      return { n, back: refs.cell(x.back), eligible: x.eligible.v, value: x.value, ...(x.soFar ? { soFar: true } : {}) };
     }),
   }));
   const scope = new Set(scopeUsers(d, f));
@@ -430,7 +461,7 @@ export function alertsFromData(d: StuData, f: Filters, refs: Refs): Alert[] {
   const out: Alert[] = [];
   const fail = ratios(d, f).find((x) => x.key === "call_fail_calls")!;
   if (fail.value != null && fail.value > CALL_FAIL_ALERT_PCT) {
-    out.push({ key: "call_fail", level: "critical", text: `Failed calls at ${fail.value}% (${fail.num.v} of ${fail.den.v}), over the ${CALL_FAIL_ALERT_PCT}% line`, cell: refs.cell(fail.num), href: "/drop-offs" });
+    out.push({ key: "call_fail", level: "critical", text: `Failed call attempts at ${fail.value}% (${fail.num.v} of ${fail.den.v}, mic denied included), over the ${CALL_FAIL_ALERT_PCT}% line`, cell: refs.cell(fail.num), href: "/drop-offs" });
   }
   return out;
 }
@@ -466,13 +497,19 @@ export function usage(d: StuData, f: Filters, refs: Refs) {
   const act = activeDays(d, scope);
   const end = f.end;
   const trendDays = dayRange(addDays(end, -29), end);
+  // ADMIN-AUDIT-STU (14 Nov 2026): a day before the count-from line was not counted: before, and no data on the charts.
+  const from = d.countFrom != null ? istDay(d.countFrom) : null;
   const trend = trendDays.map((day) => {
     const dau = activeBetween(act, day, day);
     const mau = activeBetween(act, addDays(day, -29), day).length;
     const wau = activeBetween(act, addDays(day, -6), day).length;
     const isNew = dau.filter((u) => istDay(d.users[u].joined) === day);
     const ret = dau.filter((u) => istDay(d.users[u].joined) < day);
-    return { day, dau: refs.cell(cellOf(dau)), wau, mau, stick: pct(dau.length, mau), new: refs.cell(cellOf(isNew)), returning: refs.cell(cellOf(ret)) };
+    const before = from != null && day < from;
+    return {
+      day, dau: before ? { ...cellOf([]), na: true } : refs.cell(cellOf(dau)), wau, mau, stick: before ? null : pct(dau.length, mau),
+      new: refs.cell(cellOf(isNew)), returning: refs.cell(cellOf(ret)), ...(before ? { before } : {}),
+    };
   });
   // ADMIN-FIX (5 Nov 2026): the average is over the days on or after the count-from line only; days before it are not
   // zeros, they were not counted.
@@ -496,6 +533,8 @@ export function usage(d: StuData, f: Filters, refs: Refs) {
   }).filter((x) => x.rep.v + x.one.v > 0).sort((a, b) => (b.repPct ?? 0) - (a.repPct ?? 0));
   return {
     dau: trend[trend.length - 1].dau, wau, mau, avgDau: Math.round(avgDau * 10) / 10, avgDays: last7.length, avgFrom: last7[0]?.day ?? end,
+    // MAU's 30 days reach back before counting started: it counts from then (everyone who signed up since is in it).
+    mauFrom: from != null && addDays(end, -29) < from ? from : null,
     stickiness: mau.v ? Math.round((avgDau / mau.v) * 1000) / 10 : null,
     trend,
     repeat: refs.cell(cellOf(repeat)), cohort: refs.cell(cellOf(cohort)), repeatPct: pct(repeat.length, cohort.length),
@@ -554,12 +593,15 @@ export function power(d: StuData, f: Filters, refs: Refs) {
     };
   }).sort((a, b) => b.activeDays - a.activeDays || b.richDays - a.richDays || b.lastActive.localeCompare(a.lastActive));
   const cell = refs.cell(cellOf(rows.map((r) => r.u)));
-  const trend = dayRange(addDays(end, -29), end).map((day) => ({ day, v: powerAt(d, scope, day).size }));
+  // ADMIN-AUDIT-STU (14 Nov 2026): a day before the count-from line was not counted: no data (null), not a zero.
+  const countDay = d.countFrom != null ? istDay(d.countFrom) : null;
+  const trend = dayRange(addDays(end, -29), end).map((day) => ({ day, v: countDay != null && day < countDay ? null : powerAt(d, scope, day).size }));
   const byChannel = new Map<string, number>();
   for (const r of rows) byChannel.set(r.ch, (byChannel.get(r.ch) ?? 0) + 1);
   return {
     rule: POWER_RULE, cell, trend, rows: rows.slice(0, 50), more: Math.max(0, rows.length - 50),
     weekAgo: trend.length > 7 ? trend[trend.length - 8].v : null,
+    countFromDay: countDay,
     byChannel: [...byChannel.entries()].sort((a, b) => b[1] - a[1]),
     source: activitySource(d),
   };
@@ -576,11 +618,6 @@ export interface Insight {
   cell?: Cell;
 }
 
-const vsText = (f: Filters): string => {
-  const n = dayRange(f.start, f.end).length;
-  if (n === 1) return f.end === todayIstSafe() ? "vs yesterday" : "vs the day before";
-  return `vs the ${n} days before`;
-};
 const todayIstSafe = () => istDay(Date.now());
 const niceDay = (day: string) => {
   const d = new Date(day + "T00:00:00Z");
@@ -597,31 +634,35 @@ export function insights(d: StuData, f: Filters, refs: Refs, channelName: (k: st
   const scratch = new Refs(d);
   const scope = new Set(scopeUsers(d, f));
   const days = new Set(dayRange(f.start, f.end));
-  const pf = previousRange(f);
+  // ADMIN-AUDIT-STU (14 Nov 2026): the same basis as the tiles: a range that ends today against the period before cut at
+  // this time of day ("vs yesterday at this time").
+  const cmp = compareBasis(f, dataNow(d));
+  const pf = cmp.pf;
+  const vs = compareText(f, cmp);
   const when = dayRange(f.start, f.end).length === 1 ? (f.end === todayIstSafe() ? "today" : `on ${niceDay(f.end)}`) : "in this range";
 
   // Failing calls first: they say students are stuck.
   const cl = calls(d, f, scratch);
   const topReason = cl.reasons[0];
   if (cl.failCalls.value != null && cl.failCalls.value > CALL_FAIL_ALERT_PCT) {
-    out.push({ key: "calls", score: 90, text: `Calls are failing at ${cl.failCalls.value}% (${cl.failCalls.num.v} of ${cl.failCalls.den.v})${topReason ? `; the top reason is "${topReason.label}" (${topReason.cell.v} people)` : ""}.`, href: "#calls", cell: cl.failCalls.num });
+    out.push({ key: "calls", score: 90, text: `Call attempts are failing at ${cl.failCalls.value}% (${cl.failCalls.num.v} of ${cl.failCalls.den.v}, mic denied included)${topReason ? `; the top reason is "${topReason.label}" (${topReason.cell.v} people)` : ""}.`, href: "#calls", cell: cl.failCalls.num });
   }
 
   // Sign-ups against the period before, and where they came from.
   const su = metric("signups");
   const cur = su.cell(d, f, days, scope);
-  const prev = su.cell(d, pf, new Set(dayRange(pf.start, pf.end)), scope).v;
+  const prev = su.cell(d, pf, new Set(dayRange(pf.start, pf.end)), scope, cmp.until).v;
   const from = signupSourceText(d, f, cur.v, channelName);
   if (beforeReset(d, pf)) {
     // Nothing was counted before the line, so there is nothing to compare with.
     if (cur.v === 0) out.push({ key: "signups", score: 40, text: `No sign-ups ${when}.`, href: "#kpis" });
     else out.push({ key: "signups", score: 55, text: `${cur.v} sign-up${cur.v === 1 ? "" : "s"} ${when}${from}.`, href: "#sources", cell: cur });
   } else if (cur.v === 0 && prev === 0) out.push({ key: "signups", score: 40, text: `No sign-ups ${when}, and none in the period before.`, href: "#kpis" });
-  else if (cur.v === 0) out.push({ key: "signups", score: 75, text: `No sign-ups ${when} (${prev} ${vsText(f).replace("vs ", "")}).`, href: "#kpis" });
-  else if (prev === 0) out.push({ key: "signups", score: 60, text: `${cur.v} sign-up${cur.v === 1 ? "" : "s"} ${when}, none ${vsText(f).replace("vs ", "")}${from}.`, href: "#sources", cell: cur });
+  else if (cur.v === 0) out.push({ key: "signups", score: 75, text: `No sign-ups ${when} (${prev} ${vs.replace("vs ", "")}).`, href: "#kpis" });
+  else if (prev === 0) out.push({ key: "signups", score: 60, text: `${cur.v} sign-up${cur.v === 1 ? "" : "s"} ${when}, none ${vs.replace("vs ", "")}${from}.`, href: "#sources", cell: cur });
   else {
     const ch = Math.round(((cur.v - prev) / prev) * 100);
-    out.push({ key: "signups", score: 50 + Math.min(30, Math.abs(ch) / 3), text: `Sign-ups are ${ch >= 0 ? "up" : "down"} ${Math.abs(ch)}% ${vsText(f)} (${cur.v} vs ${prev})${from}.`, href: "#sources", cell: cur });
+    out.push({ key: "signups", score: 50 + Math.min(30, Math.abs(ch) / 3), text: `Sign-ups are ${ch >= 0 ? "up" : "down"} ${Math.abs(ch)}% ${vs} (${cur.v} vs ${prev})${from}.`, href: "#sources", cell: cur });
   }
 
   // The biggest drop in the funnel's key steps, with the top call reason when it is a call step.

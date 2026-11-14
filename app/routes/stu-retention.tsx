@@ -37,7 +37,10 @@ export default function StuRetention() {
                   const c = r.d[`d${n}`];
                   return (
                     <td key={n} className="px-3 py-2 text-right">
-                      <div className="font-bold">{c.value == null ? (c.eligible.v ? "n/a" : "") : fmtPct(c.value)}</div>
+                      <div className="font-bold" title={c.soFar ? `So far: day ${n} is today for some of them, and today is not over` : undefined}>
+                        {c.value == null ? (c.eligible.v ? "n/a" : "") : fmtPct(c.value)}
+                        {c.soFar && <span className="ml-1 text-[11px] font-semibold text-amber-700">so far</span>}
+                      </div>
                       <div className="text-[11px] text-neutral-500">
                         <Num cell={c.back} title={`Week of ${r.week}: back on D${n}${orLater ? " or later" : ""}`} /> of <Num cell={c.eligible} title={`Week of ${r.week}: D${n} has come`} />
                       </div>
@@ -51,7 +54,7 @@ export default function StuRetention() {
         </table>
       </div>
       <SourceNote>
-        Any activity, as Active students counts it ({activitySource(data)}), one a person a IST day. Out of: people whose day N has already come. Day 0 is the IST day they joined.
+        Any activity, as Active students counts it ({activitySource(data)}), one a person a IST day. Out of: people whose day N has already come. Day 0 is the IST day they joined. "so far": day N is today for some of them, and today is not over.
       </SourceNote>
     </div>
   );

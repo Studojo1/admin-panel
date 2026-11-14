@@ -110,8 +110,10 @@ test("drop-off: the furthest step of each real visitor who did not sign up, and 
   assert.equal(dropOf(new Set(["real", "engaged", "scrolled"])), "scrolled");
   assert.equal(dropOf(new Set(["real", "cta"])), "cta", "Start on the first screen counts even without a scroll");
   assert.equal(dropOf(new Set(["real", "cta", "clicked"])), "clicked");
-  assert.equal(dropOf(new Set(["real", "clicked", "began"])), "began");
-  assert.deepEqual(DROPS.map((d) => d.key), ["began", "clicked", "cta", "scrolled", "stayed", "bounced"]);
+  // ADMIN-AUDIT-STU (14 Nov 2026): Began sign-up is partly tracked (about 1 sign-up in 10), so it is never a stop.
+  assert.equal(dropOf(new Set(["real", "clicked", "began"])), "clicked");
+  assert.equal(dropOf(new Set(["real", "began"])), "clicked", "began without a tracked click: still clicked Start");
+  assert.deepEqual(DROPS.map((d) => d.key), ["clicked", "cta", "scrolled", "stayed", "bounced"]);
   const r = buildReport(input({
     rows: [
       row("a", "page_view"), row("a", "page_engaged", { engaged: 20, cta: true }),
@@ -215,4 +217,28 @@ test("by day over a range", () => {
     { day: "2026-11-04", real: 1, likelyBots: 0, crawlers: 5, signedUp: 0 },
   ]);
   assert.equal(r.summary.real, 1, "one visitor over two days");
+});
+
+test("ADMIN-AUDIT-STU: signed up counts people, not browsers, and only those who joined by the end of the range", () => {
+  const r = buildReport(input({
+    rows: [
+      // One person on a phone and a laptop: one sign-up.
+      row("phone", "page_view", { at: T("09:00") }), row("laptop", "page_view", { at: T("09:30"), device: "desktop" }),
+      // Joined the day after the range: not this range's sign-up, and a non-sign-up visitor here.
+      row("later", "page_view"),
+      row("solo", "page_view"),
+    ],
+    people: {
+      phone: { id: "u1", internal: false, joined: T("10:00"), steps: { reached_stu: T("10:01") } },
+      laptop: { id: "u1", internal: false, joined: T("10:00"), steps: { reached_stu: T("10:01") } },
+      later: { id: "u2", internal: false, joined: T("10:00", "2026-11-05"), steps: { reached_stu: T("10:05", "2026-11-05") } },
+      solo: { id: "u3", internal: false, joined: T("11:00"), steps: {} },
+    },
+  }));
+  assert.equal(r.summary.real, 4, "real visitors are browsers");
+  assert.equal(r.summary.signedUp, 2, "u1 once and u3; u2 joined after the range");
+  assert.equal(r.total.counts.reached_stu, 1, "u1's later step once; u2's is after the range");
+  assert.equal(r.byDay[0].signedUp, 2);
+  assert.equal(r.dropTotal.total, 1, "u2 had not signed up in the range; u1's second browser is not a drop-off");
+  assert.ok(r.summary.signedUp <= 2);
 });

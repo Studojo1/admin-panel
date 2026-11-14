@@ -2,7 +2,7 @@
 // first, green or red against the period before. Every cell opens its people.
 import { useMemo, useState } from "react";
 import { CARD, Num, PageTitle, SourceNote, useStu } from "~/components/stu/ui";
-import { dailyTable, fmtInr } from "~/lib/stu/model";
+import { dailyTable, dailyTone, fmtInr } from "~/lib/stu/model";
 
 const GROUPS = [{ g: 1, label: "Daily" }, { g: 3, label: "3-day" }, { g: 7, label: "Weekly" }];
 
@@ -16,7 +16,7 @@ export default function StuDaily() {
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <PageTitle title="Daily" sub="Newest first. Green: up on the period before; red: down. Test rows are never coloured. Click any number for the people behind it." />
+        <PageTitle title="Daily" sub="Newest first. Green: up on the period before; red: down. Today's column is so far (the day is not over), so it is never coloured; test rows are never coloured either. Click any number for the people behind it." />
         <div className="mb-4 flex items-center gap-1 rounded-xl border-2 border-neutral-900 bg-white p-0.5">
           {GROUPS.map((x) => (
             <button key={x.g} onClick={() => setGroup(x.g)} className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${group === x.g ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"}`}>{x.label}</button>
@@ -31,7 +31,7 @@ export default function StuDaily() {
                 <th className="sticky left-0 z-10 min-w-[230px] border-b border-neutral-200 bg-neutral-50 px-4 py-2 text-left font-semibold text-neutral-700">Metric</th>
                 <th className="border-b border-l border-neutral-200 px-3 py-2 text-right font-semibold text-neutral-900">Total</th>
                 {order.map((ci) => (
-                  <th key={ci} className="whitespace-nowrap border-b border-l border-neutral-200 px-3 py-2 text-right font-semibold text-neutral-700">{table.cols[ci].label}</th>
+                  <th key={ci} className="whitespace-nowrap border-b border-l border-neutral-200 px-3 py-2 text-right font-semibold text-neutral-700" title={table.cols[ci].soFar ? "Today is not over: these numbers are so far and are not set against a whole day" : undefined}>{table.cols[ci].label}</th>
                 ))}
               </tr>
             </thead>
@@ -57,10 +57,10 @@ export default function StuDaily() {
                     {order.map((ci) => {
                       const cur = r.cells[ci];
                       const prev = ci > 0 ? r.cells[ci - 1] : null;
-                      // An old visitor count (crawlers in it) next to a real one is not a rise or a fall.
-                      const tone = r.def.kind === "test" || !prev || cur.na || prev.na || cur.old !== prev.old
-                        ? ""
-                        : cur.v > prev.v ? "bg-emerald-100 text-emerald-900" : cur.v < prev.v ? "bg-red-100 text-red-900" : "";
+                      // An old visitor count (crawlers in it) next to a real one is not a rise or a fall, and today (so far) is
+                      // not set against a whole day (ADMIN-AUDIT-STU, 14 Nov 2026).
+                      const t = dailyTone(r.def, cur, prev, table.cols[ci]);
+                      const tone = t === "up" ? "bg-emerald-100 text-emerald-900" : t === "down" ? "bg-red-100 text-red-900" : "";
                       return (
                         <td key={ci} className={`border-b border-l border-neutral-100 px-3 py-1.5 text-right font-semibold ${tone}`}>
                           <Num cell={cur} fmt={fmt} title={`${r.def.label.trim()}, ${table.cols[ci].label}`} />

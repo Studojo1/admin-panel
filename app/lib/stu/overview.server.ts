@@ -1,5 +1,5 @@
 // Server side of the Stu Overview: one section per request. Sections built from
-// the Stu dataset share its one-minute cache (stuData), so nine parallel calls
+// the Stu dataset share its cache (stuData, stale-while-revalidate), so nine parallel calls
 // read the database once. The live feed and the zero-today check read the
 // journey log directly: newest rows by primary key, and two IST days through
 // the (step, at) index. Read only, LIMITed, short statement timeout.
@@ -115,9 +115,36 @@ async function zeroToday(d: StuData, f: Filters): Promise<Alert | null> {
   };
 }
 
+/**
+ * ADMIN-AUDIT-STU (14 Nov 2026): each section is built once per copy of the dataset and filter key, and served from
+ * there until stuData (stale-while-revalidate) hands over a newer copy; the old copy's sections go with it.
+ */
+const built = new WeakMap<StuData, Map<string, Promise<OvEnvelope<unknown>>>>();
+const SECTIONS_PER_COPY = 200;
+
 export async function overviewSection(section: OvSection, f: Filters, fresh: boolean): Promise<OvEnvelope<unknown>> {
   const t0 = Date.now();
-  const [d, e] = await Promise.all([stuData(fresh), env()]);
+  const d = await stuData(fresh);
+  let m = built.get(d);
+  if (!m) built.set(d, (m = new Map()));
+  const key = `${section}|${f.start}|${f.end}|${f.internal ? 1 : 0}|${f.channel}`;
+  let p = m.get(key);
+  if (!p) {
+    if (m.size >= SECTIONS_PER_COPY) m.delete(m.keys().next().value as string);
+    p = buildSection(d, section, f);
+    m.set(key, p);
+    const mm = m;
+    p.catch(() => {
+      if (mm.get(key) === p) mm.delete(key);
+    });
+  }
+  const out = await p;
+  return { ...out, ms: Date.now() - t0 };
+}
+
+async function buildSection(d: StuData, section: OvSection, f: Filters): Promise<OvEnvelope<unknown>> {
+  const t0 = Date.now();
+  const e = await env();
   const refs = new Refs(d);
   let body: unknown;
   switch (section) {
