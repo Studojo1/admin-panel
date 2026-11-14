@@ -429,7 +429,7 @@ function Insights({ s, drill, qs }: { s: SectionState; drill: Drill; qs: string 
 
 // ------------------------------------------------------------------ chart
 
-interface TrendsBody { days: string[]; series: { key: string; label: string; na: boolean; cells: Cell[] }[]; countFromDay?: string | null }
+interface TrendsBody { days: string[]; series: { key: string; label: string; na: boolean; cells: Cell[]; total?: Cell }[]; countFromDay?: string | null }
 interface UsageTrend { trend: { day: string; dau: Cell }[] }
 
 /** Shades the days of the picked range. */
@@ -469,7 +469,7 @@ function TrendChart({ trends, usage, kpis, start, end, drill }: { trends: Sectio
       { key: "onboarded", label: "Onboarded", cells: cellsOf("onboarded"), env: trends.env! },
       { key: "active", label: "Active students", cells: days.map((d) => active.get(d) ?? ({ v: 0, users: [], na: true } as Cell)), env: usage.env! },
     ];
-    const paid = { label: "Paid (people)", cells: cellsOf("paid"), env: trends.env! };
+    const paid = { label: "Paid (people)", cells: cellsOf("paid"), total: tb!.series.find((x) => x.key === "paid")?.total, env: trends.env! };
     // Revenue by day exists for the last 14 days (the KPI section); shown in the tooltip where known.
     const revSpark = (kpis.env?.body as { tiles: KpiTile[] } | undefined)?.tiles.find((x) => x.key === "revenue")?.spark ?? [];
     const revenue = new Map(revSpark.map((p) => [p.day, p.v]));
@@ -531,7 +531,7 @@ function TrendChart({ trends, usage, kpis, start, end, drill }: { trends: Sectio
           ))}
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-3 w-3 rounded-sm border-[1.5px]" style={{ background: "rgba(168,85,247,0.35)", borderColor: SERIES.paid }} />
-            {paid.label} <span className="text-neutral-500">{fmtN(total(paid.cells))} in 30 days</span>
+            {paid.label} <span className="text-neutral-500">{fmtN(paid.total?.v ?? total(paid.cells))} in 30 days</span>
           </span>
           {from >= 0 && <span className="flex items-center gap-1.5 text-neutral-500"><span className="inline-block h-3 w-4 rounded-sm" style={{ background: "rgba(168,85,247,0.18)" }} />your range</span>}
           {tb!.countFromDay && days[0] < tb!.countFromDay && (
