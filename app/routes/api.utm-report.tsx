@@ -2,7 +2,7 @@ import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 import { requireAdmin } from "~/lib/auth-helper.server";
 import { stuData } from "~/lib/stu/data.server";
-import { istDay, stepAt, todayIst } from "~/lib/stu/model";
+import { REVENUE_KINDS, istDay, stepAt, todayIst } from "~/lib/stu/model";
 import {
   buildReport,
   touchKey,
@@ -134,11 +134,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     }));
     const clicks: ReportClick[] = raw.clicks.map((r) => ({ linkId: String(r.link_id), day: String(r.day), bot: !!r.is_bot, n: Number(r.n) || 0 }));
 
-    // Revenue as on the dashboards: real payments (paise), refunds taken off, test payments left out.
+    // Revenue as on the dashboards: real payments (paise), refunds taken off, test payments left out, and autopay once
+    // Razorpay has paid it out to the bank (SETTLE-REVENUE, 14 Nov 2026).
     const idx = new Map<string, number>();
     d.users.forEach((u, i) => idx.set(u.id, i));
     const revenue = new Map<number, number>();
-    for (const [kind, i, , , amt] of d.act) if (kind === "pay") revenue.set(i, (revenue.get(i) ?? 0) + amt);
+    for (const [kind, i, , , amt] of d.act) if (REVENUE_KINDS.includes(kind)) revenue.set(i, (revenue.get(i) ?? 0) + amt);
 
     const rowTouch = new Map<string, unknown>();
     for (const r of raw.sourceRows) rowTouch.set(r.user_id, r.touch);

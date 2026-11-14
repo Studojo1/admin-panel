@@ -121,11 +121,15 @@ export function kpis(d: StuData, f: Filters, refs: Refs) {
     };
   });
   const test = refs.cell(metric("test_payments").cell(d, f, days, scope));
+  // SETTLE-REVENUE (14 Nov 2026): autopay charged in the range and not in the bank yet, left out of revenue, by day for the chart.
+  const wait = metric("autopay_waiting");
+  const notBanked = refs.cell(wait.cell(d, f, days, scope));
+  const notBankedByDay = sparkDays.map((day) => ({ day, v: wait.cell(d, f, new Set([day]), scope).v }));
   // ADMIN-FIX (5 Nov 2026): the sign-ups named, new Google accounts against older studojo.com accounts on their first Stu day.
   const su = tiles.find((t) => t.key === "signups")!.cell;
   const existing = su.users.filter((i) => existingAccount(d, d.users[i]));
   const signupsSplit = { fresh: refs.cell(cellOf(su.users.filter((i) => !existingAccount(d, d.users[i])))), existing: refs.cell(cellOf(existing)) };
-  return { tiles, testPayments: test, signupsSplit, prevStart: pf.start, prevEnd: pf.end };
+  return { tiles, testPayments: test, notBanked, notBankedByDay, signupsSplit, prevStart: pf.start, prevEnd: pf.end };
 }
 
 // ----------------------------------------------------------------------- funnel
@@ -651,10 +655,12 @@ export function insights(d: StuData, f: Filters, refs: Refs, channelName: (k: st
   const paid = metric("paid_users").cell(d, f, days, scope);
   const rev = metric("revenue").cell(d, f, days, scope).v;
   const test = metric("test_payments").cell(d, f, days, scope).v;
-  if (paid.v > 0) out.push({ key: "paid", score: 62, text: `${paid.v} paid ${when} (${fmtInr(rev)})${test ? `; ${test} test payment${test === 1 ? "" : "s"} left out` : ""}.`, href: "#kpis", cell: paid });
+  // SETTLE-REVENUE: autopay counts as paid on the day charged, and in revenue once Razorpay pays it out to the bank.
+  const wait = metric("autopay_waiting").cell(d, f, days, scope).v;
+  if (paid.v > 0) out.push({ key: "paid", score: 62, text: `${paid.v} paid ${when} (${fmtInr(rev)}${wait ? `, plus ${fmtInr(wait)} autopay not in the bank yet` : ""})${test ? `; ${test} test payment${test === 1 ? "" : "s"} left out` : ""}.`, href: "#kpis", cell: paid });
   else {
     const plans = metric("plan_views").cell(d, f, days, scope);
-    out.push({ key: "paid", score: 30, text: `No real payments ${when}${plans.na ? "" : `; ${plans.v} plan view${plans.v === 1 ? "" : "s"}`}${test ? `, ${test} test payment${test === 1 ? "" : "s"} left out` : ""}.`, href: "#kpis" });
+    out.push({ key: "paid", score: 30, text: `No real payments ${when}${rev ? ` (${fmtInr(rev)} of earlier autopay reached the bank)` : ""}${plans.na ? "" : `; ${plans.v} plan view${plans.v === 1 ? "" : "s"}`}${test ? `, ${test} test payment${test === 1 ? "" : "s"} left out` : ""}.`, href: "#kpis" });
   }
 
   // Stickiness and what repeat users do differently.

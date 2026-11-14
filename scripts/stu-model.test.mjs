@@ -350,3 +350,64 @@ test("device and in-app split: the person's own device first, then the source ro
   assert.equal(splitKey(user({ inapp: "instagram" }), "inapp"), "instagram");
   assert.equal(splitKey(user({}), "inapp"), "unknown");
 });
+
+// SETTLE-REVENUE (14 Nov 2026, the owner: "dont count the autopay cash until it hits bank account"). Prod's 14 Nov in
+// fixture form: a pack paid 01:43 IST, autopay charged 10:36 (₹299) and 11:03 (₹699), neither settled yet. The loader
+// writes an autopay charge as "pay" with no money once settlements are read, "pay_wait" until Razorpay settles it, and
+// "pay_cash" on the IST day it was settled.
+const settleDay = () => {
+  const users = [
+    user({ id: "pack", t: { paid: ms("2026-11-13T20:13:00Z") } }),
+    user({ id: "auto299", t: { paid: ms("2026-11-14T05:06:00Z") } }),
+    user({ id: "auto699", t: { paid: ms("2026-11-14T05:33:00Z") } }),
+  ];
+  const act = [
+    ["pay", 0, "2026-11-14", 1, 119900],
+    ["pay", 1, "2026-11-14", 1, 0], ["pay_wait", 1, "2026-11-14", 1, 29900],
+    ["pay", 2, "2026-11-14", 1, 0], ["pay_wait", 2, "2026-11-14", 1, 69900],
+  ];
+  return { users, act };
+};
+const D14 = { ...F, start: "2026-11-14", end: "2026-11-14" };
+
+test("SETTLE-REVENUE: autopay is paid on the day charged, revenue only once in the bank", () => {
+  const { users, act } = settleDay();
+  const d = data(users, { act, settleLive: true });
+  const row = (key) => dailyTable(d, D14, 1).rows.find((r) => r.def.key === key).total;
+  assert.equal(row("paid_users").v, 3, "Paid counts the autopay people on the day charged");
+  assert.equal(row("revenue").v, 119900, "only the pack is revenue: ₹1,199");
+  assert.deepEqual(row("revenue").users, [0], "the people behind revenue are the ones whose money it holds");
+  assert.equal(row("autopay_waiting").v, 99800, "₹998 autopay not in the bank yet");
+  assert.deepEqual(row("autopay_waiting").users, [1, 2]);
+  assert.equal(row("autopay_waiting").na, false);
+  assert.equal(funnel(d, { ...D14, start: "2026-11-01" }, false).rows.find((r) => r.key === "paid").cell.v, 3, "the Paid step is unchanged");
+  assert.match(DAILY_METRICS.find((m) => m.key === "revenue").source(d), /career_settlements\.settled_at/);
+});
+
+test("SETTLE-REVENUE: a settled charge counts on the IST day it reached the bank, and no other", () => {
+  const { users, act } = settleDay();
+  // ₹299 settled 16 Nov 00:10 IST (15 Nov 18:40 UTC): it leaves "not in the bank yet" and lands on 16 Nov.
+  const later = act.filter((a) => !(a[0] === "pay_wait" && a[1] === 1)).concat([["pay_cash", 1, "2026-11-16", 1, 29900]]);
+  const d = data(users, { act: later, settleLive: true });
+  const tb = dailyTable(d, { ...F, start: "2026-11-14", end: "2026-11-16" }, 1);
+  const cells = (key) => tb.rows.find((r) => r.def.key === key).cells.map((c) => c.v);
+  assert.deepEqual(cells("revenue"), [119900, 0, 29900]);
+  assert.deepEqual(cells("paid_users"), [3, 0, 0], "the bank day is not a second payment");
+  assert.deepEqual(cells("autopay_waiting"), [69900, 0, 0]);
+  assert.equal(activity(d).days.has(1), false, "money reaching the bank is not activity");
+  // Sources (and the Overview's top sources) add the same money: the pack and the settled ₹299.
+  const s = sources(d, { ...F, start: "2026-11-01", end: "2026-11-16" }, "channel");
+  assert.equal(s.rows[0].revenue.v, 149800);
+  assert.deepEqual(s.rows[0].revenue.users, [0, 1]);
+});
+
+test("SETTLE-REVENUE: with no career_settlements here, autopay counts on the day charged, as before", () => {
+  const { users } = settleDay();
+  const act = [["pay", 0, "2026-11-14", 1, 119900], ["pay", 1, "2026-11-14", 1, 29900], ["pay", 2, "2026-11-14", 1, 69900]];
+  const d = data(users, { act });
+  const row = (key) => dailyTable(d, D14, 1).rows.find((r) => r.def.key === key).total;
+  assert.equal(row("revenue").v, 219700);
+  assert.equal(row("paid_users").v, 3);
+  assert.equal(row("autopay_waiting").na, true, "not read here, not zero");
+  assert.doesNotMatch(DAILY_METRICS.find((m) => m.key === "revenue").source(d), /settled_at/);
+});
