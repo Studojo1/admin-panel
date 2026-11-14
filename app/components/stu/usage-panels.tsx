@@ -15,7 +15,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 
 // ------------------------------------------------------------------ trends
 
-interface TrendsBody { days: string[]; series: { key: string; label: string; na: boolean; cells: Cell[] }[]; rates: { key: string; label: string; values: (number | null)[] }[] }
+interface TrendsBody { days: string[]; series: { key: string; label: string; na: boolean; cells: Cell[]; total?: Cell }[]; rates: { key: string; label: string; values: (number | null)[] }[] }
 
 export function Trends({ s, drill, t }: { s: SectionState; drill: Drill; t: Palette }) {
   const [view, setView] = useState<"counts" | "rates" | "table">("counts");
@@ -88,7 +88,8 @@ export function Trends({ s, drill, t }: { s: SectionState; drill: Drill; t: Pale
           <div>
             <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "var(--ink2)" }}>
               {lines.map((l, i) => {
-                const total = view === "rates" ? null : b.series[i].cells.reduce((a, c) => a + c.v, 0);
+                // TREND-TOTALS: the window's own count (each person once), never the days added up.
+                const total = view === "rates" ? null : (b.series[i].total?.v ?? null);
                 return (
                   <span key={l.label} className="flex items-center gap-1.5">
                     <span className="inline-block h-[2px] w-4 rounded" style={{ background: t.series[i] }} />

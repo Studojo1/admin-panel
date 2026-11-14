@@ -268,11 +268,15 @@ export function trends(d: StuData, f: Filters, refs: Refs) {
   const scope = new Set(scopeUsers(d, f));
   // ADMIN-AUDIT-STU (14 Nov 2026): a day before the count-from line was not counted: no data, not a zero.
   const from = d.countFrom != null ? istDay(d.countFrom) : null;
+  // TREND-TOTALS (14 Nov 2026): each series' 30-day total is the metric over the whole window, each person or visitor
+  // once; adding the days up counted a visitor on 5 days 5 times (Visitors 5,842 against 5,573 on the Overview tile).
+  const counted = new Set(days.filter((day) => !(from && day < from)));
   const series = TREND_SERIES.map((s) => {
     const m = metric(s.metric);
     return {
       key: s.key, label: s.label, na: false,
       cells: days.map((day) => (from && day < from ? { v: 0, users: [], na: true } : refs.cell(m.cell(d, f, new Set([day]), scope)))),
+      total: counted.size ? refs.cell(m.cell(d, f, counted, scope)) : ({ v: 0, users: [], na: true } as Cell),
     };
   });
   for (const s of series) s.na = s.cells.every((c) => c.na);
