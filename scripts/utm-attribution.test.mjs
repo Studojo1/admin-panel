@@ -110,7 +110,7 @@ test("wiring: /go adds utm_id on the website; the report is admin only and reads
   assert.match(api, /requireAdmin\(request\)/);
   assert.match(api, /stepAt\(d, u, "onboarded"\)/);
   assert.match(api, /stepAt\(d, u, "paid"\)/);
-  assert.match(api, /kind === "pay"/, "revenue from real payments, as the dashboards");
+  assert.match(api, /REVENUE_KINDS\.includes\(kind\)/, "revenue from real payments, autopay once in the bank, as the dashboards");
   assert.match(api, /Asia\/Kolkata/);
   assert.match(api, /accessMode: "read only"/);
   const page = readFileSync(new URL("../app/routes/utm-builder.tsx", import.meta.url), "utf8");

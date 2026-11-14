@@ -75,7 +75,7 @@ export default function StuSources() {
         </table>
       </div>
       <SourceNote>
-        channel: career_user_source.first_touch (utm tags, referrer, click ids), else the first journey event with a source, else the visitor's; grouped as on admin.studojo.com. Steps as on the Funnel page (unnested). Revenue: career_credit_orders paid, not test, less refunds.
+        channel: career_user_source.first_touch (utm tags, referrer, click ids), else the first journey event with a source, else the visitor's; grouped as on admin.studojo.com. Steps as on the Funnel page (unnested). Revenue: career_credit_orders paid, not test, less refunds; autopay charges {data.settleLive ? "once Razorpay has paid them out to the bank (career_settlements)" : "when charged"}.
         Cohort: <Num cell={cellOf(s.cohort)} title="Cohort" />
       </SourceNote>
     </div>
