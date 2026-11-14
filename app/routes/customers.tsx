@@ -19,7 +19,7 @@ import { useAdminGuard } from "~/lib/auth-guard";
 import { type DeskState, fetchCustomer, fetchCustomers, saveDesk } from "~/lib/customers/client";
 import {
   type CustomersEnvelope, type ListFilters, PICK_LABEL, PICK_STATUSES, type PickStatus, type Sort, TAG_LABEL, type Tag, VIEWS, type View,
-  type WireCustomer, type WireDetail, type WirePick, ago, filterCustomers, fmtRupees, inView, tagsOf, waLink,
+  type WireCustomer, type WireDetail, type WirePick, ago, filterCustomers, fmtRupees, inView, lastActiveText, tagsOf, waLink,
 } from "~/lib/customers/model";
 
 export function meta() {
@@ -30,6 +30,10 @@ const SELECT = "rounded-lg border-2 border-neutral-900 bg-white px-2 py-1.5 text
 const BTN = "rounded-lg border-2 border-neutral-900 bg-white px-3 py-1 text-sm font-semibold hover:bg-violet-50";
 const INPUT = "w-full rounded-lg border-2 border-neutral-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-neutral-900";
 const PAGE = 100;
+/** The Rank column, pinned to the right edge of the scrolling table (opaque, so the columns pass under it). */
+const PIN = "sticky right-0 shadow-[-6px_0_6px_-6px_rgba(25,26,35,0.25)]";
+/** White, and on hover the row's violet-50 at half over white, as one solid colour. */
+const PIN_ROW = "bg-white group-hover:bg-[color-mix(in_oklab,var(--color-violet-50)_50%,white)]";
 
 const TAG_STYLE: Record<Tag, string> = {
   yes: "border-emerald-600 bg-emerald-50 text-emerald-800",
@@ -171,6 +175,7 @@ export default function Customers() {
         </div>
 
         {error && <div className="mt-4 rounded-xl border-2 border-red-600 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+        {data?.notes?.map((n) => <div key={n} className="mt-3 rounded-xl border-2 border-amber-500 bg-amber-50 px-4 py-2 text-sm text-amber-900">{n}</div>)}
 
         {data && (
           <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -203,7 +208,9 @@ export default function Customers() {
           </form>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(420px,560px)]">
+        {/* ADMIN-AUDIT (14 Nov 2026): at 1440 px the detail column left the table under its 820 px, so Rank was cut off. The
+            column is narrower below 2xl, and Rank stays pinned to the card's right edge whenever the table scrolls. */}
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,460px)] 2xl:grid-cols-[minmax(0,1fr)_minmax(420px,560px)]">
           <div className="min-w-0">
             <div className={`relative overflow-x-auto ${CARD}`}>
               <table className="w-full min-w-[820px] text-sm">
@@ -215,13 +222,13 @@ export default function Customers() {
                     <th className="px-3 py-2">Outreach</th>
                     <th className="px-3 py-2">Last active</th>
                     <th className="px-3 py-2">Team</th>
-                    <th className="px-3 py-2 text-right">Rank</th>
+                    <th className={`px-3 py-2 text-right ${PIN} bg-neutral-50`}>Rank</th>
                   </tr>
                 </thead>
                 <tbody>
                   {list.slice(0, shown).map((c) => (
                     <tr key={c.id} onClick={() => setParam({ id: c.id })}
-                      className={`cursor-pointer border-t border-neutral-100 align-top hover:bg-violet-50/50 ${c.id === open ? "bg-violet-50" : ""}`}>
+                      className={`group cursor-pointer border-t border-neutral-100 align-top hover:bg-violet-50/50 ${c.id === open ? "bg-violet-50" : ""}`}>
                       <td className="px-3 py-2.5"><Star on={c.star} onClick={() => toggleStar(c)} label={`Star ${c.name || c.email}`} /></td>
                       <td className="px-3 py-2.5">
                         <div className="font-semibold text-neutral-950">{c.name || c.email}{c.internal && <span className="ml-1.5 text-[11px] font-semibold text-neutral-400">({c.internal})</span>}</div>
@@ -237,12 +244,12 @@ export default function Customers() {
                         {c.s.replies > 0 && <div className="font-semibold text-emerald-700">{c.s.replies} repl{c.s.replies === 1 ? "y" : "ies"}{c.s.posReplies ? `, ${c.s.posReplies} yes` : ""}</div>}
                         {c.s.paid && <div className="text-violet-700">Paid ({c.s.paid})</div>}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2.5 text-xs text-neutral-600">{ago(c.s.lastSeen, now)}<div className="text-neutral-400">{c.s.days21} day{c.s.days21 === 1 ? "" : "s"} in 3 wks</div></td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-xs text-neutral-600">{lastActiveText(c.s, now)}<div className="text-neutral-400">{c.s.days21} day{c.s.days21 === 1 ? "" : "s"} in 3 wks</div></td>
                       <td className="px-3 py-2.5 text-xs">
                         {c.hired ? <span className="font-bold text-emerald-700">Hired</span> : c.picks ? <span>{c.picksOpen} open of {c.picks}</span> : <span className="text-neutral-300">None</span>}
                         {c.note && <div className="mt-0.5 line-clamp-1 max-w-[140px] text-neutral-500" title={c.note}>{c.note}</div>}
                       </td>
-                      <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-neutral-800">{c.score}</td>
+                      <td className={`px-3 py-2.5 text-right font-semibold tabular-nums text-neutral-800 ${PIN} ${c.id === open ? "bg-violet-50" : PIN_ROW}`}>{c.score}</td>
                     </tr>
                   ))}
                   {data && !list.length && (
@@ -260,7 +267,8 @@ export default function Customers() {
             <p className="mt-3 text-xs text-neutral-400">
               Most promising first: starred, then a hiring manager saying yes (counts most), any reply, paying, thanking Stu, then desk and resume calls,
               emails sent, active days and jobs saved or applied to. Complaints and a refund ask pull a customer down. Thanks and complaints are read from
-              their own short messages to Stu, by keywords, so check them before you call.
+              their own short messages to Stu, by keywords, so check them before you call. Paid and active are counted as on the Stu pages: paid means
+              money came in (not a free pack or a test), and active means the customer did something themselves (not our own updates or auto-adds).
               {data ? ` Read ${ago(data.at, now)}.` : ""}
             </p>
           </div>
@@ -384,7 +392,7 @@ function Panel({ id, summary, now, onClose, onDesk, onStar }: {
         <Link to={`/talent?id=${encodeURIComponent(c.id)}`} className={BTN}>Talent profile</Link>
       </div>
       <p className="mt-2 text-xs text-neutral-500">
-        Signed up {fmtDate(c.signedUp)} · last active {ago(c.s.lastSeen, now)} · rank {c.score}: {why(c)}
+        Signed up {fmtDate(c.signedUp)} · last active {lastActiveText(c.s, now)} · rank {c.score}: {why(c)}
       </p>
 
       {!d ? (

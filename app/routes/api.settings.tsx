@@ -29,8 +29,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     return Response.json({ settings: result.rows });
   }
 
+  // ADMIN-AUDIT (14 Nov 2026): drizzle turns a JS array into a list, "($1, $2)", so ANY with the keys in it was
+  // ANY(($1)), a 500 "malformed array literal". IN takes the list as it comes (keys is never empty here).
+  // scripts/sql-array-params.test.mjs keeps it that way.
   const result = await db.execute(
-    sql`SELECT key, value, updated_at FROM platform_settings WHERE key = ANY(${keys})`
+    sql`SELECT key, value, updated_at FROM platform_settings WHERE key IN ${keys}`
   );
 
   const map: Record<string, string> = {};

@@ -2,7 +2,7 @@
 // Imports the TypeScript source directly: Node 22.18+ strips the types itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { discoveryState, nothingSentReason } from "../app/lib/health-watch.ts";
+import { discoveryState, discoveryTone, nothingSentReason } from "../app/lib/health-watch.ts";
 
 const OCT_3 = "2026-10-03T18:20:00Z";
 const OCT_4 = "2026-10-04T05:10:00Z";
@@ -87,4 +87,13 @@ test("every reason is plain words: no dashes, no underscores", () => {
   // En dash, em dash, underscore. Built from code points so this file holds no dash itself.
   const banned = new RegExp(`[${String.fromCharCode(0x2013, 0x2014)}_]`);
   for (const f of cases) assert.doesNotMatch(nothingSentReason(f), banned);
+});
+
+// ADMIN-AUDIT (14 Nov 2026): /old/daily showed "Lead discovery is failing" for the retired product.
+test("a retired page raises no lead discovery alert; a live one keeps the state", () => {
+  assert.equal(discoveryTone("failing", true), "off");
+  assert.equal(discoveryTone("watch", true), "off");
+  assert.equal(discoveryTone("ok", true), "off");
+  assert.equal(discoveryTone("failing", false), "failing");
+  assert.equal(discoveryTone("ok", false), "ok");
 });

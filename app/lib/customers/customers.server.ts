@@ -8,10 +8,11 @@
 // until the customer is told.
 import { sql, type SQL } from "drizzle-orm";
 import db from "~/lib/db.server";
-import { internalReason, testUsers } from "~/lib/stu/data.server";
+import { internalReason, stuData, testUsers } from "~/lib/stu/data.server";
+import { activity } from "~/lib/stu/model";
 import {
   type CustomersEnvelope, type PickStatus, type Signals, type WireCustomer, type WireDetail, type WirePick,
-  OPEN_PICK, cleanLink, isPickStatus, scoreOf, toneCounts, toneOf,
+  OPEN_PICK, activeDays, cleanLink, istDay, isPickStatus, scoreOf, toneCounts, toneOf,
 } from "./model";
 
 const TTL_MS = 3 * 60_000;
@@ -30,9 +31,19 @@ async function read<T>(fn: (q: Q) => Promise<T>): Promise<T> {
   );
 }
 
+const errText = (e: unknown): string => String((e as any)?.message ?? e).slice(0, 160);
+
 let tablesReady: Promise<void> | null = null;
+/**
+ * Makes the team's two tables when they are not there yet. ADMIN-AUDIT (14 Nov 2026): it looks first, so an open of
+ * the page only reads once they exist (and works on a read-only connection).
+ */
 export function ensureTables(): Promise<void> {
   tablesReady ??= (async () => {
+    const have = (await db.execute(sql`
+      SELECT to_regclass('public.stu_customer_desk') IS NOT NULL AND to_regclass('public.stu_customer_picks') IS NOT NULL
+             AND to_regclass('public.stu_customer_picks_user') IS NOT NULL AS ok`)).rows[0] as any;
+    if (have?.ok) return;
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS stu_customer_desk (
         user_id    TEXT PRIMARY KEY REFERENCES "user"(id) ON DELETE CASCADE,
@@ -101,17 +112,13 @@ const LIST = sql`
      GROUP BY 1),
   c AS (
     SELECT user_id, count(*) FILTER (WHERE mode = 'desk') AS desk, count(*) FILTER (WHERE mode = 'build') AS build,
-           coalesce(sum(duration_s), 0) AS secs, max(coalesce(started_at, created_at)) AS last_call
+           coalesce(sum(duration_s), 0) AS secs
       FROM career_agent.career_voice_calls GROUP BY 1),
   m AS (
     SELECT user_id, count(*) AS n, count(*) FILTER (WHERE state = 'saved') AS saved, count(*) FILTER (WHERE state = 'applied') AS applied
       FROM career_agent.career_matches GROUP BY 1),
   g AS (SELECT user_id, string_agg(DISTINCT source, '+') AS src FROM career_agent.career_plan_grants WHERE revoked_at IS NULL GROUP BY 1),
-  o AS (SELECT user_id, count(*) AS n FROM career_agent.career_credit_orders WHERE status = 'paid' AND NOT coalesce(test, false) GROUP BY 1),
-  j AS (
-    SELECT user_id, max(at) AS last_at,
-           count(DISTINCT (at AT TIME ZONE 'Asia/Kolkata')::date) FILTER (WHERE at > now() - interval '21 days') AS days21
-      FROM career_agent.career_journey_events WHERE user_id IS NOT NULL GROUP BY 1)
+  o AS (SELECT user_id, count(*) AS n FROM career_agent.career_credit_orders WHERE status = 'paid' AND NOT coalesce(test, false) GROUP BY 1)
   SELECT p.user_id AS id, u.name, u.email, u.role, coalesce(ph.phone, u.phone_number) AS phone, coalesce(ph.whatsapp_ok, false) AS wa,
          (extract(epoch FROM u.created_at AT TIME ZONE 'UTC') * 1000)::float8 AS signed,
          left(p.profile->>'headline', 160) AS headline,
@@ -121,35 +128,72 @@ const LIST = sql`
          coalesce(q.pos, 0) AS pos, coalesce(q.replies, 0) AS replies, coalesce(q.companies, 0) AS companies, coalesce(st.sent, 0) AS sent,
          coalesce(c.desk, 0) AS desk, coalesce(c.build, 0) AS build, coalesce(c.secs, 0) AS secs,
          coalesce(m.n, 0) AS matches, coalesce(m.saved, 0) AS saved, coalesce(m.applied, 0) AS applied,
-         CASE WHEN g.src IS NOT NULL THEN g.src WHEN o.n > 0 THEN 'order' END AS paid,
-         coalesce(j.days21, 0) AS days21,
-         (extract(epoch FROM greatest(j.last_at, c.last_call, p.updated_at)) * 1000)::float8 AS last_seen
+         CASE WHEN g.src IS NOT NULL THEN g.src WHEN o.n > 0 THEN 'order' END AS paid_how
     FROM career_agent.career_profiles p
     JOIN public."user" u ON u.id = p.user_id
     LEFT JOIN career_agent.career_phones ph ON ph.user_id = p.user_id
     LEFT JOIN q ON q.user_id = p.user_id LEFT JOIN st ON st.user_id = p.user_id LEFT JOIN c ON c.user_id = p.user_id
-    LEFT JOIN m ON m.user_id = p.user_id LEFT JOIN g ON g.user_id = p.user_id LEFT JOIN o ON o.user_id = p.user_id
-    LEFT JOIN j ON j.user_id = p.user_id`;
+    LEFT JOIN m ON m.user_id = p.user_id LEFT JOIN g ON g.user_id = p.user_id LEFT JOIN o ON o.user_id = p.user_id`;
 
 interface Pool {
   env: string;
   at: number;
   ms: number;
   all: WireCustomer[];
+  notes: string[];
+}
+
+/**
+ * ADMIN-AUDIT (14 Nov 2026): paid and active as the Stu pages count them, from the Stu dataset itself (its one-minute
+ * cache is shared with the Stu pages), so Paid and Active this week here agree with the Stu Overview's paid since
+ * launch and WAU. Paid: the person's first real payment (data.server.ts truth.paid). Active: model.ts activity().
+ */
+interface StuFacts {
+  paid: Set<string>;
+  days: Map<string, string[]>;
+  /** last started call, epoch ms */
+  lastCall: Map<string, number>;
+}
+async function stuFacts(fresh: boolean): Promise<StuFacts> {
+  const d = await stuData(fresh);
+  const act = activity(d);
+  const out: StuFacts = { paid: new Set(), days: new Map(), lastCall: new Map() };
+  d.users.forEach((u, i) => {
+    if (u.t.paid != null) out.paid.add(u.id);
+    const m = act.days.get(i);
+    if (m) out.days.set(u.id, [...m.keys()]);
+  });
+  for (const c of d.calls) {
+    const id = d.users[c[0]]?.id;
+    if (id && c[5] != null && c[5] > (out.lastCall.get(id) ?? 0)) out.lastCall.set(id, c[5]);
+  }
+  return out;
 }
 let cache: Pool | null = null;
 
 async function loadPool(fresh: boolean): Promise<Pool> {
   if (!fresh && cache && Date.now() - cache.at < TTL_MS) return cache;
   const t0 = Date.now();
-  await ensureTables();
+  const notes: string[] = [];
+  // ADMIN-AUDIT (14 Nov 2026): the list shows even when the team's tables cannot be made (a read-only connection).
+  await ensureTables().catch((e) => {
+    console.error("[customers] tables", e);
+    notes.push(`Stars, notes and picks are off: their tables could not be made (${errText(e)}).`);
+  });
+  const facts = await stuFacts(fresh).catch((e) => {
+    console.error("[customers] stu data", e);
+    notes.push(`Paid and last active could not be read from the Stu data (${errText(e)}), so nobody shows as paid or active.`);
+    return null;
+  });
+  const today = istDay(Date.now());
   const pool = await read(async (q): Promise<Pool> => {
     const reg = (await q(sql`
       SELECT to_regclass('career_agent.career_profiles') IS NOT NULL AS ok,
-             to_regclass('career_agent.career_journey_events') IS NOT NULL AS j,
+             to_regclass('public.stu_customer_desk') IS NOT NULL AS desk,
+             to_regclass('public.stu_customer_picks') IS NOT NULL AS picks,
              current_database() AS db`))[0] ?? {};
     const env = /staging/i.test(String(reg.db ?? "")) ? "staging" : "production";
-    if (!reg.ok || !reg.j) return { env, at: Date.now(), ms: 0, all: [] };
+    if (!reg.ok) return { env, at: Date.now(), ms: 0, all: [], notes };
     const rows = await q(LIST);
     const said = await q(SAID(sql`true`, 20000));
     const byUser = new Map<string, { text: string | null; at: number }[]>();
@@ -159,9 +203,9 @@ async function loadPool(fresh: boolean): Promise<Pool> {
       byUser.set(m.user_id, list);
     }
     const desk = new Map<string, { star: boolean; note: string }>();
-    for (const d of await q(sql`SELECT user_id, star, note FROM public.stu_customer_desk`)) desk.set(d.user_id, { star: !!d.star, note: d.note ?? "" });
+    if (reg.desk) for (const d of await q(sql`SELECT user_id, star, note FROM public.stu_customer_desk`)) desk.set(d.user_id, { star: !!d.star, note: d.note ?? "" });
     const picks = new Map<string, { n: number; open: number; hired: boolean }>();
-    for (const p of await q(sql`SELECT user_id, status, count(*) AS n FROM public.stu_customer_picks GROUP BY 1, 2`)) {
+    if (reg.picks) for (const p of await q(sql`SELECT user_id, status, count(*) AS n FROM public.stu_customer_picks GROUP BY 1, 2`)) {
       const cur = picks.get(p.user_id) ?? { n: 0, open: 0, hired: false };
       cur.n += num(p.n);
       if (OPEN_PICK.has(p.status as PickStatus)) cur.open += num(p.n);
@@ -172,11 +216,13 @@ async function loadPool(fresh: boolean): Promise<Pool> {
     const all: WireCustomer[] = rows.map((r) => {
       const tone = toneCounts(byUser.get(r.id) ?? []);
       const lastMsg = (byUser.get(r.id) ?? [])[0]?.at ?? null;
-      const lastSeen = Math.max(numOrNull(r.last_seen) ?? 0, lastMsg ?? 0) || null;
+      const lastSeen = Math.max(lastMsg ?? 0, facts?.lastCall.get(r.id) ?? 0) || null;
+      const { lastDay, days21 } = activeDays(facts?.days.get(r.id) ?? [], today);
       const s: Signals = {
-        posReplies: num(r.pos), replies: num(r.replies), sent: num(r.sent), companies: num(r.companies), paid: r.paid ?? null,
+        posReplies: num(r.pos), replies: num(r.replies), sent: num(r.sent), companies: num(r.companies),
+        paid: facts?.paid.has(r.id) ? r.paid_how ?? "paid" : null,
         praise: tone.praise, gripes: tone.gripes, refund: tone.refund, desk: num(r.desk), build: num(r.build),
-        callMin: Math.round(num(r.secs) / 60), days21: num(r.days21), lastSeen,
+        callMin: Math.round(num(r.secs) / 60), days21, lastDay, lastSeen,
         matches: num(r.matches), saved: num(r.saved), applied: num(r.applied),
       };
       const email = (r.email ?? "").toLowerCase();
@@ -189,7 +235,8 @@ async function loadPool(fresh: boolean): Promise<Pool> {
         s, score: scoreOf(s), star: d?.star ?? false, note: d?.note ?? "", picks: pk?.n ?? 0, picksOpen: pk?.open ?? 0, hired: pk?.hired ?? false,
       };
     });
-    return { env, at: Date.now(), ms: 0, all };
+    if ((!reg.desk || !reg.picks) && !notes.some((n) => n.startsWith("Stars"))) notes.push("Stars, notes and picks are off: their tables are not there yet.");
+    return { env, at: Date.now(), ms: 0, all, notes };
   });
   pool.ms = Date.now() - t0;
   cache = pool;
@@ -198,7 +245,10 @@ async function loadPool(fresh: boolean): Promise<Pool> {
 
 export async function customersList(internal: boolean, fresh: boolean): Promise<CustomersEnvelope> {
   const pool = await loadPool(fresh);
-  return { env: pool.env, at: pool.at, ms: pool.ms, customers: internal ? pool.all : pool.all.filter((c) => !c.internal) };
+  return {
+    env: pool.env, at: pool.at, ms: pool.ms, customers: internal ? pool.all : pool.all.filter((c) => !c.internal),
+    ...(pool.notes.length ? { notes: pool.notes } : {}),
+  };
 }
 
 const when = (start: unknown, end: unknown): string => [str(start, 20), str(end, 20)].filter(Boolean).join(" to ");
@@ -209,7 +259,8 @@ const pickOf = (r: any): WirePick => ({
 });
 
 async function picksOf(id: string): Promise<WirePick[]> {
-  await ensureTables();
+  // The page shows without them when the tables cannot be made (the list says so).
+  if (!(await ensureTables().then(() => true, () => false))) return [];
   const rows = (await db.execute(sql`
     SELECT id, company, role, link, contact, note, status, created_by, updated_by,
            (extract(epoch FROM created_at) * 1000)::float8 AS created, (extract(epoch FROM updated_at) * 1000)::float8 AS updated
