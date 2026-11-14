@@ -4,7 +4,7 @@
 // by visitor id for the same range, above the cohort.
 import { useMemo, useState } from "react";
 import { CARD, Num, PageTitle, SourceNote, useStu } from "~/components/stu/ui";
-import { ANON_STEPS, arriveCells, cellOf, fmtDur, fmtPct, funnel, pct, stepSource } from "~/lib/stu/model";
+import { ANON_STEPS, PARTLY_TRACKED, arriveCells, cellOf, fmtDur, fmtPct, funnel, pct, stepSource } from "~/lib/stu/model";
 
 export default function StuFunnel() {
   const { data, filters } = useStu();
@@ -29,7 +29,10 @@ export default function StuFunnel() {
         <div className="flex flex-wrap gap-6">
           {ANON_STEPS.map((s) => (
             <div key={s.key}>
-              <div className="text-xs text-neutral-500">{s.n}. {s.label}</div>
+              <div className="text-xs text-neutral-500" title={"partial" in s && s.partial ? "Recorded for about 1 sign-up in 10 (the Google sign-in path writes none): not a base for a % and never a drop" : undefined}>
+                {s.n}. {s.label}
+                {"partial" in s && s.partial && <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-semibold text-amber-800">{PARTLY_TRACKED}</span>}
+              </div>
               <div className="font-['Clash_Display'] text-2xl font-bold"><Num cell={arrive[s.key]} title={`${s.label}, visitors ${filters.start} to ${filters.end}`} /></div>
               <SourceNote>{stepSource(data, s.key)}</SourceNote>
             </div>

@@ -32,7 +32,7 @@
 export const STEPS = [
   { key: "visited_home", n: "1", label: "Visited", phase: "Arrive", anon: true, journey: ["visited_home"], truth: null },
   { key: "clicked_join", n: "2", label: "Opened Stu", phase: "Arrive", anon: true, journey: ["clicked_join"], truth: null },
-  { key: "saw_signup", n: "3", label: "Saw sign-up", phase: "Arrive", anon: true, journey: ["signup_started", "saw_signup"], truth: null },
+  { key: "saw_signup", n: "3", label: "Saw sign-up", phase: "Arrive", anon: true, partial: true, journey: ["signup_started", "saw_signup"], truth: null },
   { key: "signed_up", n: "4", label: "Signed up (Google)", phase: "Sign up", gate: true, journey: ["signed_up"], truth: 'public."user".created_at (first Stu activity for an older account)' },
   { key: "reached_stu", n: "5", label: "Reached Stu", phase: "Sign up", journey: ["reached_stu"], truth: null },
   { key: "verified_phone", n: "6", label: "Verified phone", phase: "Sign up", journey: ["phone_verified", "verified_phone"], truth: "career_phones.verified_at" },
@@ -77,7 +77,15 @@ export interface StepDef {
   truth: string | null;
   gate?: boolean;
   anon?: boolean;
+  /**
+   * ADMIN-AUDIT-STU (14 Nov 2026): recorded for only some of the people who did it (saw_signup: about 1 sign-up in 10,
+   * the Google sign-in path writes none). Shown as "partly tracked", never a base for a % and never a drop.
+   */
+  partial?: boolean;
 }
+
+/** ADMIN-AUDIT-STU: the words shown next to a partly tracked step. */
+export const PARTLY_TRACKED = "partly tracked";
 
 export type StepKey = (typeof STEPS)[number]["key"];
 export const STEP_KEYS: StepKey[] = STEPS.map((s) => s.key);
@@ -529,15 +537,23 @@ export interface DailyMetricDef {
   group: string;
   source: (d: StuData) => string;
   kind?: "inr" | "test";
-  /** days: the IST days in one column */
-  cell: (d: StuData, f: Filters, days: Set<string>, scope: Set<number>) => Cell;
+  /**
+   * ADMIN-AUDIT-STU (14 Nov 2026): the metric has an exact time per event, so `until` can cut it at a time of day (the
+   * same-time comparison). Without it the data is per IST day only, and a range that ends today is "so far".
+   */
+  timed?: true;
+  /** days: the IST days in one column; until: count only what happened at or before this time, epoch ms */
+  cell: (d: StuData, f: Filters, days: Set<string>, scope: Set<number>, until?: number | null) => Cell;
 }
 
-function firstStepCell(d: StuData, key: string, days: Set<string>, scope: Set<number>): Cell {
+/** By the cut time (no cut: everything). */
+const by = (t: number, until?: number | null) => until == null || t <= until;
+
+function firstStepCell(d: StuData, key: string, days: Set<string>, scope: Set<number>, until?: number | null): Cell {
   const users: number[] = [];
   for (const i of scope) {
     const t = stepAt(d, d.users[i], key);
-    if (t != null && days.has(istDay(t))) users.push(i);
+    if (t != null && days.has(istDay(t)) && by(t, until)) users.push(i);
   }
   const def = STEP_BY_KEY[key];
   const na = !(def?.truth && d.truthOn[key]) && key !== "signed_up" && !d.journeyLive;
@@ -622,24 +638,24 @@ export const callOutcome = (c: WireCall): string => {
   return "ended_early";
 };
 
-function callCell(d: StuData, days: Set<string>, scope: Set<number>, pred: CallPred, at: (c: WireCall) => number | null): Cell {
+function callCell(d: StuData, days: Set<string>, scope: Set<number>, pred: CallPred, at: (c: WireCall) => number | null, until?: number | null): Cell {
   const users: number[] = [];
   let n = 0;
   for (const c of d.calls) {
     if (!scope.has(c[0]) || !pred(c)) continue;
     const t = at(c);
-    if (t == null || !days.has(istDay(t))) continue;
+    if (t == null || !days.has(istDay(t)) || !by(t, until)) continue;
     n++;
     users.push(c[0]);
   }
   return cellOf(users, n);
 }
 
-function failCell(d: StuData, days: Set<string>, scope: Set<number>, reason?: string): Cell {
+function failCell(d: StuData, days: Set<string>, scope: Set<number>, until?: number | null): Cell {
   const users: number[] = [];
   let n = 0;
-  for (const [u, t, r] of d.fails) {
-    if (!scope.has(u) || !days.has(istDay(t)) || (reason && r !== reason)) continue;
+  for (const [u, t] of d.fails) {
+    if (!scope.has(u) || !days.has(istDay(t)) || !by(t, until)) continue;
     n++;
     users.push(u);
   }
@@ -649,23 +665,26 @@ function failCell(d: StuData, days: Set<string>, scope: Set<number>, reason?: st
 const both = (a: Cell, b: Cell): Cell => ({ v: a.v + b.v, users: uniq([...a.users, ...b.users]), na: a.na && b.na });
 
 const T = (s: string) => () => s;
+
+/** ADMIN-AUDIT-STU (14 Nov 2026): the one definition of a failed call attempt, for Daily, Ratios and Call health. */
+export const FAILED_ATTEMPTS = "failed call attempts: onboarding calls with status failed, plus every journey call_failed (mic denied, no mic, network, error)";
 const J = (d: StuData) => (d.journeyLive ? "journey log" : "journey log (not live yet)");
 
 export const DAILY_METRICS: DailyMetricDef[] = [
   { key: "visitors", label: "Visitors", group: "Arrive", source: (d) => visitSource(d), cell: (d, f, days) => visitorCell(d, f, "visited_home", days) },
   { key: "stu_opens", label: "Stu opens", group: "Arrive", source: (d) => `${J(d)}: clicked_join, distinct visitor ids`, cell: (d, f, days) => visitorCell(d, f, "clicked_join", days) },
-  { key: "saw_signup", label: "Saw sign-up", group: "Arrive", source: (d) => `${J(d)}: saw_signup, distinct visitor ids`, cell: (d, f, days) => visitorCell(d, f, "saw_signup", days) },
-  { key: "signups", label: "Sign-ups", group: "Sign up", source: (d) => stepSource(d, "signed_up"), cell: (d, _f, days, s) => firstStepCell(d, "signed_up", days, s) },
-  { key: "reached", label: "Reached Stu", group: "Sign up", source: (d) => stepSource(d, "reached_stu"), cell: (d, _f, days, s) => firstStepCell(d, "reached_stu", days, s) },
-  { key: "phone", label: "Phone verified", group: "Sign up", source: (d) => stepSource(d, "verified_phone"), cell: (d, _f, days, s) => firstStepCell(d, "verified_phone", days, s) },
-  { key: "wa_linked", label: "WhatsApp linked", group: "Sign up", source: (d) => stepSource(d, "whatsapp_linked"), cell: (d, _f, days, s) => firstStepCell(d, "whatsapp_linked", days, s) },
-  { key: "calls_started", label: "Calls started", group: "Call", source: T("career_voice_calls.started_at, onboarding, returning and build calls (each call)"), cell: (d, _f, days, s) => callCell(d, days, s, NON_DESK, (c) => c[5]) },
-  { key: "calls_completed", label: "Calls completed", group: "Call", source: T("career_voice_calls status ready or finished, by end time (each call)"), cell: (d, _f, days, s) => callCell(d, days, s, (c) => NON_DESK(c) && c[10] === 1, (c) => c[6] ?? c[5]) },
-  { key: "calls_failed", label: "Calls failed", group: "Call", source: (d) => `career_voice_calls status failed, plus ${J(d)} call_failed (mic denied, network, error)`, cell: (d, _f, days, s) => both(callCell(d, days, s, (c) => c[2] === "failed", (c) => c[4]), failCell(d, days, s)) },
-  { key: "calls_dropped", label: "Calls dropped", group: "Call", source: T("career_voice_calls.timeline dropped (the connection went)"), cell: (d, _f, days, s) => callCell(d, days, s, (c) => NON_DESK(c) && callOutcome(c) === "dropped", (c) => c[5] ?? c[4]) },
-  { key: "calls_hung_early", label: "Hung up in first minute", group: "Call", source: T("career_voice_calls: under 60 s, not completed, not dropped"), cell: (d, _f, days, s) => callCell(d, days, s, (c) => NON_DESK(c) && callOutcome(c) === "hung_up_first_minute", (c) => c[5] ?? c[4]) },
-  { key: "resumes", label: "Resumes in call", group: "Call", source: T("career_voice_calls: onboarding calls with a resume read (each call)"), cell: (d, _f, days, s) => callCell(d, days, s, (c) => c[1] === "onboarding" && c[9] === 1, (c) => c[5] ?? c[4]) },
-  { key: "onboarded", label: "Onboarded", group: "Call", source: (d) => stepSource(d, "onboarded"), cell: (d, _f, days, s) => firstStepCell(d, "onboarded", days, s) },
+  { key: "saw_signup", label: `Saw sign-up (${PARTLY_TRACKED})`, group: "Arrive", source: (d) => `${J(d)}: saw_signup, distinct visitor ids. Partly tracked: recorded for about 1 sign-up in 10 (the Google sign-in path writes none), so it is never a base or a drop`, cell: (d, f, days) => visitorCell(d, f, "saw_signup", days) },
+  { key: "signups", label: "Sign-ups", group: "Sign up", timed: true, source: (d) => stepSource(d, "signed_up"), cell: (d, _f, days, s, u) => firstStepCell(d, "signed_up", days, s, u) },
+  { key: "reached", label: "Reached Stu", group: "Sign up", timed: true, source: (d) => stepSource(d, "reached_stu"), cell: (d, _f, days, s, u) => firstStepCell(d, "reached_stu", days, s, u) },
+  { key: "phone", label: "Phone verified", group: "Sign up", timed: true, source: (d) => stepSource(d, "verified_phone"), cell: (d, _f, days, s, u) => firstStepCell(d, "verified_phone", days, s, u) },
+  { key: "wa_linked", label: "WhatsApp linked", group: "Sign up", timed: true, source: (d) => stepSource(d, "whatsapp_linked"), cell: (d, _f, days, s, u) => firstStepCell(d, "whatsapp_linked", days, s, u) },
+  { key: "calls_started", label: "Calls started", group: "Call", timed: true, source: T("career_voice_calls.started_at, onboarding, returning and build calls (each call)"), cell: (d, _f, days, s, u) => callCell(d, days, s, NON_DESK, (c) => c[5], u) },
+  { key: "calls_completed", label: "Calls completed", group: "Call", timed: true, source: T("career_voice_calls status ready or finished, by end time (each call)"), cell: (d, _f, days, s, u) => callCell(d, days, s, (c) => NON_DESK(c) && c[10] === 1, (c) => c[6] ?? c[5], u) },
+  { key: "calls_failed", label: "Failed call attempts", group: "Call", timed: true, source: (d) => `${FAILED_ATTEMPTS}; ${J(d)} for call_failed`, cell: (d, _f, days, s, u) => both(callCell(d, days, s, (c) => NON_DESK(c) && c[2] === "failed", (c) => c[4], u), failCell(d, days, s, u)) },
+  { key: "calls_dropped", label: "Calls dropped", group: "Call", timed: true, source: T("career_voice_calls.timeline dropped (the connection went)"), cell: (d, _f, days, s, u) => callCell(d, days, s, (c) => NON_DESK(c) && callOutcome(c) === "dropped", (c) => c[5] ?? c[4], u) },
+  { key: "calls_hung_early", label: "Hung up in first minute", group: "Call", timed: true, source: T("career_voice_calls: under 60 s, not completed, not dropped"), cell: (d, _f, days, s, u) => callCell(d, days, s, (c) => NON_DESK(c) && callOutcome(c) === "hung_up_first_minute", (c) => c[5] ?? c[4], u) },
+  { key: "resumes", label: "Resumes in call", group: "Call", timed: true, source: T("career_voice_calls: onboarding calls with a resume read (each call)"), cell: (d, _f, days, s, u) => callCell(d, days, s, (c) => c[1] === "onboarding" && c[9] === 1, (c) => c[5] ?? c[4], u) },
+  { key: "onboarded", label: "Onboarded", group: "Call", timed: true, source: (d) => stepSource(d, "onboarded"), cell: (d, _f, days, s, u) => firstStepCell(d, "onboarded", days, s, u) },
   { key: "active", label: "Active (did something)", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s) },
   { key: "active_new", label: "  of them new (joined that day)", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s, "new") },
   { key: "active_returning", label: "  of them returning", group: "Use", source: (d) => activitySource(d), cell: (d, _f, days, s) => activeCell(d, days, s, "returning") },
@@ -680,18 +699,18 @@ export const DAILY_METRICS: DailyMetricDef[] = [
     const users = all.users.filter((i) => d.act.some(([k, u, day]) => k === "desk" && u === i && days.has(day) && day > istDay(d.users[i].joined)));
     return { ...cellOf(users), na: all.na };
   } },
-  { key: "saw_jobs", label: "Saw jobs (first time)", group: "Use", source: (d) => stepSource(d, "saw_jobs"), cell: (d, _f, days, s) => firstStepCell(d, "saw_jobs", days, s) },
+  { key: "saw_jobs", label: "Saw jobs (first time)", group: "Use", timed: true, source: (d) => stepSource(d, "saw_jobs"), cell: (d, _f, days, s, u) => firstStepCell(d, "saw_jobs", days, s, u) },
   { key: "job_opens", label: "Job opens", group: "Use", source: (d) => `${J(d)}: opened_job (each)`, cell: (d, _f, days, s) => actCell(d, ["job_open"], days, s, "sum", !d.journeyLive) },
-  { key: "saved", label: "Saved a job (first time)", group: "Use", source: (d) => stepSource(d, "saved_job"), cell: (d, _f, days, s) => firstStepCell(d, "saved_job", days, s) },
+  { key: "saved", label: "Saved a job (first time)", group: "Use", timed: true, source: (d) => stepSource(d, "saved_job"), cell: (d, _f, days, s, u) => firstStepCell(d, "saved_job", days, s, u) },
   { key: "apply_clicks", label: "Apply clicks", group: "Use", source: (d) => `${J(d)}: apply_click (each)`, cell: (d, _f, days, s) => actCell(d, ["apply"], days, s, "sum", !d.journeyLive) },
   { key: "chats", label: "Chat messages to Stu", group: "Use", source: T("career_messages (desk chat), career_channel_messages in (WhatsApp), desk and interview calls"), cell: (d, _f, days, s) => actCell(d, ["chat_desk", "chat_wa", "chat_call"], days, s, "sum") },
   { key: "chatters", label: "People who chatted", group: "Use", source: T("same tables, distinct people a day"), cell: (d, _f, days, s) => actCell(d, ["chat_desk", "chat_wa", "chat_call"], days, s, "users") },
   { key: "digest_sent", label: "Digests sent", group: "Use", source: T("career_daily_sends whatsapp picks, sent_at"), cell: (d, _f, days, s) => actCell(d, ["digest_sent"], days, s, "sum") },
   { key: "digest_read", label: "Digests read", group: "Use", source: T("career_daily_sends whatsapp picks, read_at"), cell: (d, _f, days, s) => actCell(d, ["digest_read"], days, s, "sum") },
   { key: "digest_tapped", label: "Digests tapped", group: "Use", source: T("career_daily_sends whatsapp picks, tapped_at"), cell: (d, _f, days, s) => actCell(d, ["digest_tapped"], days, s, "sum") },
-  { key: "outreach_people", label: "Outreach started (people)", group: "Outreach", source: (d) => stepSource(d, "outreach_started"), cell: (d, _f, days, s) => firstStepCell(d, "outreach_started", days, s) },
+  { key: "outreach_people", label: "Outreach started (people)", group: "Outreach", timed: true, source: (d) => stepSource(d, "outreach_started"), cell: (d, _f, days, s, u) => firstStepCell(d, "outreach_started", days, s, u) },
   { key: "outreach_rows", label: "Jobs added to outreach", group: "Outreach", source: T("career_outreach.created_at (each)"), cell: (d, _f, days, s) => actCell(d, ["outreach_row"], days, s, "sum") },
-  { key: "mailboxes", label: "Mailboxes connected", group: "Outreach", source: (d) => stepSource(d, "mailbox_connected"), cell: (d, _f, days, s) => firstStepCell(d, "mailbox_connected", days, s) },
+  { key: "mailboxes", label: "Mailboxes connected", group: "Outreach", timed: true, source: (d) => stepSource(d, "mailbox_connected"), cell: (d, _f, days, s, u) => firstStepCell(d, "mailbox_connected", days, s, u) },
   { key: "emails", label: "Emails sent (real)", group: "Outreach", source: T("career_emails status sent, not a dry run or test inbox (each)"), cell: (d, _f, days, s) => actCell(d, ["email"], days, s, "sum") },
   { key: "emails_test", label: "Emails sent (dry run / test)", group: "Outreach", kind: "test", source: T("career_emails sent as a dry run or from a test inbox (each)"), cell: (d, _f, days, s) => actCell(d, ["email_test"], days, s, "sum") },
   { key: "replies", label: "Replies (real)", group: "Outreach", source: T("career_sequences.replied_at, not bounce, not dry run (each)"), cell: (d, _f, days, s) => actCell(d, ["reply"], days, s, "sum") },
@@ -705,16 +724,62 @@ export const DAILY_METRICS: DailyMetricDef[] = [
 export interface DailyColumn {
   label: string;
   days: string[];
+  /** ADMIN-AUDIT-STU (14 Nov 2026): the column holds today (IST), which is not over: "so far", never coloured */
+  soFar?: boolean;
 }
 
-export function dailyColumns(f: Filters, group: number): DailyColumn[] {
+export function dailyColumns(f: Filters, group: number, today: string = todayIst()): DailyColumn[] {
   const days = dayRange(f.start, f.end);
   const cols: DailyColumn[] = [];
   for (let i = 0; i < days.length; i += group) {
     const chunk = days.slice(i, i + group);
-    cols.push({ label: chunk.length === 1 ? chunk[0].slice(5) : `${chunk[0].slice(5)} to ${chunk[chunk.length - 1].slice(5)}`, days: chunk });
+    const soFar = chunk.includes(today);
+    const label = chunk.length === 1 ? chunk[0].slice(5) : `${chunk[0].slice(5)} to ${chunk[chunk.length - 1].slice(5)}`;
+    cols.push({ label: soFar ? `${label} so far` : label, days: chunk, ...(soFar ? { soFar } : {}) });
   }
   return cols;
+}
+
+/**
+ * ADMIN-AUDIT-STU (14 Nov 2026): the Daily colour of a cell against the column before it. Never for a test row, a
+ * missing number, an old visitor count next to a real one, or a column that holds today (a day not over against a
+ * whole day).
+ */
+export function dailyTone(def: Pick<DailyMetricDef, "kind">, cur: Cell, prev: Cell | null, col: Pick<DailyColumn, "soFar">): "up" | "down" | "" {
+  if (def.kind === "test" || !prev || col.soFar || cur.na || prev.na || cur.old !== prev.old) return "";
+  return cur.v > prev.v ? "up" : cur.v < prev.v ? "down" : "";
+}
+
+/**
+ * ADMIN-AUDIT-STU (14 Nov 2026): what a range is compared with. The period just before, the same number of days; when
+ * the range ends today (IST) it is cut at the same time of day (now less the range's length: yesterday up to this time,
+ * or the 7 days before up to this time on their last day), as today is not over. `until` is that cut, else null.
+ * A metric with no time per event (per IST day only) cannot be cut: soFar says to show it as "so far", with no %.
+ */
+export interface CompareBasis {
+  pf: Filters;
+  until: number | null;
+  soFar: boolean;
+}
+
+export function compareBasis(f: Filters, now: number): CompareBasis {
+  const n = dayRange(f.start, f.end).length;
+  const pf = { ...f, start: addDays(f.start, -n), end: addDays(f.start, -1) };
+  const soFar = f.end >= istDay(now);
+  return { pf, until: soFar ? now - n * 86_400_000 : null, soFar };
+}
+
+/** The time the dataset was read (what "now" is for its numbers), else the clock. */
+export const dataNow = (d: Pick<StuData, "generatedAt">): number => {
+  const t = Date.parse(d.generatedAt);
+  return Number.isFinite(t) ? t : Date.now();
+};
+
+/** "vs yesterday at this time", "vs the day before", "vs the 7 days before at this time". */
+export function compareText(f: Filters, c: Pick<CompareBasis, "until">): string {
+  const n = dayRange(f.start, f.end).length;
+  if (n === 1) return c.until != null ? "vs yesterday at this time" : "vs the day before";
+  return c.until != null ? `vs the ${n} days before at this time` : `vs the ${n} days before`;
 }
 
 export function dailyTable(d: StuData, f: Filters, group: number) {
@@ -826,6 +891,8 @@ export interface BasisBar {
   pctPrev: number | null;
   /** fewer people than a later step they come before: the beacon misses people, so it is not a drop */
   gap?: boolean;
+  /** ADMIN-AUDIT-STU: a partly tracked step (StepDef.partial): no %, never a base and never a drop */
+  partial?: boolean;
 }
 
 /**
@@ -849,7 +916,7 @@ export function funnelBasis(bars: BasisBar[], withPaid: boolean): string | null 
     b.fromKey = null;
     b.pctPrev = null;
     b.gap = false;
-    if (b.untracked) return;
+    if (b.untracked || b.partial) return;
     b.gap = (b.cell.v === 0 && bars.slice(k + 1).some((x) => !x.untracked && x.cell.v > 0)) || (b.anon && signed != null && b.cell.v < signed.cell.v);
     const from = b.anon || b.key === "signed_up" ? lastAnon : lastGate;
     if (from) {
@@ -908,6 +975,10 @@ export function ratios(d: StuData, f: Filters): Ratio[] {
   const nonDesk = cohortCalls.filter(NON_DESK);
   const failedCalls = nonDesk.filter((c) => c[2] === "failed");
   const failsJ = d.fails.filter(([u]) => cohortSet.has(u));
+  // ADMIN-AUDIT-STU (14 Nov 2026): one definition (FAILED_ATTEMPTS) for calls and people: a mic denied or any other
+  // call_failed is a failed attempt too. Attempts: calls made plus those call_failed rows.
+  const failedAttempts = [...failedCalls.map((c) => c[0]), ...failsJ.map(([u]) => u)];
+  const attempts = [...nonDesk.map((c) => c[0]), ...failsJ.map(([u]) => u)];
   const tried = uniq([...nonDesk.map((c) => c[0]), ...failsJ.map(([u]) => u)]);
   const micDenied = uniq(failsJ.filter(([, , r]) => /mic/i.test(r)).map(([u]) => u));
   const anyFail = uniq([...failedCalls.map((c) => c[0]), ...failsJ.map(([u]) => u)]);
@@ -926,8 +997,8 @@ export function ratios(d: StuData, f: Filters): Ratio[] {
     R("signup_paid", "Sign-up to paid (real)", paid, signedUp, stepSource(d, "paid")),
     R("visit_paid", "Visit to paid (real)", cellOf(paid), visitors, "paid people in the cohort over visitor ids in range"),
     { ...R("mic_denied", "Mic denied rate (people)", micDenied, tried, "journey log call_failed reason mic over people who tried a call"), value: d.journeyLive ? pct(micDenied.length, tried.length) : null },
-    R("call_fail", "Call failure rate (people)", anyFail, tried, "career_voice_calls failed plus journey call_failed, over people who tried a call"),
-    R("call_fail_calls", "Call failure rate (calls)", cellOf(failedCalls.map((c) => c[0]), failedCalls.length), cellOf(nonDesk.map((c) => c[0]), nonDesk.length), "career_voice_calls status failed over calls made (not desk or interview)"),
+    R("call_fail", "Call failure rate (people)", anyFail, tried, `people with a failed attempt (${FAILED_ATTEMPTS}) over people who tried a call`),
+    R("call_fail_calls", "Call failure rate (attempts)", cellOf(failedAttempts, failedAttempts.length), cellOf(attempts, attempts.length), `${FAILED_ATTEMPTS}, over calls made (not desk or interview) plus those call_failed rows`),
     { key: "avg_calls", label: "Average calls per person who called", num: cellOf(startedCalls.map((c) => c[0]), startedCalls.length), den: cellOf(startedCalls.map((c) => c[0])), value: avg(startedCalls.length, uniq(startedCalls.map((c) => c[0])).length), source: "career_voice_calls started, every mode", avg: true },
     { key: "avg_calls_signup", label: "Average calls per sign-up", num: cellOf(startedCalls.map((c) => c[0]), startedCalls.length), den: cellOf(cohort), value: avg(startedCalls.length, cohort.length), source: "career_voice_calls started, every mode", avg: true },
     { key: "avg_chats", label: "Average chat messages per person who chatted", num: cellOf(chatters, chatMsgs), den: cellOf(chatters), value: avg(chatMsgs, chatters.length), source: "career_messages, career_channel_messages, desk and interview calls", avg: true },
@@ -1059,7 +1130,8 @@ export function signupSourceText(d: StuData, f: Filters, total: number, channelN
 export interface RetentionRow {
   week: string;
   size: Cell;
-  d: Record<string, { back: Cell; eligible: Cell; value: number | null }>;
+  /** soFar (ADMIN-AUDIT-STU, 14 Nov 2026): day N is today for some of the people, so the day is not over */
+  d: Record<string, { back: Cell; eligible: Cell; value: number | null; soFar?: boolean }>;
 }
 
 export const RETENTION_DAYS = [1, 7, 30] as const;
@@ -1070,11 +1142,10 @@ export const RETENTION_DAYS = [1, 7, 30] as const;
  * and sent an email without opening the desk read as gone. Rows are weeks of joining (Monday), or IST days of
  * joining with `by` "day" (the Overview's cohort heatmap).
  */
-export function retention(d: StuData, f: Filters, orLater: boolean, by: "week" | "day" = "week", ns: readonly number[] = RETENTION_DAYS): RetentionRow[] {
+export function retention(d: StuData, f: Filters, orLater: boolean, by: "week" | "day" = "week", ns: readonly number[] = RETENTION_DAYS, today: string = todayIst()): RetentionRow[] {
   const cohort = cohortOf(d, f);
   const backDays = new Map<number, Set<string>>();
   for (const [u, m] of activity(d).days) backDays.set(u, new Set(m.keys()));
-  const today = todayIst();
   const weeks = new Map<string, number[]>();
   for (const i of cohort) {
     const w = by === "day" ? istDay(d.users[i].joined) : weekOf(istDay(d.users[i].joined));
@@ -1093,7 +1164,8 @@ export function retention(d: StuData, f: Filters, orLater: boolean, by: "week" |
         for (const x of ds) if (x >= target) return true;
         return false;
       });
-      row.d[`d${n}`] = { back: cellOf(back), eligible: cellOf(eligible), value: pct(back.length, eligible.length) };
+      const soFar = eligible.some((i) => addDays(istDay(d.users[i].joined), n) === today);
+      row.d[`d${n}`] = { back: cellOf(back), eligible: cellOf(eligible), value: pct(back.length, eligible.length), ...(soFar ? { soFar } : {}) };
     }
     return row;
   });

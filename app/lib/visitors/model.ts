@@ -55,6 +55,8 @@ export interface SiteRow {
 
 /** The Stu person a visitor id became. joined null: an account with no Stu activity (not a Stu sign-up). */
 export interface Person {
+  /** the account's id: two browsers of one person count as one sign-up (ADMIN-AUDIT-STU, 14 Nov 2026) */
+  id?: string;
   internal: boolean;
   joined: number | null;
   steps: Partial<Record<PersonStep, number>>;
@@ -95,8 +97,8 @@ export const FUNNEL = [
   { key: "scrolled", label: `Scrolled ${SCROLL_PCT}%+`, hint: `Reached ${SCROLL_PCT}% of a page or more` },
   { key: "cta", label: "Saw Start", hint: "A Start button was at least half on screen for half a second" },
   { key: "clicked", label: "Clicked Start", hint: "Clicked a Start or join button (clicked_join)" },
-  { key: "began", label: "Began sign-up", hint: "Reached the sign-up step (signup_started)" },
-  { key: "signed_up", label: "Signed up", hint: "Joined Stu on or after the first day of the range, from a visit that sent a page_view (sign-ups with no tracked visit are on the Overview's Sign-ups)" },
+  { key: "began", label: "Began sign-up (partly tracked)", hint: "Reached the sign-up step (signup_started). Partly tracked: recorded for about 1 sign-up in 10 (the Google sign-in path writes none), so it is never used as a drop-off" },
+  { key: "signed_up", label: "Signed up", hint: "People (not browsers) who joined Stu in the range, from a visit that sent a page_view (sign-ups with no tracked visit are on the Overview's Sign-ups)" },
   { key: "reached_stu", label: "Reached Stu", hint: "Opened Stu after signing in, on or after the first day of the range" },
   { key: "call_started", label: "Call started", hint: "From the calls table" },
   { key: "call_completed", label: "Call completed", hint: "From the calls table" },
@@ -107,10 +109,13 @@ export type FunnelKey = (typeof FUNNEL)[number]["key"];
 
 // --------------------------------------------------------------- drop-offs
 
-/** Where a real visitor who did not sign up stopped, furthest step first. */
+/**
+ * Where a real visitor who did not sign up stopped, furthest step first. ADMIN-AUDIT-STU (14 Nov 2026): "Began sign-up"
+ * is recorded for only about 1 sign-up in 10, so it is not a stop of its own: a visitor who clicked Start (or began
+ * sign-up) and did not sign up stopped at "Clicked Start, didn't sign up".
+ */
 export const DROPS = [
-  { key: "began", label: "Began sign-up, didn't finish" },
-  { key: "clicked", label: "Clicked Start, didn't begin sign-up" },
+  { key: "clicked", label: "Clicked Start, didn't sign up" },
   { key: "cta", label: "Saw Start, didn't click" },
   { key: "scrolled", label: "Scrolled, never saw Start" },
   { key: "stayed", label: "Stayed, didn't scroll or see Start" },
@@ -337,12 +342,17 @@ interface Visit {
   /** the last homepage section seen (non-clickers only), or "none" */
   lastSection: string | null;
   signedDay: string | null;
+  /** the person it became (account id, else the visitor id), for counting people not browsers */
+  pid: string;
+  /** first row in the range, epoch ms */
+  firstAt: number;
+  /** another browser of the same person is counted for their sign-up and later steps */
+  dupPerson?: boolean;
 }
 
 /** The furthest step a real visitor who didn't sign up reached. */
 export function dropOf(flags: Set<string>): DropKey {
-  if (flags.has("began")) return "began";
-  if (flags.has("clicked")) return "clicked";
+  if (flags.has("began") || flags.has("clicked")) return "clicked";
   if (flags.has("cta")) return "cta";
   if (flags.has("scrolled")) return "scrolled";
   if (flags.has("engaged")) return "stayed";
@@ -351,6 +361,7 @@ export function dropOf(flags: Set<string>): DropKey {
 
 function visitsOf(input: VisitorsInput): { visits: Visit[]; excluded: number; beforeTracking: number; noPageView: number } {
   const startMs = dayStart(input.start);
+  const endMs = dayStart(addDays(input.end, 1));
   const byV = new Map<string, SiteRow[]>();
   for (const r of input.rows) {
     if (!r.v || r.day < input.start || r.day > input.end) continue;
@@ -406,7 +417,9 @@ function visitsOf(input: VisitorsInput): { visits: Visit[]; excluded: number; be
     }
     let returning = false;
     let signedDay: string | null = null;
-    if (real && person && person.joined != null) {
+    // ADMIN-AUDIT-STU (14 Nov 2026): a sign-up in the range, not after it (a visit this week by someone who joined
+    // later is not this range's sign-up), and later steps in the range too.
+    if (real && person && person.joined != null && person.joined < endMs) {
       if (person.joined < startMs) returning = true;
       else {
         flags.add("signed_up");
@@ -414,7 +427,7 @@ function visitsOf(input: VisitorsInput): { visits: Visit[]; excluded: number; be
       }
       for (const k of PERSON_STEPS) {
         const t = person.steps[k];
-        if (t != null && t >= startMs) flags.add(k);
+        if (t != null && t >= startMs && t < endMs) flags.add(k);
       }
     }
     // The homepage section a non-clicker saw last: on their home page view that saw the most sections, the last new one.
@@ -431,7 +444,16 @@ function visitsOf(input: VisitorsInput): { visits: Visit[]; excluded: number; be
     visits.push({
       id, real, days: new Set(list.map((r) => r.day)), realDays, device, landing: landingGroup(first.path), source, detail, flags, returning,
       noServerRow: real && ![...realDays].some((d) => serverDays.has(d)), lastSection, signedDay,
+      pid: person?.id ? `u:${person.id}` : `v:${id}`, firstAt: list[0].at,
     });
+  }
+  // ADMIN-AUDIT-STU (14 Nov 2026): people, not browsers. One person on two browsers (phone and laptop) is one sign-up:
+  // their first real visit in the range carries the sign-up and the later steps; the others still did not drop off.
+  const seen = new Set<string>();
+  for (const v of [...visits].sort((a, b) => Number(b.real) - Number(a.real) || a.firstAt - b.firstAt)) {
+    if (!v.pid.startsWith("u:") || !v.flags.has("signed_up")) continue;
+    if (seen.has(v.pid)) v.dupPerson = true;
+    else seen.add(v.pid);
   }
   return { visits, excluded, beforeTracking, noPageView };
 }
@@ -442,11 +464,14 @@ function topDetail(xs: string[]): string {
   return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${k} (${n})`).join(", ");
 }
 
+/** The flags a person carries once, whatever the number of browsers. */
+const PERSON_FLAGS = new Set<string>(["signed_up", ...PERSON_STEPS]);
+
 function sourceRow(key: string, label: string, vs: Visit[]): SourceRow {
   const counts = zero();
   let returning = 0;
   for (const v of vs) {
-    for (const f of v.flags) counts[f]++;
+    for (const f of v.flags) if (!(v.dupPerson && PERSON_FLAGS.has(f))) counts[f]++;
     if (v.returning) returning++;
   }
   return { key, label, counts, returning, signupPct: pct(counts.signed_up, counts.real - returning), detail: topDetail(vs.map((v) => v.detail)) };
@@ -542,7 +567,7 @@ export function buildReport(input: VisitorsInput): VisitorsReport {
       real: real.filter((v) => v.realDays.has(d)).length,
       likelyBots: bots.filter((v) => v.days.has(d)).length,
       crawlers: recorded ? crawlDay.get(d) ?? 0 : null,
-      signedUp: real.filter((v) => v.signedDay === d).length,
+      signedUp: real.filter((v) => v.signedDay === d && !v.dupPerson).length,
     });
   }
 

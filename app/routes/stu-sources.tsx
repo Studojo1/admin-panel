@@ -22,7 +22,7 @@ export default function StuSources() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <PageTitle title="Sources" sub={`People who joined Stu from ${filters.start} to ${filters.end} (IST), split by where they came from.`} />
-        <div className="mb-4 flex items-center gap-1 rounded-xl border-2 border-neutral-900 bg-white p-0.5">
+        <div className="mb-4 flex max-w-full flex-wrap items-center gap-1 rounded-xl border-2 border-neutral-900 bg-white p-0.5">
           {SPLITS.map((x) => (
             <button key={x.v} onClick={() => setBy(x.v)} className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${by === x.v ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"}`}>{x.l}</button>
           ))}
@@ -75,7 +75,7 @@ export default function StuSources() {
         </table>
       </div>
       <SourceNote>
-        channel: career_user_source.first_touch (utm tags, referrer, click ids), else the first journey event with a source, else the visitor's; grouped as on admin.studojo.com. Steps as on the Funnel page (unnested). Revenue: career_credit_orders paid, not test, less refunds.
+        channel: career_user_source.first_touch (utm tags, referrer, click ids), else the first journey event with a source, else the visitor's; grouped as on admin.studojo.com. Steps as on the Funnel page (unnested). Revenue (real): everything these people paid, any day: career_credit_orders paid, not test, less refunds; autopay charges (career_plan_grants autopay, not refunded, subscription not test); career_plans jobs, not test or grant. Paid and revenue here are of the people who joined in range; the Overview's Paid and Revenue tiles count every payment in the range.
         Cohort: <Num cell={cellOf(s.cohort)} title="Cohort" />
       </SourceNote>
     </div>

@@ -143,7 +143,9 @@ test("periods: DAU, WAU and MAU against the period before, none against days bef
     ["active_day:web", 4, addDays(end, -3), 1, 0], ["active_day:web", 4, addDays(end, -35), 1, 0],
   ];
   const d = data([0, 1, 2, 3, 4].map((i) => person(`p${i}`, "2026-11-05")), { act });
-  const b = activesBody({ end }, input(d, { today: end }));
+  // ADMIN-AUDIT-STU (14 Nov 2026): the end day is over (today is the day after), so each period is compared; a period
+  // that ends today is "so far" and is not (scripts/stu-same-time.test.mjs).
+  const b = activesBody({ end }, input(d, { today: addDays(end, 1) }));
   assert.equal(b.dau.cell.v, 1);
   assert.equal(b.dau.prev, 1);
   assert.equal(b.wau.cell.v, 3, "today, the day before, three days back");
@@ -156,7 +158,7 @@ test("periods: DAU, WAU and MAU against the period before, none against days bef
   assert.equal(b.wauMau.value, 75);
 
   // Counting starts 20 days before the end: the 30 days before (and the MAU's own start) reach before it.
-  const late = activesBody({ end }, input(d, { today: end, countFromDay: addDays(end, -20) }));
+  const late = activesBody({ end }, input(d, { today: addDays(end, 1), countFromDay: addDays(end, -20) }));
   assert.equal(late.mau.prev, null, "never compared with days that were not counted");
   assert.equal(late.mau.partial, true);
   assert.equal(late.wau.prev, 1, "the 7 days before were counted");

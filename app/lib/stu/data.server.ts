@@ -11,6 +11,7 @@
 import { sql } from "drizzle-orm";
 import db from "~/lib/db.server";
 import { CHANNELS, channelOf } from "~/lib/utm-dictionary";
+import { swrCache } from "~/lib/swr-cache";
 import {
   ACTIVITY_EVENTS, ANON_STEPS, EXTRA_EVENTS, JOURNEY_NAME_TO_STEP, STEPS, USER_STEPS,
   type Act, type JourneyStepRow, type StuData, type Touch, type WireCall, type WireFail, type WireUser, type WireVisitor,
@@ -579,24 +580,23 @@ async function readOnly<T>(fn: (q: Q) => Promise<T>): Promise<T> {
   );
 }
 
-let cache: { minute: number; data: Promise<StuData> } | null = null;
-const TTL_MS = 60_000;
-
 /**
- * The Stu dataset from the reset on (model.ts sinceReset), read at most once per clock minute (fresh: read now).
- * ADMIN-FIX (5 Nov 2026): the copy turns over on the minute, not a minute after this pod's last read, so the two pods'
- * copies are from the same minute and two refreshes agree.
+ * The Stu dataset from the reset on (model.ts sinceReset). ADMIN-FIX (5 Nov 2026): the copy turns over on the clock
+ * minute, so the two pods' copies are from the same minute and two refreshes agree. ADMIN-AUDIT-STU (14 Nov 2026):
+ * stale-while-revalidate (app/lib/swr-cache.ts): a copy from an earlier minute is served at once while one rebuild runs
+ * in the background, for up to 5 minutes; only the first read, or a copy older than that, waits for the database.
+ * fresh (the pages' Refresh): read now.
  */
+const cache = swrCache<StuData>({
+  freshMs: 60_000, bucketMs: 60_000, maxStaleMs: 5 * 60_000, max: 1,
+  onError: (_k, err) => console.error("[stuData] background rebuild failed, serving the last copy", err),
+});
+
 export function stuData(fresh = false): Promise<StuData> {
-  const minute = Math.floor(Date.now() / TTL_MS);
-  if (!fresh && cache && cache.minute === minute) return cache.data;
-  const from = countFrom(process.env.STU_COUNT_FROM);
-  const data = readOnly((q) => load(q, from)).then((d) => sinceReset(d, from));
-  cache = { minute, data };
-  data.catch(() => {
-    if (cache?.data === data) cache = null;
-  });
-  return data;
+  return cache.get("all", () => {
+    const from = countFrom(process.env.STU_COUNT_FROM);
+    return readOnly((q) => load(q, from)).then((d) => sinceReset(d, from));
+  }, fresh);
 }
 
 /** One person's raw journey log (their visitor ids included), oldest first, and their source row, for the Journeys timeline. */
