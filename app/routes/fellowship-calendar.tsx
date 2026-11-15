@@ -63,7 +63,7 @@ interface Rules {
 interface Story { id: number; creatorId: number; prompt: string | null; text: string; spoken: boolean; createdAt: string }
 interface Desk {
   today: string; thisWeek: string; rules: Rules; playbook: { text: string; updatedAt: string | null; by: string | null }; programmeStart: string;
-  totals: { impressions: number; studojoImpressions: number; measuredPosts: number; avgPerPost: number; storiesCollected: number; draftsWaiting: number; draftsSentBack: number; versionsWaiting: number };
+  totals: { impressions: number; studojoImpressions: number; measuredPosts: number; avgPerPost: number; avgPerStudojoPost: number; storiesCollected: number; draftsWaiting: number; draftsSentBack: number; versionsWaiting: number };
   weekly: { week: string; impressions: number; partial: boolean }[]; stories: Story[]; fellows: Fellow[];
 }
 
@@ -77,7 +77,7 @@ const DSHORT = ["Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"];
 // The calendar's tour: what each part is for, for whoever on the team opens it first.
 const TOUR: TourStep[] = [
   { title: "The Editorial calendar", body: "This is where the team runs the fellowship day to day: which posts go out, what needs a decision today, and how posts are doing. Here's a quick look around." },
-  { sel: '[data-tour="cal-goal"]', title: "The goal and this week", body: "Impressions so far against the 1M goal and the founder's plan. Underneath: posts done of those due this week, fellows active, who's at risk, and numbers still to come in." },
+  { sel: '[data-tour="cal-goal"]', title: "The goal and this week", body: "Studojo post impressions so far against the 1M goal and the founder's plan (only Studojo posts count). Underneath: posts done of those due this week, fellows active, who's at risk, and numbers still to come in." },
   { sel: '[data-tour="cal-attention"]', title: "Needs attention today", body: "Today's to-do list. To review: Claude's drafts waiting for approval. Nudge: fellows behind on posts, with an email ready to send in one click. Numbers due, New stories and Ask for stories work the same way." },
   { sel: '[data-tour="cal-review"]', title: "Review posts", body: "Opens every draft, and every fellow's own version of a post, waiting for you. Approve it, edit it, or send it back with a note. Nothing reaches a fellow until someone here approves it." },
   { sel: '[data-tour="cal-week"]', title: "The week, fellow by fellow", body: "One row per fellow, one column per day, Wednesday to Tuesday. A post's colour shows where it is; the key is above the table. Click a name for the fellow's profile and stories, or a post to open it. The arrows move between weeks." },
@@ -340,7 +340,9 @@ function Desk(P: DeskProps) {
 
   // ------------------------------------------------ overview
   const T = D.totals, G = D.rules.goal;
-  const pct = G.impressions ? (T.impressions / G.impressions) * 100 : 0;
+  // The goal counts impressions on Studojo posts only (the founder, 15 Nov 2026).
+  const got = T.studojoImpressions, avg = T.avgPerStudojoPost;
+  const pct = G.impressions ? (got / G.impressions) * 100 : 0;
   // The founder's plan, not a straight line: interpolate between its checkpoints from zero at the programme start.
   const planPts: [string, number][] = [[D.programmeStart, 0], ...D.rules.plan.map((p) => [p.by, p.impressions] as [string, number])];
   const planToday = (() => {
@@ -354,7 +356,7 @@ function Desk(P: DeskProps) {
   const nextCheckpoint = D.rules.plan.find((p) => p.by >= today) ?? D.rules.plan[D.rules.plan.length - 1];
   const daysLeft = Math.max(0, diff(today, G.by));
   const weeksLeft = Math.max(1, Math.round(daysLeft / 7));
-  const perWeek = Math.round(Math.max(0, G.impressions - T.impressions) / weeksLeft / 1000) * 1000;
+  const perWeek = Math.round(Math.max(0, G.impressions - got) / weeksLeft / 1000) * 1000;
   const fullWeeks = D.weekly.filter((w) => !w.partial);
   const lastFull = fullWeeks[fullWeeks.length - 1];
   const dueThisWeek = live.reduce((s, f) => s + f.standing.thisWeek.due, 0);
@@ -453,8 +455,8 @@ function Desk(P: DeskProps) {
             <div className="goal">
               <div>
                 <p className="eyebrow" id="ov-title">Programme goal</p>
-                <div className="hero"><b>{num(T.impressions)}</b><span>impressions of {num(G.impressions)} by {fmt(G.by)}</span><span className="pct">{pct.toFixed(0)}% there</span></div>
-                <div className="gm" role="img" aria-label={`${num(T.impressions)} of ${num(G.impressions)} impressions. The plan for today is ${num(planToday)}.`}>
+                <div className="hero"><b>{num(got)}</b><span>Studojo post impressions of {num(G.impressions)} by {fmt(G.by)}</span><span className="pct">{pct.toFixed(0)}% there</span></div>
+                <div className="gm" role="img" aria-label={`${num(got)} of ${num(G.impressions)} Studojo post impressions. The plan for today is ${num(planToday)}.`}>
                   <div className="gm-track">
                     <div className="gm-fill" style={{ width: `${Math.min(100, pct).toFixed(2)}%` }} />
                     <div className="gm-pace" style={{ left: `${Math.min(100, (planToday / G.impressions) * 100).toFixed(2)}%` }}><span style={planToday / G.impressions < 0.15 ? { left: 0, transform: "none" } : planToday / G.impressions > 0.85 ? { left: "auto", right: 0, transform: "none" } : undefined}>Plan for today: {kfmt(planToday)}</span></div>
@@ -462,9 +464,9 @@ function Desk(P: DeskProps) {
                   <div className="gm-scale"><span>0</span><span>250K</span><span>500K</span><span>750K</span><span>1M</span></div>
                 </div>
                 <p className="gm-note">
-                  {daysLeft} days to go. Reaching {kfmt(G.impressions)} needs <b>about {num(perWeek)} impressions a week</b> from here.
-                  {lastFull ? ` The last full week brought ${num(lastFull.impressions)}.` : ""}
-                  {T.avgPerPost ? ` At ${num(T.avgPerPost)} impressions a post, that is about ${num(Math.round(perWeek / T.avgPerPost))} posts a week, and ${num(dueThisWeek)} are due this week.` : ` ${num(dueThisWeek)} posts are due this week.`}
+                  {daysLeft} days to go. Reaching {kfmt(G.impressions)} needs <b>about {num(perWeek)} Studojo post impressions a week</b> from here. Only Studojo posts count.
+                  {lastFull ? ` The last full week's Studojo posts brought ${num(lastFull.impressions)}.` : ""}
+                  {avg ? ` At ${num(avg)} impressions a Studojo post, that is about ${num(Math.round(perWeek / avg))} Studojo posts a week, and ${num(dueThisWeek)} are due this week.` : ` ${num(dueThisWeek)} posts are due this week.`}
                   {nextCheckpoint ? ` The plan says ${num(nextCheckpoint.impressions)} impressions and ${nextCheckpoint.creators} fellows by ${fmt(nextCheckpoint.by)}.` : ""}
                 </p>
               </div>

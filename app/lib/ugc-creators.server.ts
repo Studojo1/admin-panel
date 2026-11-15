@@ -256,6 +256,15 @@ async function createTables() {
     SET rules = jsonb_set(rules, '{weeks}', ${JSON.stringify(PROGRAMME_RULES.weeks)}::jsonb), updated_at = NOW(), updated_by = 'founder, 5 Nov 2026'
     WHERE id = 1 AND rules->>'weeks' LIKE 'Weeks run Monday to Sunday%'
   `);
+  // 15 Nov 2026: the founder, the goal is 1M impressions on Studojo posts by 30 Nov (was 25 Nov). Applied once.
+  await db.execute(sql`
+    UPDATE ugc_programme
+    SET rules = jsonb_set(jsonb_set(rules, '{goal,by}', '"2026-11-30"'), '{plan}', (
+          SELECT jsonb_agg(CASE WHEN c->>'by' = '2026-11-25' THEN c || '{"by": "2026-11-30"}'::jsonb ELSE c END ORDER BY i)
+          FROM jsonb_array_elements(rules->'plan') WITH ORDINALITY AS t(c, i))),
+        updated_at = NOW(), updated_by = 'founder, 15 Nov 2026'
+    WHERE id = 1 AND rules->'goal'->>'by' = '2026-11-25' AND jsonb_typeof(rules->'plan') = 'array'
+  `);
   // 9 Nov 2026: the founder, the month-1 milestone is the fellowship certificate, not an intern certificate.
   // Applied once, only while the row's month milestone still says "intern certificate".
   const month = PROGRAMME_RULES.milestones.find((m) => m.id === "month")!;
@@ -360,14 +369,14 @@ export const HIRING_PIPELINE = {
 
 /** The rules both apps read, seeded into ugc_programme once; edit the row, not this. */
 export const PROGRAMME_RULES = {
-  goal: { impressions: 1_000_000, creators: 125, by: "2026-11-25" },
+  goal: { impressions: 1_000_000, creators: 125, by: "2026-11-30" }, // impressions on Studojo posts (the founder, 15 Nov 2026)
   // The founder's plan (Oct 2026): where the programme should be by each date.
   // Measure progress against these, not a straight line to the goal.
   plan: [
     { by: "2026-11-01", creators: 35, posting: 21, impressions: 110_000 },
     { by: "2026-11-08", creators: 65, posting: 39, impressions: 310_000 },
     { by: "2026-11-15", creators: 95, posting: 57, impressions: 600_000 },
-    { by: "2026-11-25", creators: 125, posting: 75, impressions: 1_000_000 },
+    { by: "2026-11-30", creators: 125, posting: 75, impressions: 1_000_000 },
   ],
   // The founder's decision (2 Nov 2026): 5 posts a week, 3 personal and 2 about Studojo.
   postingDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
