@@ -85,9 +85,22 @@ export interface Fellow {
   college: string | null; field: string | null; cohort: string | null; status: string; email: string | null;
   whatsapp: string | null; linkedin: string | null; joined: string; connectionsAtJoin: number | null;
   learnings: string; teamNotes: string; nudgedAt: string | null;
+  /** Their own posting plan, when the team set one (the founder, 15 Nov 2026); null means the programme's rule. */
+  plan: FellowPlan | null;
   /** Admin-only: taken on as a Growth intern / referred to someone hiring (set on the applicant profile). */
   internAt: string | null; referredAt: string | null;
 }
+/** A fellow's own weekly plan in place of the programme's: how many posts, and how many of them Studojo posts. */
+export interface FellowPlan { postsPerWeek: number; studojoPerWeek: number }
+export const planOf = (v: unknown): FellowPlan | null => {
+  const o = jsonOf<Record<string, unknown> | null>(v, null);
+  const posts = Number(o?.postsPerWeek), studojo = Number(o?.studojoPerWeek);
+  if (!Number.isInteger(posts) || posts < 1 || posts > 7 || !Number.isInteger(studojo) || studojo < 0 || studojo > posts) return null;
+  return { postsPerWeek: posts, studojoPerWeek: studojo };
+};
+/** The programme's rules with this fellow's own plan on top. */
+export const rulesFor = <R extends { postsPerWeek: number }>(f: { plan: FellowPlan | null }, rules: R): R =>
+  f.plan ? { ...rules, postsPerWeek: f.plan.postsPerWeek, studojoPerWeek: f.plan.studojoPerWeek } : rules;
 export interface PostInput { title?: unknown; body?: unknown; kind?: unknown; due?: unknown; angle?: unknown; photoIdea?: unknown }
 
 // Timestamps arrive as text from this app's db ("2026-10-29 08:47:00.12+00") or as Date objects; send ISO either way.
@@ -123,7 +136,7 @@ function toFellow(r: Record<string, unknown>): Fellow {
     status: String(r.status ?? "active"), email: (r.email as string) ?? null, whatsapp: (r.whatsapp as string) ?? null,
     linkedin: (r.linkedin_url as string) ?? null, joined: String(r.joined_day ?? ""),
     connectionsAtJoin: r.connections_at_join == null ? null : Number(r.connections_at_join),
-    learnings: String(r.learnings ?? ""), teamNotes: String(r.team_notes ?? ""), nudgedAt: iso(r.nudged_at),
+    learnings: String(r.learnings ?? ""), teamNotes: String(r.team_notes ?? ""), nudgedAt: iso(r.nudged_at), plan: planOf(r.plan),
     internAt: iso(r.intern_at), referredAt: iso(r.referred_at),
   };
 }
@@ -149,7 +162,7 @@ function toDraft(r: Record<string, unknown>): Draft {
 }
 
 const FELLOW_COLS = sql`id, application_id, slug, full_name, email, whatsapp, linkedin_url, college, field, cohort, status,
-  connections_at_join, to_char(joined_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS joined_day, learnings, team_notes, nudged_at, intern_at, referred_at`;
+  connections_at_join, to_char(joined_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS joined_day, learnings, team_notes, nudged_at, plan, intern_at, referred_at`;
 const POST_COLS = sql`id, creator_id, title, body, kind, to_char(due_date, 'YYYY-MM-DD') AS due, status, copied_at, own_line, posted_at,
   post_url, impressions, reactions, comments, screenshot_url, metrics_at, review, insight, insight_at, created_at, created_by,
   photo_idea, photo_url, photo_help_at, analytics_url, analytics, rewrite_body, rewrite_at, rewrite_reply`;
@@ -251,7 +264,7 @@ export function weekMix(rules: { postsPerWeek: number }): WeekMix {
   return { studojo, personal: Math.max(0, rules.postsPerWeek - studojo) };
 }
 const weekRule = (rules: { postsPerWeek: number }) => `${mixLine(weekMix(rules))} A batch must leave each week that hasn't started at exactly that, so write a fellow's whole week at once.`;
-const mixLine = (m: WeekMix) => `Every week (Wednesday to Tuesday) has exactly ${m.studojo} Studojo and ${m.personal} personal posts.`;
+const mixLine = (m: WeekMix) => `Every week (Wednesday to Tuesday) has exactly ${m.studojo === 0 ? `${m.personal} personal ${m.personal === 1 ? "post" : "posts"} and no Studojo posts` : `${m.studojo} Studojo and ${m.personal} personal posts`}.`;
 
 /**
  * A week that hasn't started yet and doesn't come out at exactly the mix once
@@ -336,7 +349,7 @@ async function checkContext(fellowId: number, ex: Exec): Promise<CheckContext | 
       WHERE d.creator_id <> ${fellowId} AND d.created_at >= ${since}::date
   `)).rows as { owner: string; title: string; body: string }[];
   const otherNames = ((await ex.execute(sql`SELECT full_name FROM ugc_creators WHERE id <> ${fellowId}`)).rows as { full_name: string }[]).map((r) => r.full_name);
-  return { today: istDate(), fellow: { id: f.id, name: f.name }, own, others, otherNames, mix: weekMix(await programmeRules(ex)) };
+  return { today: istDate(), fellow: { id: f.id, name: f.name }, own, others, otherNames, mix: weekMix(rulesFor(f, await programmeRules(ex))) };
 }
 
 function readInput(x: PostInput) {
@@ -861,7 +874,7 @@ export async function calendarView() {
         connections: conns.get(f.id) ?? null,
         stories: storiesBy.get(f.id) ?? 0,
         earlierPosts: earlier.get(f.id) ?? 0,
-        standing: standing(ps, today, rules.postsPerWeek),
+        standing: standing(ps, today, rulesFor(f, rules).postsPerWeek),
         emailed: { nudge: emailed.get(`nudge:${f.id}`) ?? null, stories: emailed.get(`stories:${f.id}`) ?? null },
         posts: ps.map((p) => ({ ...p, verdict: verdictOf(p, ps, all), numbersEmailedAt: emailed.get(`post:${p.id}`) ?? null })),
         drafts: draftsBy.get(f.id) ?? [],
@@ -924,7 +937,7 @@ export async function programmeDashboard() {
     now: { creators: live.length, posting: postingBy(today), impressions: cal.totals.impressions, avgPerPost: cal.totals.avgPerPost },
     checkpoints,
     postsWeek: {
-      target: live.filter((f) => f.status === "active").length * rules.postsPerWeek,
+      target: live.filter((f) => f.status === "active").reduce((n, f) => n + rulesFor(f, rules).postsPerWeek, 0),
       scheduled: weekPosts.length,
       posted: weekPosts.filter(isPosted).length,
       dueByToday: weekPosts.filter((p) => p.due <= today).length,
@@ -1036,11 +1049,15 @@ export async function agentRoster() {
   const [fs, posts, drafts, rules] = await Promise.all([fellows(), postsOf(null), draftsOf(null), programmeRules()]);
   return {
     today,
-    programme: { postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules), eachWeek: weekRule(rules) },
+    programme: {
+      postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules), eachWeek: weekRule(rules),
+      ownPlans: "A fellow with a plan below has their own weekly numbers instead of these. Their plan's eachWeek is the rule for them.",
+    },
     fellows: fs.filter((f) => f.status !== "removed").map((f) => {
       const ps = posts.filter((p) => p.creatorId === f.id), ds = drafts.filter((d) => d.creatorId === f.id);
       return {
         id: f.id, name: f.name, college: f.college, field: f.field, cohort: f.cohort, paused: f.status === "paused", joined: f.joined,
+        plan: f.plan ? { ...f.plan, eachWeek: weekRule(rulesFor(f, rules)) } : null,
         waitingForReview: ds.filter((d) => d.status === "review").length, sentBack: ds.filter((d) => d.status === "changes").length,
         approvedNotUpYet: ps.filter((p) => p.status === "ready").length, posted: ps.filter(isPosted).length,
         takenDays: [...ps.map((p) => p.due), ...ds.map((d) => d.due)].filter((d) => d >= today).sort(),
@@ -1219,7 +1236,8 @@ export async function agentFellow(id: number) {
     drafts: ds.map(agentDraft),
     takenDays: [...own.map((p) => p.due), ...ds.map((d) => d.due)].filter((d) => d >= today).sort(),
     programme: {
-      postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules), eachWeek: weekRule(rules),
+      postingDays: rules.postingDays, postsPerWeek: rulesFor(f, rules).postsPerWeek, studojoPerWeek: studojoPerWeek(rulesFor(f, rules)), eachWeek: weekRule(rulesFor(f, rules)),
+      ownPlan: f.plan ? "These numbers are this fellow's own plan, set by the team; they replace the programme's." : null,
       postsWithNumbers: all.filter(measured).length, usualImpressions: usual(), usualStudojoPost: usual("studojo"), usualPersonalPost: usual("personal"),
     },
     playbook: pb.text,

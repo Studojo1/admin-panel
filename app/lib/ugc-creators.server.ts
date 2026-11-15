@@ -125,6 +125,9 @@ async function createTables() {
   // fellows' own pages must never select these.
   await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS team_notes TEXT`);
   await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS nudged_at TIMESTAMPTZ`);
+  // A fellow's own weekly plan ({postsPerWeek, studojoPerWeek}) in place of the programme's, when the team sets
+  // one (the founder, 15 Nov 2026: fewer posts for a fellow who doesn't want promotional ones). NULL = the programme's.
+  await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS plan JSONB`);
   // What a fellow went on to, marked by the team on their applicant profile:
   // the growth internship at Studojo, or a referral to someone hiring in our
   // network. These fill the last two stages of the applicants' pipeline.
