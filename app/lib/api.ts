@@ -136,6 +136,14 @@ export async function getToken(): Promise<string | null> {
   return null;
 }
 
+/** True when the token belongs to an admin or ops user, checked by this server (not control-plane). */
+export async function isAdminToken(token: string): Promise<boolean> {
+  const response = await fetch("/api/admin-check", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.ok;
+}
+
 export async function checkAdminAccess(): Promise<boolean> {
   const { data: session } = authClient.useSession();
   if (!session?.user) return false;
@@ -146,14 +154,7 @@ export async function checkAdminAccess(): Promise<boolean> {
     const token = await getToken();
     if (!token) return false;
     
-    const base = getControlPlaneUrl();
-    const response = await fetch(`${base}/v1/admin/users?limit=1`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    
-    return response.ok;
+    return await isAdminToken(token);
   } catch {
     return false;
   }
