@@ -39,6 +39,9 @@ jobs:
       # VISITORS (4 Nov 2026): real visitors (a page_view), likely bots, crawlers, the first-touch source, the funnel
       # per source and the furthest step of those who did not sign up.
       - run: node --test scripts/visitors-model.test.mjs
+      # OLD-VS-NEW (15 Nov 2026): /compare: the old baselines, a window's numbers on either side, the change words, the
+      # best days, both funnels, channels, the timeline, and Stu's side equal to the Stu pages' own numbers.
+      - run: node --test scripts/compare-model.test.mjs
       # RECORDINGS (5 Nov 2026): the /recordings filters, the furthest step in a visit, career-agent's chunk names, the
       # tracks a visit plays as, the journey markers, and the wiring (admin gate, the Journeys link, storage refs).
       - run: node --test scripts/recordings-model.test.mjs

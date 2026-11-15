@@ -34,6 +34,9 @@ export default [
   // Visitors (4 Nov 2026): real visitors, likely bots and crawlers, the funnel per source and the drop-offs; its own range control.
   route("visitors", "routes/visitors.tsx"),
   route("api/visitors", "routes/api.visitors.tsx"),
+  // Old vs new (15 Nov 2026): the retired student product against Stu, every ratio, the best day; its own controls.
+  route("compare", "routes/compare.tsx"),
+  route("api/compare", "routes/api.compare.tsx"),
   // Recordings (5 Nov 2026): session replays of the website and the platform, kept 30 days; its own range control.
   route("recordings", "routes/recordings.tsx"),
   route("api/recordings", "routes/api.recordings.tsx"),
