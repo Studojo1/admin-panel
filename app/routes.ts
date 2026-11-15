@@ -100,6 +100,9 @@ export default [
   route("api/fellowship-proof", "routes/api.fellowship-proof.tsx"),
   // Vanshika's Claude Code (shared key, not an admin login): drafts in, never approval.
   route("api/agent/*", "routes/api.agent.$.tsx"),
+  // A teammate's Claude reading /customers (shared key, not an admin login): read only, JSON API and MCP.
+  route("api/customers-agent/*", "routes/api.customers-agent.$.tsx"),
+  route("mcp/customers", "routes/mcp.customers.tsx"),
   route("api/b2b-gtm", "routes/api.b2b-gtm.tsx"),
   route("api/gtm-dashboards", "routes/api.gtm-dashboards.tsx"),
 

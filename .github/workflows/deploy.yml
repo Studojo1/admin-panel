@@ -106,6 +106,9 @@ jobs:
           # Fellows' analytics screenshots, read from the shared storage account (fellow-proof container).
           secret_ref AZURE_STORAGE_ACCOUNT_NAME azure-storage-account-name
           secret_ref AZURE_STORAGE_ACCOUNT_KEY azure-storage-account-key
+          # A teammate's Claude reads /customers (/api/customers-agent, /mcp/customers) with this key.
+          # Optional: until app-secrets has it, those routes refuse everyone.
+          secret_ref_optional CUSTOMERS_AGENT_KEY customers-agent-key
           secret_audit
 
       - name: Two replicas across nodes, with a PDB

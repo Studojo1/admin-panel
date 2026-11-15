@@ -51,6 +51,8 @@ jobs:
       # CUSTOMERS (13 Nov 2026): the /customers page: the rank, thanks and complaints in a customer's own messages, the
       # tags, the views, the search and order, and pasted links.
       - run: node --test scripts/customers-model.test.mjs
+      # CUSTOMERS AGENT (15 Nov 2026): the read-only API and MCP for a teammate's Claude.
+      - run: node --test scripts/customers-agent.test.mjs
       # UTM links (2 Nov 2026): the naming scheme, utm_id = slug first, utm_*
       # as the fallback, IST ranges, internal accounts and bots apart.
       - run: node --test scripts/utm-attribution.test.mjs
