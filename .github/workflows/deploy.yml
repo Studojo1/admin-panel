@@ -117,6 +117,12 @@ jobs:
             '{"spec":{"replicas":2,"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"DoNotSchedule","labelSelector":{"matchLabels":{"app":"${{ env.APP_NAME }}"}}}]}}}}'
           kubectl create pdb ${{ env.APP_NAME }} -n studojo --min-available=1 \
             --selector=app=${{ env.APP_NAME }} --dry-run=client -o yaml | kubectl apply -f -
+          # A 10m CPU request starved the pod on a busy node: "/" took over 5 s,
+          # the liveness probe killed it, and every restart started a cold cache
+          # (15 Nov 2026, 33 restarts, blank pages). Ask for real CPU and only
+          # restart after a minute without an answer.
+          kubectl patch deployment/${{ env.APP_NAME }} -n studojo --type=strategic -p \
+            '{"spec":{"template":{"spec":{"containers":[{"name":"${{ env.APP_NAME }}","resources":{"requests":{"cpu":"100m"}},"livenessProbe":{"timeoutSeconds":10,"failureThreshold":6},"readinessProbe":{"timeoutSeconds":5}}]}}}}'
 
       - name: Deploy to Kubernetes
         run: |
