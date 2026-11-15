@@ -256,12 +256,13 @@ const has1000 = (r: Applicant) => r.connections === "1,000+" || r.followers === 
 const HIGHLIGHTS: { key: HighlightKey; label: string; points: number; test: (r: Applicant, links: ShareLinks) => boolean }[] = [
   { key: "conn500", label: "500+ connections", points: 2, test: has500 },
   { key: "conn1000", label: "1,000+ connections", points: 1, test: has1000 },
-  { key: "crossed1k", label: "A post crossed 1K impressions", points: 3, test: (r) => r.crossed_1k === "Yes" },
-  { key: "weekly", label: "Posts every week", points: 2, test: (r) => r.post_frequency === "Every week or more" },
+  // Points: the founder, 15 Nov 2026 (posting habit over one big post).
+  { key: "crossed1k", label: "A post crossed 1K impressions", points: 2, test: (r) => r.crossed_1k === "Yes" },
+  { key: "weekly", label: "Posts every week", points: 3, test: (r) => r.post_frequency === "Every week or more" },
   {
     key: "recent",
     label: "Posted in the last month",
-    points: 1,
+    points: 2,
     test: (r) => r.last_posted === "In the last week" || r.last_posted === "In the last month",
   },
   { key: "bestPost", label: "Shared a post they're proud of", points: 1, test: (r) => Boolean(r.best_post_url) },
