@@ -2,6 +2,7 @@ import type { Route } from "./+types/api.ugc-creators";
 import { requireAdmin } from "~/lib/auth-helper.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
+import { planOf } from "~/lib/fellowship.server";
 import {
   creatorStats,
   ensureCreatorTables,
@@ -148,6 +149,16 @@ export async function action({ request }: Route.ActionArgs) {
       await db.execute(sql`UPDATE ugc_applications SET status = 'selected' WHERE id = ${applicationId} AND status <> 'selected'`);
     }
     return Response.json({ ok: true });
+  }
+
+  // Their own weekly plan: { intent: "set-plan", id, postsPerWeek, studojoPerWeek }, or postsPerWeek null for
+  // the programme's rule. The fellowship desk and Vanshika's Claude read it (fellowship.server.ts, rulesFor).
+  if (body.intent === "set-plan") {
+    const plan = body.postsPerWeek == null ? null : planOf({ postsPerWeek: body.postsPerWeek, studojoPerWeek: body.studojoPerWeek ?? 0 });
+    if (body.postsPerWeek != null && !plan) return Response.json({ error: "Posts a week is 1 to 7, and Studojo posts can't be more than that." }, { status: 400 });
+    const r = await db.execute(sql`UPDATE ugc_creators SET plan = ${plan ? JSON.stringify(plan) : null}::jsonb WHERE id = ${id} RETURNING id`);
+    if (!r.rows.length) return Response.json({ error: "Creator not found" }, { status: 404 });
+    return Response.json({ ok: true, plan });
   }
 
   // What they went on to: { outcome: "intern" | "referred", on }. Turning one on

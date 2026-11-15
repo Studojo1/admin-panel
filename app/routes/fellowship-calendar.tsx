@@ -51,12 +51,14 @@ interface Fellow {
   id: number; name: string; first: string; slug: string | null; link: string | null; college: string | null; field: string | null; cohort: string | null;
   status: string; email: string | null; whatsapp: string | null; linkedin: string | null; joined: string; connectionsAtJoin: number | null; connections: number | null;
   learnings: string; teamNotes: string; nudgedAt: string | null; internAt: string | null; referredAt: string | null; stories: number; earlierPosts: number; standing: Standing; posts: Post[]; drafts: Draft[];
+  /** Their own weekly plan (posts a week, and how many are Studojo posts), or null for the programme's rule. */
+  plan: { postsPerWeek: number; studojoPerWeek: number } | null;
   /** When the team last emailed them a nudge or a request for stories, from the desk. */
   emailed: { nudge: string | null; stories: string | null };
 }
 interface Rules {
   goal: { impressions: number; creators: number; by: string }; plan: { by: string; creators: number; impressions: number }[];
-  postingDays: string[]; postsPerWeek: number; partnershipLabel: string; milestones: { id: string; weeks: number; name: string }[];
+  postingDays: string[]; postsPerWeek: number; studojoPerWeek?: number; partnershipLabel: string; milestones: { id: string; weeks: number; name: string }[];
 }
 interface Story { id: number; creatorId: number; prompt: string | null; text: string; spoken: boolean; createdAt: string }
 interface Desk {
@@ -860,6 +862,41 @@ function NotesBox({ saved, label, placeholder, meta, onSave }: { saved: string; 
 }
 
 // ---------------------------------------------------------------- fellow drawer
+// A fellow's own weekly plan (the founder, 15 Nov 2026): fewer posts, or none about Studojo, for a fellow who
+// wants that. Claude writes to it and the desk counts against it; the programme's rule stays for everyone else.
+function PlanBox({ f, rules, creatorApi }: { f: Fellow; rules: Rules; creatorApi: (path: string, body: Record<string, unknown>, done?: string) => Promise<unknown> }) {
+  const base = { posts: rules.postsPerWeek, studojo: rules.studojoPerWeek ?? 2 };
+  const [edit, setEdit] = useState(false);
+  const [posts, setPosts] = useState(f.plan?.postsPerWeek ?? base.posts);
+  const [studojo, setStudojo] = useState(f.plan?.studojoPerWeek ?? base.studojo);
+  const [busy, setBusy] = useState(false);
+  const line = (n: number, s: number) => `${n} a week: ${s === 0 ? `${n === 1 ? "their own story" : "all their own stories"}, no Studojo posts` : `${s} Studojo and ${n - s} their own`}`;
+  const save = async (plan: { postsPerWeek: number; studojoPerWeek: number } | null) => {
+    setBusy(true);
+    const r = await creatorApi("/api/ugc-creators", { intent: "set-plan", id: f.id, postsPerWeek: plan?.postsPerWeek ?? null, studojoPerWeek: plan?.studojoPerWeek ?? 0 },
+      plan ? `${f.first}'s plan: ${line(plan.postsPerWeek, plan.studojoPerWeek)}. Claude writes to it from the next batch.` : `${f.first} is back on the programme's plan.`);
+    setBusy(false);
+    if (r) setEdit(false);
+  };
+  return (
+    <div className="field" data-tour="fellow-plan">
+      <span className="label">Posting plan</span>
+      {!edit ? (
+        <p className="hint">{f.plan ? <><b>Their own plan: </b>{line(f.plan.postsPerWeek, f.plan.studojoPerWeek)}.</> : <>The programme's: {line(base.posts, base.studojo)}.</>}
+          {" "}<button className="btn-link" type="button" onClick={() => setEdit(true)}>Change</button>
+          {f.plan ? <> · <button className="btn-link" type="button" disabled={busy} onClick={() => save(null)}>Use the programme's</button></> : null}</p>
+      ) : (
+        <div className="numrow">
+          <div className="field"><label htmlFor="plan-n">Posts a week</label><input className="input" id="plan-n" inputMode="numeric" value={posts} onChange={(e) => { const n = Math.max(1, Math.min(7, Number(e.target.value) || 1)); setPosts(n); if (studojo > n) setStudojo(n); }} /></div>
+          <div className="field"><label htmlFor="plan-s">Of them, Studojo posts</label><input className="input" id="plan-s" inputMode="numeric" value={studojo} onChange={(e) => setStudojo(Math.max(0, Math.min(posts, Number(e.target.value) || 0)))} /></div>
+          <div className="stack-actions"><button className="btn btn-primary btn-sm" type="button" disabled={busy} onClick={() => save({ postsPerWeek: posts, studojoPerWeek: studojo })}><Icon id="check" />Save plan</button>
+            <button className="btn btn-quiet btn-sm" type="button" onClick={() => setEdit(false)}>Cancel</button></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }: {
   f: Fellow; D: Desk; act: (b: Record<string, unknown>, done?: string) => Promise<Desk | null>; creatorApi: (p: string, b: Record<string, unknown>, d?: string) => Promise<unknown>;
   setDrawer: (d: DrawerState | null) => void; nudge: (id: number) => void; copyPlan: (names: string[], w: string) => void; toast: (m: string) => void;
@@ -897,6 +934,7 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
               <a className="btn btn-line btn-sm" href={f.link} target="_blank" rel="noopener noreferrer"><Icon id="link" />Open</a></div>
             <p className="hint">{[f.whatsapp ? `WhatsApp ${f.whatsapp}` : "No WhatsApp number", f.email].filter(Boolean).join(" · ")}{safeUrl(f.linkedin) ? <> · <a href={safeUrl(f.linkedin)!} target="_blank" rel="noopener noreferrer">LinkedIn profile</a></> : null}</p></div>
         ) : null}
+        <PlanBox f={f} rules={D.rules} creatorApi={creatorApi} />
         <dl className="kv">
           <div><dt>This week</dt><dd>{s.thisWeek.posted} of {s.thisWeek.due}</dd></div>
           <div><dt>Weekly run</dt><dd>{s.run} wk</dd></div>
