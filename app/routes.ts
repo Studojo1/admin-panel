@@ -83,6 +83,9 @@ export default [
   route("api/posthog", "routes/api.posthog.tsx"),
   route("api/webinar-registrations", "routes/api.webinar-registrations.tsx"),
   route("api/campus-ambassadors", "routes/api.campus-ambassadors.tsx"),
+  // A teammate's Claude reading /customers (shared key, not an admin login): read only, JSON API and MCP.
+  route("api/customers-agent/*", "routes/api.customers-agent.$.tsx"),
+  route("mcp/customers", "routes/mcp.customers.tsx"),
   route("api/b2b-gtm", "routes/api.b2b-gtm.tsx"),
   route("api/gtm-dashboards", "routes/api.gtm-dashboards.tsx"),
 

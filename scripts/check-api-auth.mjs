@@ -22,6 +22,16 @@ const GATE_MODULE = "~/lib/auth-helper.server";
 // file -> export -> { reason, mustContain }. mustContain proves the route still
 // does the alternative check the reason describes.
 export const ALLOWLIST = {
+  "api.customers-agent.$.tsx": {
+    loader: {
+      reason: "A teammate's Claude reading /customers (read only); authenticated by the CUSTOMERS_AGENT_KEY shared secret, not a user login",
+      mustContain: "customersKeyOk(request)",
+    },
+    action: {
+      reason: "Refuses every write (read only); the same CUSTOMERS_AGENT_KEY check runs first",
+      mustContain: "customersKeyOk(request)",
+    },
+  },
   "api.ops-alerts.tsx": {
     action: {
       reason: "in-cluster CronJob ingest; authenticated by the ALERT_INGEST_TOKEN shared secret, not a user login",
