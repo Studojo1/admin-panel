@@ -23,6 +23,8 @@ export default [
     route("usage", "routes/stu-usage.tsx"),
   ]),
   route("api/stu", "routes/api.stu.tsx"),
+  // Admin check on our own server, so a control-plane outage no longer blanks every page (15 Nov 2026).
+  route("api/admin-check", "routes/api.admin-check.tsx"),
   route("api/stu/overview", "routes/api.stu-overview.tsx"),
   // Auditor (4 Nov 2026): every failure in a range with the person and why; its own range control, like the Overview.
   route("auditor", "routes/stu-auditor.tsx"),

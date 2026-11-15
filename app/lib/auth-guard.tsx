@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router";
 import { authClient } from "./auth-client";
-import { getToken, getControlPlaneUrl } from "./api";
+import { getToken, isAdminToken } from "./api";
 
 export function useAdminGuard() {
   const navigate = useNavigate();
@@ -30,14 +30,7 @@ export function useAdminGuard() {
           return;
         }
 
-        const base = getControlPlaneUrl();
-        const response = await fetch(`${base}/v1/admin/users?limit=1`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
+        if (await isAdminToken(token)) {
           checkedRef.current = true;
           setIsAuthorized(true);
         } else {

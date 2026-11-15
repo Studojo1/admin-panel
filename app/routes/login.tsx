@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { authClient } from "~/lib/auth-client";
-import { getControlPlaneUrl } from "~/lib/api";
+import { isAdminToken } from "~/lib/api";
 import { toast } from "sonner";
 import type { Route } from "./+types/login";
 
@@ -63,14 +63,7 @@ export default function AdminLogin() {
         return;
       }
 
-      const controlPlaneUrl = getControlPlaneUrl();
-      const response = await fetch(`${controlPlaneUrl}/v1/admin/users?limit=1`, {
-        headers: {
-          Authorization: `Bearer ${tokenData.token}`,
-        },
-      });
-
-      if (response.ok) {
+      if (await isAdminToken(tokenData.token)) {
         const redirectTo = searchParams.get("redirect") || "/";
         navigate(redirectTo, { replace: true });
       } else {
