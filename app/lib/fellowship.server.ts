@@ -847,7 +847,7 @@ export async function calendarView() {
   // Impressions credited to the week each post went up, for the last six weeks (India time).
   const thisWeek = weekOf(today);
   const weekly = Array.from({ length: 6 }, (_, i) => addDays(thisWeek, -7 * (5 - i))).map((w) => ({
-    week: w, impressions: posts.filter((p) => isPosted(p) && p.postedAt && weekOf(istDate(p.postedAt)) === w).reduce((s, p) => s + imp(p), 0), partial: w === thisWeek,
+    week: w, impressions: posts.filter((p) => isPosted(p) && p.kind === "studojo" && p.postedAt && weekOf(istDate(p.postedAt)) === w).reduce((s, p) => s + imp(p), 0), partial: w === thisWeek,
   }));
   // Week 1 is the week the first approved posts were due (the founder, 5 Nov 2026: the fellowship's clock
   // starts when posts start going out), or the first join while there are none yet.
@@ -860,6 +860,8 @@ export async function calendarView() {
       impressions: posts.filter(isPosted).reduce((s, p) => s + imp(p), 0), studojoImpressions,
       measuredPosts: posts.filter(measured).length,
       avgPerPost: (() => { const m = posts.filter(measured); return m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0; })(),
+      // The goal is impressions on Studojo posts (the founder, 15 Nov 2026: 1M by 30 Nov; the rest don't count).
+      avgPerStudojoPost: (() => { const m = posts.filter((p) => measured(p) && p.kind === "studojo"); return m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0; })(),
       storiesCollected: stories.length,
       draftsWaiting: drafts.filter((d) => d.status === "review").length,
       draftsSentBack: drafts.filter((d) => d.status === "changes").length,
@@ -899,7 +901,8 @@ export async function programmeDashboard() {
   const posts = live.flatMap((f) => f.posts);
   const postedOn = (p: Post) => (p.postedAt ? istDate(p.postedAt) : null);
   const postingBy = (end: string) => new Set(posts.filter((p) => isPosted(p) && postedOn(p) && postedOn(p)! > addDays(end, -7) && postedOn(p)! <= end).map((p) => p.creatorId)).size;
-  const impressionsBy = (end: string) => posts.filter((p) => isPosted(p) && postedOn(p) && postedOn(p)! <= end).reduce((s, p) => s + imp(p), 0);
+  // Impressions count toward the goal only from Studojo posts (the founder, 15 Nov 2026).
+  const impressionsBy = (end: string) => posts.filter((p) => isPosted(p) && p.kind === "studojo" && postedOn(p) && postedOn(p)! <= end).reduce((s, p) => s + imp(p), 0);
 
   // Each checkpoint of the plan, with what had happened by that date (nothing yet for dates ahead).
   const checkpoints = rules.plan.map((c) => ({
@@ -914,7 +917,7 @@ export async function programmeDashboard() {
     return {
       week: w, partial: w === thisWeek, due: due.length, postedOfDue: due.filter(isPosted).length,
       posted: up.length, studojo: up.filter((p) => p.kind === "studojo").length,
-      impressions: up.reduce((s, p) => s + imp(p), 0), posting: new Set(up.map((p) => p.creatorId)).size,
+      impressions: up.filter((p) => p.kind === "studojo").reduce((s, p) => s + imp(p), 0), posting: new Set(up.map((p) => p.creatorId)).size,
       joined: live.filter((f) => f.joined && weekOf(f.joined) === w).length,
     };
   });
@@ -934,7 +937,7 @@ export async function programmeDashboard() {
 
   return {
     today, thisWeek, programmeStart: cal.programmeStart, rules: { goal: rules.goal, plan: rules.plan, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules) },
-    now: { creators: live.length, posting: postingBy(today), impressions: cal.totals.impressions, avgPerPost: cal.totals.avgPerPost },
+    now: { creators: live.length, posting: postingBy(today), impressions: cal.totals.studojoImpressions, avgPerPost: cal.totals.avgPerStudojoPost },
     checkpoints,
     postsWeek: {
       target: live.filter((f) => f.status === "active").reduce((n, f) => n + rulesFor(f, rules).postsPerWeek, 0),

@@ -72,10 +72,10 @@ async function api<T>(path: string): Promise<T> {
 // The dashboard's tour: what each part is for, for whoever on the team opens it first.
 const TOUR: TourStep[] = [
   { title: "The Program dashboard", body: "How the fellowship is doing against the founder's plan, from applicants to impressions. It's for reading: the work itself happens on the Editorial calendar." },
-  { sel: '[data-tour="pd-plan"]', title: "Against the plan", body: "Fellows, fellows who posted in the last 7 days, impressions, and this week's posts, each against where the plan says we should be today. The table lists the plan's checkpoints." },
+  { sel: '[data-tour="pd-plan"]', title: "Against the plan", body: "Fellows, fellows who posted in the last 7 days, Studojo post impressions (the goal counts only those), and this week's posts, each against where the plan says we should be today. The table lists the plan's checkpoints." },
   { sel: '[data-tour="pd-funnel"]', title: "Applicant to posting fellow", body: "Where people drop off: applied, became fellows, posted at least once, posting this week. Each step shows its share of the one before." },
   { sel: '[data-tour="pd-pipeline"]', title: "Posts in the pipeline", body: "Every post from Claude's draft to a post with numbers: waiting for review, sent back, scheduled, overdue, posted, numbers still to come, and posts still waiting for a photo." },
-  { sel: '[data-tour="pd-weekly"]', title: "Week by week", body: "Each week, Wednesday to Tuesday: posts due and posted, Studojo posts, impressions, fellows posting and fellows who joined." },
+  { sel: '[data-tour="pd-weekly"]', title: "Week by week", body: "Each week, Wednesday to Tuesday: posts due and posted, Studojo posts, their impressions, fellows posting and fellows who joined." },
   { sel: '[data-tour="pd-fellows"]', title: "Fellows", body: "One row per fellow: posts, impressions, best post and when they last posted. Open the calendar to act on any of it." },
   { sel: '[data-tour="program-switch"]', title: "Dashboard and calendar", body: "Go to the Editorial calendar to review drafts, nudge fellows and see each day's posts. Take this tour again any time from Take the tour." },
 ];
@@ -142,7 +142,7 @@ function Dashboard({ D, at }: { D: Dash; at: string | null }) {
   const tiles = [
     { key: "creators" as const, label: "Fellows", value: D.now.creators, note: "with a fellow page" },
     { key: "posting" as const, label: "Posting", value: D.now.posting, note: "posted in the last 7 days" },
-    { key: "impressions" as const, label: "Impressions", value: D.now.impressions, note: D.now.avgPerPost ? `${num(D.now.avgPerPost)} a post on average` : "from posts with numbers" },
+    { key: "impressions" as const, label: "Studojo impressions", value: D.now.impressions, note: D.now.avgPerPost ? `${num(D.now.avgPerPost)} a Studojo post on average` : "from Studojo posts with numbers" },
   ];
   const daysLeft = Math.max(0, diff(today, G.by));
 
