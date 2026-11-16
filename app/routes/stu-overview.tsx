@@ -15,6 +15,7 @@ import { Chart } from "react-chartjs-2";
 import { AdminHeader, StatCard } from "~/components";
 import { CARD, DrillModal } from "~/components/stu/ui";
 import { VisitorsSummary } from "~/components/stu/visitors-summary";
+import { ReachTile } from "~/components/stu/reach-tile";
 import {
   type Drill, type Env, type SectionState, Card, KIT_CSS, N, PALETTE, Seg, crosshair, dayLabel, drillPeople, istTime, useSections,
 } from "~/components/stu/overview-kit";
@@ -66,6 +67,7 @@ const PAGES = [
   { to: "/usage", label: "Usage", note: "Engagement, power users, calls, live feed", fresh: true },
   { to: "/auditor", label: "Auditor", note: "Everything that failed, with who and why", fresh: true },
   { to: "/visitors", label: "Visitors", note: "Real people, crawlers, sources and drop-offs", fresh: true },
+  { to: "/reach", label: "Reach", note: "Who got 2 WhatsApp messages this week, and who did not", fresh: true },
 ];
 
 const SERIES = { signups: "#10b981", onboarded: "#f59e0b", active: "#ec4899", paid: "#a855f7" };
@@ -202,6 +204,9 @@ export default function StuOverview() {
         )}
 
         <div id="kpis" className="scroll-mt-28"><Headline s={S("kpis")} usage={S("usage")} drill={openDrill} range={range} today={today} end={end} /></div>
+
+        {/* REACH-PAGE (15 Nov 2026): students with 2 or more WhatsApp messages delivered in the last 7 days; lists on /reach. */}
+        <div id="reach" className="mt-6 scroll-mt-28"><ReachTile internal={internal} enabled={Boolean(isAuthorized)} /></div>
 
         {/* VISITORS (4 Nov 2026): real visitors against crawlers and bots, top sources, the biggest drop-off; tables on /visitors. */}
         <div id="visitors" className="mt-6 scroll-mt-28">

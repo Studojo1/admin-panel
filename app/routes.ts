@@ -37,6 +37,9 @@ export default [
   // Old vs new (15 Nov 2026): the retired student product against Stu, every ratio, the best day; its own controls.
   route("compare", "routes/compare.tsx"),
   route("api/compare", "routes/api.compare.tsx"),
+  // Reach (15 Nov 2026): % of students reached twice on WhatsApp in 7 days, the trend, who was not and why, Meta's limits.
+  route("reach", "routes/reach.tsx"),
+  route("api/reach", "routes/api.reach.tsx"),
   // Recordings (5 Nov 2026): session replays of the website and the platform, kept 30 days; its own range control.
   route("recordings", "routes/recordings.tsx"),
   route("api/recordings", "routes/api.recordings.tsx"),
