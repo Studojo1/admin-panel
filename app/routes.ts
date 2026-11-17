@@ -40,6 +40,9 @@ export default [
   // Reach (15 Nov 2026): % of students reached twice on WhatsApp in 7 days, the trend, who was not and why, Meta's limits.
   route("reach", "routes/reach.tsx"),
   route("api/reach", "routes/api.reach.tsx"),
+  // Email (17 Nov 2026): Stu's emails to students from due to paid, the health strip, each kind, placement, against WhatsApp.
+  route("email-funnel", "routes/email-funnel.tsx"),
+  route("api/email-funnel", "routes/api.email-funnel.tsx"),
   // Recordings (5 Nov 2026): session replays of the website and the platform, kept 30 days; its own range control.
   route("recordings", "routes/recordings.tsx"),
   route("api/recordings", "routes/api.recordings.tsx"),
