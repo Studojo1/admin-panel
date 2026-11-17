@@ -1,5 +1,6 @@
 // Reach (15 Nov 2026, the owner: "Add '% reached twice this week' to the admin panel, with the list of students who
-// weren't"). Whether every student gets at least 2 WhatsApp messages a week: the headline (all students, linked or not,
+// weren't"). Whether every student gets at least 2 messages a week, on WhatsApp or email (REACH-EMAIL, 17 Nov 2026, as
+// the product counts since EMAIL-CH): the headline (all students, linked or not,
 // onboarded or not), the last 14 days with the floor lane's start marked, the students at 0 and at 1 with what is
 // stopping them, and Meta's limits. Same rule as the product's floor lane (REACH, live 15 Nov 2026 18:38 IST): a
 // delivered business message in the last 7 days. Read only (/api/reach, app/lib/reach).
@@ -27,7 +28,7 @@ export function meta() {
 }
 
 const REFRESH_MS = 60_000;
-const LANE_COLORS = { other: "#a3a3a3", floor: "#8b5cf6", catchup: "#f59e0b" };
+const LANE_COLORS = { other: "#a3a3a3", floor: "#8b5cf6", catchup: "#f59e0b", email: "#10b981" };
 const LINE_COLOR = "#8b5cf6";
 type Tab = "zero" | "one" | "notLinked";
 const PAGE_ROWS = 50;
@@ -140,7 +141,7 @@ export default function Reach() {
             <div className="text-xs font-bold uppercase tracking-wide text-purple-700">Stu · <Link to="/" className="hover:underline">Overview</Link></div>
             <h1 className="font-['Clash_Display'] text-3xl font-medium tracking-tight text-neutral-950 md:text-4xl">Reach</h1>
             <p className="mt-1 flex max-w-2xl flex-wrap items-center gap-x-2 gap-y-1 text-sm text-neutral-500">
-              <span>Did every student get at least 2 WhatsApp messages from us in the last {REACH_DAYS} days?</span>
+              <span>Did every student get at least 2 messages from us, on WhatsApp or email, in the last {REACH_DAYS} days?</span>
               {envName && (
                 <span className={`rounded-full border-2 px-2 py-0.5 text-[11px] font-bold ${env?.env === "production" ? "border-emerald-600 text-emerald-700" : "border-amber-500 text-amber-700"}`}>
                   {local ? `Local, ${envName.toLowerCase()} data` : envName}
@@ -167,13 +168,13 @@ export default function Reach() {
         </div>
 
         {error && <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-50 p-3 text-sm text-red-700">Could not read reach: {error}</div>}
-        {env?.missing && <div className="mt-4 rounded-xl border-2 border-amber-500 bg-amber-50 p-3 text-sm text-amber-900">This database has no WhatsApp tables ({env.env}): nothing to count.</div>}
+        {env?.missing && <div className="mt-4 rounded-xl border-2 border-amber-500 bg-amber-50 p-3 text-sm text-amber-900">This database has no WhatsApp or send ledger tables ({env.env}): nothing to count.</div>}
         {!env && !error && <div className="mt-6 h-40 animate-pulse rounded-2xl border-2 border-neutral-900 bg-white" />}
 
         {r && (
           <div className="fade mt-6 flex flex-col gap-6" style={{ opacity: loading ? 0.6 : 1 }}>
             <Headline r={r} open={openList} />
-            <Panel id="trend" title="Last 14 days" sub={<>Each day: the share of linked students with 2 or more deliveries in the {REACH_DAYS} days to that day's end (today: to now), and the messages delivered that day by lane. The dashed line is the floor lane going live, {istText(r.floorStart)} IST.</>}>
+            <Panel id="trend" title="Last 14 days" sub={<>Each day: the share of linked students with 2 or more deliveries, WhatsApp or email, in the {REACH_DAYS} days to that day's end (today: to now), and the messages delivered that day by lane. The dashed line is the floor lane going live, {istText(r.floorStart)} IST.</>}>
               <Trend r={r} />
             </Panel>
             <Panel id="lists" title="Who was not reached twice" sub="Students at 0 or 1 delivered in the last 7 days. What is stopping them is read from our latest try to them in 7 days, else their picks.">
@@ -198,7 +199,7 @@ function Headline({ r, open }: { r: ReachReport; open: (t: Tab) => void }) {
   const h = r.headline;
   const tiles: { label: string; ratio: Ratio; note: string }[] = [
     { label: "WhatsApp linked", ratio: h.linked, note: ofText(h.linked) },
-    { label: "Not linked", ratio: h.notLinked, note: `${ofText(h.notLinked)}: no channel yet` },
+    { label: "Not linked", ratio: h.notLinked, note: `${ofText(h.notLinked)}: email only` },
     { label: "Onboarded", ratio: h.onboarded, note: ofText(h.onboarded) },
     { label: "Not onboarded", ratio: h.notOnboarded, note: ofText(h.notOnboarded) },
   ];
@@ -208,7 +209,7 @@ function Headline({ r, open }: { r: ReachReport; open: (t: Tab) => void }) {
     <div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-5">
         <div className="col-span-2 sm:col-span-1">
-          <StatCard value={pctText(h.all)} label="Reached twice this week" color="purple" note={`${ofText(h.all)}, linked or not, in the last ${REACH_DAYS} days`} />
+          <StatCard value={pctText(h.all)} label="Reached twice this week" color="purple" note={`${ofText(h.all)}, WhatsApp or email, in the last ${REACH_DAYS} days`} />
         </div>
         {tiles.map((t) => (
           <div key={t.label} className={`${CARD} min-w-0 p-4 md:p-5`}>
@@ -222,7 +223,7 @@ function Headline({ r, open }: { r: ReachReport; open: (t: Tab) => void }) {
         <span className="text-xs font-bold uppercase tracking-wide text-neutral-500">Delivered in 7 days</span>
         <span className="text-neutral-700">
           <span className="whitespace-nowrap">At 0 <button type="button" className={btn} onClick={() => open("zero")}>{fmtN(c.zero)}</button> linked</span>{" "}
-          <span className="whitespace-nowrap">+ <button type="button" className={btn} onClick={() => open("notLinked")}>{fmtN(c.notLinked)}</button> not linked</span>
+          <span className="whitespace-nowrap">+ <button type="button" className={btn} onClick={() => open("notLinked")}>{fmtN(c.notLinked)}</button> not linked, under 2</span>
         </span>
         <span className="whitespace-nowrap text-neutral-700">At 1 <button type="button" className={btn} onClick={() => open("one")}>{fmtN(c.one)}</button></span>
         <span className="whitespace-nowrap text-neutral-700">At 2 or more <b className="tnum text-neutral-950">{fmtN(c.twoPlus)}</b></span>
@@ -274,8 +275,8 @@ function Trend({ r }: { r: ReachReport }) {
     },
   };
 
-  const lanes: { key: "other" | "floor" | "catchup"; label: string }[] = [
-    { key: "other", label: "Other business messages" }, { key: "floor", label: "Floor" }, { key: "catchup", label: "Catch-up" },
+  const lanes: { key: "other" | "floor" | "catchup" | "email"; label: string }[] = [
+    { key: "other", label: "Other business messages" }, { key: "floor", label: "Floor" }, { key: "catchup", label: "Catch-up" }, { key: "email", label: "Email" },
   ];
   const barData = {
     labels,
@@ -294,7 +295,7 @@ function Trend({ r }: { r: ReachReport }) {
           label: (c: any) => ` ${fmtN(c.parsed.y)}  ${c.dataset.label}`,
           footer: (items: any[]) => {
             const d = days[items[0]?.dataIndex];
-            return d ? `${fmtN(d.floor + d.catchup + d.other)} delivered` : "";
+            return d ? `${fmtN(d.floor + d.catchup + d.other + d.email)} delivered` : "";
           },
         },
       },
@@ -341,6 +342,7 @@ function Trend({ r }: { r: ReachReport }) {
                 <th className="px-2 pb-1.5 text-right">Floor</th>
                 <th className="px-2 pb-1.5 text-right">Catch-up</th>
                 <th className="px-2 pb-1.5 text-right">Other</th>
+                <th className="px-2 pb-1.5 text-right">Email</th>
               </tr>
             </thead>
             <tbody>
@@ -353,6 +355,7 @@ function Trend({ r }: { r: ReachReport }) {
                   <td className="px-2 py-1 text-right">{fmtN(d.floor)}</td>
                   <td className="px-2 py-1 text-right">{fmtN(d.catchup)}</td>
                   <td className="px-2 py-1 text-right">{fmtN(d.other)}</td>
+                  <td className="px-2 py-1 text-right">{fmtN(d.email)}</td>
                 </tr>
               ))}
             </tbody>
@@ -575,8 +578,8 @@ function MetaLimits({ r }: { r: ReachReport }) {
 function HowCounted({ internal }: { internal: boolean }) {
   return (
     <ul className="max-w-3xl list-disc space-y-1.5 whitespace-normal pl-5 text-xs leading-snug text-neutral-600">
-      <li>Reached: a business message on WhatsApp that Meta marked delivered, in the last 7 days to now. Replies in a chat, emails and dry runs do not count. The same rule as the product's floor lane.</li>
-      <li>Reached twice: 2 or more of those. A student with no WhatsApp link is at 0.</li>
+      <li>Reached: a business message delivered in the last 7 days to now, on WhatsApp (Meta's receipt) or by email (the provider took it and reported it delivered). Replies in a chat, Stu's answers to a student's own email and dry runs do not count. The same rule as the product's floor lane, which counts email since 16 Nov.</li>
+      <li>Reached twice: 2 or more of those, on either channel. A student with no WhatsApp link is reached by email alone.</li>
       <li>Students: everyone the Stu pages count, onboarded or not, plus anyone with a WhatsApp link.{" "}
         {internal ? "Internal accounts included." : "Excluded: staff, @studojo.com, the test accounts, guests, and accounts sharing a browser with one."}</li>
       <li>Floor: the product's daily top-up for students under 2 (from 15 Nov 18:38 IST). Catch-up: morning picks sent again after Meta's spam pause.</li>

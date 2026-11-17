@@ -1,5 +1,5 @@
 /**
- * Reach (15 Nov 2026): who got 2 or more delivered WhatsApp business messages in the last 7 days, the trend, the
+ * Reach (15 Nov 2026): who got 2 or more delivered business messages, WhatsApp or email, in the last 7 days, the trend, the
  * students who did not and what is stopping them, and Meta's limits. Read only, admin only.
  *
  * GET /api/reach[?internal=1][&fresh=1]          the whole report (/reach)

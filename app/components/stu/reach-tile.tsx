@@ -1,5 +1,5 @@
-// REACH-PAGE on the Overview (15 Nov 2026): "Reached twice this week", the share of students with 2 or more WhatsApp
-// messages delivered in the last 7 days, whatever the Overview's range. The lists and the trend are on /reach. Its own
+// REACH-PAGE on the Overview (15 Nov 2026): "Reached twice this week", the share of students with 2 or more messages
+// delivered in the last 7 days on WhatsApp or email (REACH-EMAIL, 17 Nov 2026), whatever the Overview's range. The lists and the trend are on /reach. Its own
 // read (/api/reach?view=summary, cached on the server for a few minutes), so the Overview's sections never wait for it.
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
@@ -40,7 +40,7 @@ export function ReachTile({ internal, enabled }: { internal: boolean; enabled: b
       <div className="flex flex-wrap items-start justify-between gap-2 border-b-2 border-neutral-900 bg-neutral-50 px-4 py-2.5">
         <div className="min-w-0">
           <h2 className="font-['Clash_Display'] text-lg font-semibold leading-tight text-neutral-950">Reached twice this week</h2>
-          <p className="mt-0.5 text-xs text-neutral-500">Students with 2 or more WhatsApp messages delivered in the last 7 days, whatever the range above.</p>
+          <p className="mt-0.5 text-xs text-neutral-500">Students with 2 or more messages delivered on WhatsApp or email in the last 7 days, whatever the range above.</p>
         </div>
         <Link to={href} className="whitespace-nowrap text-xs font-semibold text-purple-700 underline underline-offset-2">Reach detail →</Link>
       </div>
@@ -67,7 +67,7 @@ export function ReachTile({ internal, enabled }: { internal: boolean; enabled: b
               <div className="text-xs font-bold uppercase tracking-wide text-neutral-500">Not reached twice</div>
               <div className="tnum mt-1 text-sm text-neutral-700">
                 <b className="text-neutral-950">{fmtN(data.zero)}</b> at 0 and <b className="text-neutral-950">{fmtN(data.one)}</b> at 1 (linked),{" "}
-                <b className="text-neutral-950">{fmtN(data.notLinked)}</b> not linked
+                <b className="text-neutral-950">{fmtN(data.notLinked)}</b> not linked, under 2
               </div>
             </div>
           </div>

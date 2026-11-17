@@ -1,7 +1,8 @@
 // Server side of /reach and the Overview's "Reached twice this week" tile (model.ts has the rules and the words). Read
 // only, one transaction with a short statement timeout. The students and their internal flags come from the Stu dataset
 // the other Stu pages share (data.server.ts stuData, stale-while-revalidate), so the exclusions match theirs; a student
-// with a WhatsApp link the dataset lacks is read here and flagged by the same rule (internalReason). The WhatsApp rows
+// with a WhatsApp link the dataset lacks is read here and flagged by the same rule (internalReason). Reached counts a
+// delivered business message on WhatsApp or by email (REACH-EMAIL, 17 Nov 2026, as the product). The WhatsApp rows
 // are career_agent's: the links, the send ledger (career_daily_sends), the messages (career_channel_messages), the day's
 // picks (career_today_picks) and the phone step's codes (career_phone_otps, in Meta's count of students we started).
 import { sql, type SQL } from "drizzle-orm";
@@ -15,8 +16,14 @@ import {
 
 const S = "career_agent";
 const TABLES = ["career_channel_links", "career_daily_sends", "career_channel_messages", "career_today_picks", "career_phone_otps", "career_profiles"];
-/** A business message on the ledger (rows of alias d), the product's rule (career-agent reach.server.ts BUSINESS_SQL). */
-const BUSINESS = (d: string) => sql.raw(`${d}.channel <> 'email' AND ${d}.kind <> 'inbound' AND COALESCE(${d}.meta->>'dry', '') <> 'true'`);
+/**
+ * A business message on the ledger (rows of alias d), the product's rule (career-agent reach.server.ts BUSINESS_SQL):
+ * not inbound, not a dry run, and on email only once the provider took it (meta.acs_id) and never Stu's answer to a
+ * student's own email (email_answer, a conversation as a WhatsApp chat reply is). REACH-EMAIL (17 Nov 2026): the
+ * product counts delivered emails since EMAIL-CH (16 Nov 2026), so this page does too.
+ */
+const BUSINESS = (d: string) =>
+  sql.raw(`(${d}.channel <> 'email' OR (${d}.meta ? 'acs_id' AND ${d}.kind <> 'email_answer')) AND ${d}.kind <> 'inbound' AND COALESCE(${d}.meta->>'dry', '') <> 'true'`);
 const ms = (x: string) => sql.raw(`(extract(epoch from ${x}) * 1000)::float8`);
 const istDaySql = (x: string) => sql.raw(`to_char(${x} AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')`);
 /** Deliveries read back: the trend's 14 days plus the 7 before its first, and a day's slack. */
@@ -109,16 +116,16 @@ async function readRows(q: (s: SQL) => Promise<any[]>): Promise<Rows> {
 
   const deliveries = await q(sql`
     SELECT d.user_id, ${ms("d.delivered_at")} AS at,
-           CASE WHEN d.meta->>'floor' = 'true' THEN 'floor' WHEN d.meta->>'catchup' = 'true' THEN 'catchup' ELSE 'other' END AS lane
+           CASE WHEN d.channel = 'email' THEN 'email' WHEN d.meta->>'floor' = 'true' THEN 'floor' WHEN d.meta->>'catchup' = 'true' THEN 'catchup' ELSE 'other' END AS lane
       FROM career_agent.career_daily_sends d
      WHERE d.delivered_at > now() - make_interval(days => ${DELIVERY_DAYS}::int) AND ${BUSINESS("d")}
      LIMIT 300000`);
 
+  // Every student's last delivered business message, on WhatsApp or email (a student with no link is reached by email).
   const last = await q(sql`
     SELECT d.user_id, ${ms("max(d.delivered_at)")} AS at
       FROM career_agent.career_daily_sends d
      WHERE d.delivered_at IS NOT NULL AND ${BUSINESS("d")}
-       AND d.user_id IN (SELECT user_id FROM career_agent.career_channel_links WHERE channel = 'whatsapp')
      GROUP BY 1`);
 
   // The latest business try in 7 days (a message tied to a ledger row, or a template), delivered by the ledger's receipt

@@ -3,10 +3,12 @@
 // (reach.server.ts) reads the rows; this builds the report from them. Pure and with no imports, so
 // `node --test scripts/reach-model.test.mjs` reads it as is.
 //
-// Reached: a delivered business message on WhatsApp, the rule of the product's own floor lane (career-agent
-// app/lib/channels/reach.server.ts REACHED_SQL, live 15 Nov 2026): a career_daily_sends row with delivered_at set, kind
-// not 'inbound', channel not email, not a dry run, for a student with an active WhatsApp link. Reached twice this week:
-// 2 or more such deliveries in the 7 days to now. A student with no active link is at 0 by definition (no channel yet).
+// Reached: a delivered business message on WhatsApp or by email, the rule of the product's own floor lane (career-agent
+// app/lib/channels/reach.server.ts BUSINESS_SQL, REACHED_SQL and EMAIL_ONLY_SQL): a career_daily_sends row with
+// delivered_at set, kind not 'inbound', not a dry run, and an email only once the provider took it and never Stu's
+// answer to a student's own email. REACH-EMAIL (17 Nov 2026): since EMAIL-CH (16 Nov 2026) the product counts delivered
+// emails, "2 a week across both channels", so a student with no WhatsApp link is reached by email alone. Reached twice
+// this week: 2 or more such deliveries in the 7 days to now.
 // Students: the Stu pages' people (the Stu dataset), plus anyone with a WhatsApp link it lacks; internal accounts
 // (staff, @studojo.com, the test accounts, guests, a shared browser) are left out unless "include internal" is on.
 
@@ -37,7 +39,7 @@ export const REASONS: { key: ReasonKey; label: string; note: string }[] = [
   { key: "no_picks", label: "No picks", note: "no jobs picked for them in 7 days, so nothing to send" },
   { key: "not_tried", label: "Not tried yet", note: "they have picks; nothing sent since their last delivery" },
   { key: "stop", label: "Messages off", note: "they turned the daily messages off (STOP)" },
-  { key: "not_linked", label: "Not linked", note: "no WhatsApp link: no channel yet" },
+  { key: "not_linked", label: "Not linked", note: "no WhatsApp link: email is their only channel" },
 ];
 export const REASON_LABEL: Record<ReasonKey, string> = Object.fromEntries(REASONS.map((r) => [r.key, r.label])) as Record<ReasonKey, string>;
 
@@ -64,7 +66,7 @@ export interface LinkIn {
   lastInbound: number | null;
 }
 
-export type Lane = "floor" | "catchup" | "other";
+export type Lane = "floor" | "catchup" | "other" | "email";
 
 /** A delivered business message: who, when (delivered_at, epoch ms), and the lane that sent it. */
 export interface DeliveryIn {
@@ -141,7 +143,7 @@ export interface ReachPerson {
   lastDelivered: number | null;
   lastIn: { at: number; text: string } | null;
   onboarded: boolean;
-  /** delivered business messages in the last 7 days */
+  /** delivered business messages (WhatsApp or email) in the last 7 days */
   d7: number;
   reason: ReasonKey;
   detail: string;
@@ -153,13 +155,14 @@ export interface TrendDay {
   soFar: boolean;
   /** students with an active WhatsApp link at the day's end */
   linked: number;
-  /** of them, 2 or more deliveries in the 7 days to the day's end */
+  /** of them, 2 or more deliveries (WhatsApp or email) in the 7 days to the day's end */
   reached: number;
   pct: number | null;
-  /** deliveries that day, by lane */
+  /** deliveries that day, by lane (WhatsApp's floor, catch-up and other; every email apart) */
   floor: number;
   catchup: number;
   other: number;
+  email: number;
 }
 
 export interface ReachReport {
@@ -238,10 +241,13 @@ export function metaCode(code: string | null | undefined, error: string | null |
  * days; else nothing tried since their last delivery. Pure.
  */
 export function reasonOf(
-  s: { linked: boolean; digestOn: boolean; attempt: AttemptIn | null; picks: boolean; onboarded: boolean },
+  s: { linked: boolean; digestOn: boolean; attempt: AttemptIn | null; picks: boolean; onboarded: boolean; d7?: number },
   now: number,
 ): { reason: ReasonKey; detail: string } {
-  if (!s.linked) return { reason: "not_linked", detail: s.onboarded ? "Onboarded, no WhatsApp link" : "No WhatsApp link, not onboarded" };
+  if (!s.linked) {
+    const by = s.d7 ? `, ${s.d7} delivered in 7 days` : "";
+    return { reason: "not_linked", detail: (s.onboarded ? "Onboarded, no WhatsApp link" : "No WhatsApp link, not onboarded") + by };
+  }
   if (!s.digestOn) return { reason: "stop", detail: "They turned the daily messages off" };
   const a = s.attempt;
   const tries = a ? `${a.tries} ${a.tries === 1 ? "try" : "tries"} in 7 days, ${a.failedTries} failed` : "";
@@ -306,16 +312,16 @@ export function buildReach(i: ReachInput): ReachReport {
   const people: ReachPerson[] = [];
   for (const s of students) {
     const link = activeLink(s.id);
-    const d7 = link ? inWindow(times.get(s.id) ?? [], now) : 0;
+    const d7 = inWindow(times.get(s.id) ?? [], now);
     const m = link ? inbound.get(s.id) : undefined;
     const r = d7 >= REACH_TARGET
       ? { reason: "not_tried" as ReasonKey, detail: "" }
-      : reasonOf({ linked: Boolean(link), digestOn: link?.digestOn ?? false, attempt: link ? attempt.get(s.id) ?? null : null, picks: picks.has(s.id), onboarded: s.onboarded }, now);
+      : reasonOf({ linked: Boolean(link), digestOn: link?.digestOn ?? false, attempt: link ? attempt.get(s.id) ?? null : null, picks: picks.has(s.id), onboarded: s.onboarded, d7 }, now);
     people.push({
       id: s.id, name: s.name, email: s.email, internal: s.internal,
       linked: link ? link.created : null,
       inWindow: Boolean(link?.lastInbound != null && now - link.lastInbound < DAY_MS),
-      lastDelivered: link ? i.lastDelivered[s.id] ?? null : null,
+      lastDelivered: i.lastDelivered[s.id] ?? null,
       lastIn: m ? { at: m.at, text: inboundText(m) } : null,
       onboarded: s.onboarded, d7, reason: r.reason, detail: r.detail,
     });
@@ -330,17 +336,19 @@ export function buildReach(i: ReachInput): ReachReport {
     (order.get(a.reason) ?? 99) - (order.get(b.reason) ?? 99) || (b.linked ?? 0) - (a.linked ?? 0) || a.email.localeCompare(b.email);
   const zero = linked.filter((p) => p.d7 === 0).sort(byReason);
   const one = linked.filter((p) => p.d7 === 1).sort(byReason);
-  const notLinked = people.filter((p) => p.linked == null).sort((a, b) => Number(b.onboarded) - Number(a.onboarded) || a.email.localeCompare(b.email));
+  // Not linked and not reached twice (by email); a student with no link reached twice by email counts in 2 or more.
+  const unlinked = people.filter((p) => p.linked == null);
+  const notLinked = unlinked.filter((p) => p.d7 < REACH_TARGET).sort((a, b) => Number(b.onboarded) - Number(a.onboarded) || a.email.localeCompare(b.email));
 
   // The trend: for each of the last TREND_DAYS IST days, the linked students at its end (now, for today) and how many
   // had 2 or more deliveries in the 7 days to then; and the deliveries that day by lane.
   const today = istDay(now);
   const trend: TrendDay[] = [];
-  const lanes = new Map<string, { floor: number; catchup: number; other: number }>();
+  const lanes = new Map<string, { floor: number; catchup: number; other: number; email: number }>();
   for (const d of i.deliveries) {
     if (!inScope.has(d.user) || d.at > now) continue;
     const k = istDay(d.at);
-    const c = lanes.get(k) ?? { floor: 0, catchup: 0, other: 0 };
+    const c = lanes.get(k) ?? { floor: 0, catchup: 0, other: 0, email: 0 };
     c[d.lane]++;
     lanes.set(k, c);
   }
@@ -354,7 +362,7 @@ export function buildReach(i: ReachInput): ReachReport {
       on++;
       if (inWindow(times.get(id) ?? [], t) >= REACH_TARGET) hit++;
     }
-    const c = lanes.get(day) ?? { floor: 0, catchup: 0, other: 0 };
+    const c = lanes.get(day) ?? { floor: 0, catchup: 0, other: 0, email: 0 };
     trend.push({ day, soFar: k === 0, linked: on, reached: hit, pct: ratio(hit, on).pct, ...c });
   }
 
@@ -377,11 +385,11 @@ export function buildReach(i: ReachInput): ReachReport {
     headline: {
       all: ratio(reached(people), people.length),
       linked: ratio(reached(linked), linked.length),
-      notLinked: ratio(0, notLinked.length),
+      notLinked: ratio(reached(unlinked), unlinked.length),
       onboarded: ratio(reached(onb), onb.length),
       notOnboarded: ratio(reached(notOnb), notOnb.length),
     },
-    counts: { students: people.length, linked: linked.length, zero: zero.length, one: one.length, twoPlus: reached(linked), notLinked: notLinked.length },
+    counts: { students: people.length, linked: linked.length, zero: zero.length, one: one.length, twoPlus: reached(people), notLinked: notLinked.length },
     reasons, trend, floorStart: FLOOR_START,
     lists: { zero, one, notLinked },
     meta: { students24h: i.meta.students24h, limit: TIER_LIMIT, days },

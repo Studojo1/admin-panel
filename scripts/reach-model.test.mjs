@@ -1,7 +1,7 @@
 // node --test scripts/reach-model.test.mjs
-// REACH-PAGE (15 Nov 2026): the /reach rules (app/lib/reach/model.ts): reached twice in 7 days, the headline splits
-// (linked or not, onboarded or not), internal accounts left out unless asked, what is stopping a student, the 14 day
-// trend by link time and lane, and Meta's days. Every person here is made up.
+// REACH-PAGE (15 Nov 2026): the /reach rules (app/lib/reach/model.ts): reached twice in 7 days (WhatsApp or email since
+// REACH-EMAIL), the headline splits (linked or not, onboarded or not), internal accounts left out unless asked, what is
+// stopping a student, the 14 day trend by link time and lane, and Meta's days. Every person here is made up.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -44,26 +44,30 @@ test("Meta's codes: the code when given, else read from the error text", () => {
   assert.equal(metaCode("130472", "User's number is part of an experiment"), "130472");
 });
 
-test("reached twice: 2 or more delivered in the 7 days to now, for a linked student only", () => {
+test("reached twice: 2 or more delivered in the 7 days to now, WhatsApp or email; with no link, by email alone", () => {
   const r = buildReach(input({
-    students: [student("a"), student("b"), student("c"), student("d")],
+    students: [student("a"), student("b"), student("c"), student("d"), student("e")],
     links: [link("a"), link("b"), link("c")],
     deliveries: [
       dl("a", NOW - 1 * D), dl("a", NOW - 6 * D), // 2 in 7 days
       dl("b", NOW - 2 * D), dl("b", NOW - 7 * D - H), // one is 7 days and an hour old: 1
-      dl("d", NOW - 1 * D), dl("d", NOW - 2 * D), // d has no link: not reached, whatever the ledger says
+      dl("d", NOW - 1 * D, "email"), dl("d", NOW - 2 * D, "email"), // d has no link: reached twice by email (REACH-EMAIL)
+      dl("e", NOW - 3 * D, "email"), // e has no link and one email: not reached twice
     ],
   }));
-  assert.equal(r.headline.all.n, 1);
-  assert.equal(r.headline.all.of, 4);
-  assert.equal(r.headline.all.pct, 25);
+  assert.equal(r.headline.all.n, 2);
+  assert.equal(r.headline.all.of, 5);
+  assert.equal(r.headline.all.pct, 40);
   assert.deepEqual(r.headline.linked, { n: 1, of: 3, pct: 33 });
-  assert.deepEqual(r.headline.notLinked, { n: 0, of: 1, pct: 0 });
-  assert.deepEqual(r.counts, { students: 4, linked: 3, zero: 1, one: 1, twoPlus: 1, notLinked: 1 });
+  assert.deepEqual(r.headline.notLinked, { n: 1, of: 2, pct: 50 });
+  assert.deepEqual(r.counts, { students: 5, linked: 3, zero: 1, one: 1, twoPlus: 2, notLinked: 1 }, "2 or more counts d; not linked is the one under 2");
+  assert.equal(r.counts.zero + r.counts.one + r.counts.twoPlus + r.counts.notLinked, r.counts.students);
   assert.deepEqual(r.lists.zero.map((p) => p.id), ["c"]);
   assert.deepEqual(r.lists.one.map((p) => p.id), ["b"]);
-  assert.deepEqual(r.lists.notLinked.map((p) => p.id), ["d"]);
+  assert.deepEqual(r.lists.notLinked.map((p) => p.id), ["e"]);
   assert.equal(r.lists.notLinked[0].reason, "not_linked");
+  assert.equal(r.lists.notLinked[0].d7, 1);
+  assert.equal(r.lists.notLinked[0].detail, "Onboarded, no WhatsApp link, 1 delivered in 7 days");
 });
 
 test("a delivery exactly 7 days old is out; one a minute younger is in (the product's > now - 7 days)", () => {
@@ -79,10 +83,11 @@ test("an unlinked link does not count as linked now; the active one does", () =>
   const r = buildReach(input({
     students: [student("a"), student("b")],
     links: [link("a", { active: false, unlinked: NOW - D }), link("b", { active: false, unlinked: NOW - D }), link("b", { created: NOW - 2 * H })],
-    deliveries: [dl("a", NOW - 2 * D), dl("a", NOW - 3 * D)],
+    deliveries: [dl("a", NOW - 2 * D)],
   }));
   assert.equal(r.counts.linked, 1);
-  assert.equal(r.lists.notLinked[0].id, "a", "unlinked a day ago: not linked now, deliveries before do not count");
+  assert.equal(r.lists.notLinked[0].id, "a", "unlinked a day ago: not linked now");
+  assert.equal(r.lists.notLinked[0].d7, 1, "a delivery before the unlink still counts, as the product's EMAIL_ONLY_SQL counts every delivery");
   assert.equal(r.lists.zero[0].linked, NOW - 2 * H, "the active link's date");
 });
 
@@ -198,6 +203,18 @@ test("today's point counts to now, not the day's end", () => {
   const r = buildReach(input({ students: [student("a")], links: [link("a")], deliveries: [dl("a", NOW - H), dl("a", NOW + H)] }));
   assert.equal(r.trend.at(-1).reached, 0, "a delivery after now is not counted");
   assert.equal(r.trend.at(-1).other, 1);
+});
+
+test("REACH-EMAIL: an email delivery counts like a WhatsApp one, and the trend shows email as its own lane", () => {
+  const r = buildReach(input({
+    students: [student("a")], links: [link("a")],
+    deliveries: [dl("a", at("2026-11-16", "09:00"), "email"), dl("a", at("2026-11-15", "19:00"), "floor")],
+  }));
+  assert.equal(r.counts.twoPlus, 1);
+  const day = (k) => r.trend.find((d) => d.day === k);
+  assert.deepEqual([day("2026-11-16").email, day("2026-11-16").other, day("2026-11-15").floor], [1, 0, 1]);
+  assert.equal(r.trend.at(-1).reached, 1);
+  assert.ok(REASONS.find((x) => x.key === "not_linked").note.includes("email"));
 });
 
 test("linkActiveAt", () => {
