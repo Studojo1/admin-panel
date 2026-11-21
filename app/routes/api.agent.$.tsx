@@ -17,15 +17,17 @@ import {
   setLearnings,
   setPlaybook,
 } from "~/lib/fellowship.server";
-import { ensureCreatorTables, istDate } from "~/lib/ugc-creators.server";
+import { ensureCreatorTables, istDate, newCreatorSlug, newCreatorToken } from "~/lib/ugc-creators.server";
 import db from "~/lib/db.server";
 import { sql } from "drizzle-orm";
 
 // Vanshika's Claude Code (/api/agent/...). Not an admin login: a shared key in
 // FELLOWSHIP_AGENT_KEY, sent as "Authorization: Bearer <key>". It reads what it
 // needs to write one fellow's posts, saves drafts for the team to review,
-// revises drafts the team sent back, and records what it learned from results.
-// Nothing here approves a draft or puts anything on a fellow's page.
+// revises drafts the team sent back, records what it learned from results, and
+// adds a fellow the team asked for (the same as "Add a fellow" on the calendar).
+// Nothing here approves a draft or puts a post on a fellow's page, and adding a
+// fellow never answers with their page link: the team sends the welcome.
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body, null, 2), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 
@@ -78,6 +80,32 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (!body || typeof body !== "object") return json({ error: "Send a JSON body." }, 400);
   const [what, a, b] = parts(params);
   const id = idOf(a);
+  // Add a fellow: { fullName, college?, field?, cohort?, linkedinUrl?, whatsapp?, email? }.
+  // Same row as "Add a fellow" on the calendar. Refused when someone with that
+  // name is already on the programme, so a retry can't make a second page.
+  if (what === "fellows" && !a) {
+    await ensureCreatorTables();
+    const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+    const fullName = text(body.fullName, 120);
+    if (fullName.length < 2) return json({ error: "fullName is required." }, 400);
+    const row = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('agent-add-fellow'))`);
+      const same = (await tx.execute(sql`
+        SELECT id FROM ugc_creators WHERE lower(trim(full_name)) = lower(${fullName}) AND status <> 'removed' LIMIT 1
+      `)).rows[0] as { id: number } | undefined;
+      if (same) return { existing: same.id };
+      const r = (await tx.execute(sql`
+        INSERT INTO ugc_creators (token, slug, full_name, email, whatsapp, linkedin_url, college, field, cohort, created_by)
+        VALUES (${newCreatorToken()}, ${newCreatorSlug(fullName)}, ${fullName}, ${text(body.email, 200) || null}, ${text(body.whatsapp, 30) || null},
+                ${text(body.linkedinUrl, 300) || null}, ${text(body.college, 160) || null}, ${text(body.field, 80) || null},
+                ${text(body.cohort, 40) || null}, ${"claude"})
+        RETURNING id
+      `)).rows[0] as { id: number };
+      return { created: r.id };
+    });
+    if ("existing" in row) return json({ error: `${fullName} is already a fellow (id ${row.existing}).`, id: row.existing }, 409);
+    return json({ ok: true, id: row.created, next: "Added. The team sends them their page from the calendar. Load their notes with POST /fellows/<id>/notes." }, 201);
+  }
   try {
     if (what === "fellows" && id && b === "drafts") {
       const ids = await addDrafts(id, body.posts, body.batch);
