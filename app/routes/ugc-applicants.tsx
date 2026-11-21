@@ -127,13 +127,15 @@ interface Analytics {
   top_sharers: { id: number; full_name: string; share_code: string; clicks: ClickCounts; visitors: number; applications: number }[];
 }
 
-// The review states and the notes limit, as enforced by api.ugc-applicants.tsx.
-const STATUSES = ["new", "shortlisted", "selected", "rejected"] as const;
+// The review states and the notes limit, as enforced by api.ugc-applicants.tsx. In the order people move
+// through them (the founder, 21 Nov 2026): invited got the selection email, confirmed said yes, selected has a
+// fellow page, removed was taken off, backed out said no.
+const STATUSES = ["new", "shortlisted", "invited", "confirmed", "selected", "removed", "backed_out", "rejected"] as const;
 
 // The applicants page's tour: what each part is for, for whoever on the team opens it first.
 const TOUR: TourStep[] = [
   { title: "Growth Fellowship applicants", body: "Everyone who applied from studojo.com/fellowship-growth. Here's how to find the right people and take them on." },
-  { sel: '[data-tour="ap-counts"]', title: "Applicants at a glance", body: "How many applied, how many in the past 24 hours, and how many are new, shortlisted, selected or rejected." },
+  { sel: '[data-tour="ap-counts"]', title: "Where everyone stands", body: "How many applied, and how many are at each stage: invited, said yes, in the fellowship, removed, backed out. Click a number to see just those people." },
   { sel: '[data-tour="ap-standout"]', title: "Who stands out", body: "Quick filters for the strongest signals: reach, a post over 1K impressions, posting every week. Pick several to see people who match all of them, or sort by the stand-out score." },
   { sel: '[data-tour="ap-filters"]', title: "Search and filter", body: "Search by name, email or college, or filter by status, field, connections and more." },
   { sel: '[data-tour="ap-table"]', title: "Every applicant", body: "Change someone's status right in their row. Click a row to read every answer, add team notes, or press Make fellow, which creates their fellow page and marks them selected." },
@@ -144,14 +146,22 @@ const TOUR: TourStep[] = [
 const STATUS_LABELS: Record<string, string> = {
   new: "New",
   shortlisted: "Shortlisted",
-  selected: "Selected",
+  invited: "Invited, no reply",
+  confirmed: "Said yes",
+  selected: "In the fellowship",
+  removed: "Removed",
+  backed_out: "Backed out",
   rejected: "Rejected",
 };
 
 const STATUS_STYLES: Record<string, string> = {
   new: "bg-blue-100 text-blue-700 border-blue-200",
   shortlisted: "bg-amber-100 text-amber-700 border-amber-200",
+  invited: "bg-violet-100 text-violet-700 border-violet-200",
+  confirmed: "bg-teal-100 text-teal-700 border-teal-200",
   selected: "bg-green-100 text-green-700 border-green-200",
+  removed: "bg-red-100 text-red-700 border-red-200",
+  backed_out: "bg-orange-100 text-orange-700 border-orange-200",
   rejected: "bg-gray-200 text-gray-600 border-gray-300",
 };
 
@@ -804,14 +814,22 @@ export default function UgcApplicants() {
         </div>
 
         {counts && (
-          <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-5" data-tour="ap-counts">
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9" data-tour="ap-counts">
             <CountTile
               label="Total applicants"
               value={counts.total}
               note={`${counts.last_24_hours} in the past 24 hours`}
+              active={filters.status === ""}
+              onClick={() => setFilters((prev) => ({ ...prev, status: "" }))}
             />
             {STATUSES.map((s) => (
-              <CountTile key={s} label={STATUS_LABELS[s]} value={counts.by_status[s] ?? 0} />
+              <CountTile
+                key={s}
+                label={STATUS_LABELS[s]}
+                value={counts.by_status[s] ?? 0}
+                active={filters.status === s}
+                onClick={() => setFilters((prev) => ({ ...prev, status: prev.status === s ? "" : s }))}
+              />
             ))}
           </div>
         )}
@@ -1142,13 +1160,27 @@ export default function UgcApplicants() {
   );
 }
 
-function CountTile({ label, value, note }: { label: string; value: number; note?: string }) {
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+function CountTile({ label, value, note, active, onClick }: { label: string; value: number; note?: string; active?: boolean; onClick?: () => void }) {
+  const body = (
+    <>
       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
       <p className="mt-1 text-3xl font-bold text-gray-900">{value}</p>
       {note && <p className="mt-1 text-xs text-gray-400">{note}</p>}
-    </div>
+    </>
+  );
+  if (!onClick) return <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">{body}</div>;
+  // Clicking a stage shows just those people (it sets the Status filter); clicking it again shows everyone.
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-300 ${
+        active ? "border-violet-500 ring-1 ring-violet-500" : "border-gray-200"
+      }`}
+    >
+      {body}
+    </button>
   );
 }
 

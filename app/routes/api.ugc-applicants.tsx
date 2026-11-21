@@ -16,7 +16,11 @@ import { ensureCreatorTables } from "~/lib/ugc-creators.server";
 // The review states. 'new' is the default assigned on insert by the public
 // form; the rest are set from this panel. 'meeting' is "Meeting scheduled";
 // 'selected' is a fellow (Make fellow sets it).
-const STATUSES = ["new", "shortlisted", "meeting", "selected", "rejected"] as const;
+// The founder, 21 Nov 2026, so everyone's standing is clear at a glance:
+// 'invited' got the selection email and hasn't replied, 'confirmed' replied yes
+// but has no fellow page yet, 'removed' was a fellow and was taken off (set when
+// their fellow page is removed), 'backed_out' said they're not doing it.
+const STATUSES = ["new", "shortlisted", "meeting", "invited", "confirmed", "selected", "removed", "backed_out", "rejected"] as const;
 type Status = (typeof STATUSES)[number];
 
 const isStatus = (value: string): value is Status =>
@@ -156,7 +160,7 @@ async function statusCounts() {
 // Referred are what those fellows went on to, marked on their profile and kept
 // in ugc_creators. Like Fellow, they still count if the fellow later leaves.
 async function pipelineCounts(counts: Awaited<ReturnType<typeof statusCounts>>) {
-  const fellow = counts.by_status.selected ?? 0;
+  const fellow = (counts.by_status.selected ?? 0) + (counts.by_status.removed ?? 0);
   let growthIntern = 0;
   let referred = 0;
   try {
@@ -584,7 +588,7 @@ export async function action({ request }: Route.ActionArgs) {
       return { row: updated.rows[0] };
     });
     if (outcome.fellow) {
-      return Response.json({ error: "They're a fellow with a live page, so their status stays Selected." }, { status: 409 });
+      return Response.json({ error: "They're a fellow with a live page, so they stay In the fellowship. Remove their fellow page first." }, { status: 409 });
     }
     if (!outcome.row) return Response.json({ error: "Applicant not found" }, { status: 404 });
     // Fresh counts, so the header stays right without reloading every row.

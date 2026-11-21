@@ -143,10 +143,14 @@ export async function action({ request }: Route.ActionArgs) {
     const r = await db.execute(sql`UPDATE ugc_creators SET status = ${body.status} WHERE id = ${id} RETURNING id, application_id`);
     if (!r.rows.length) return Response.json({ error: "Creator not found" }, { status: 404 });
     // An active or paused fellow who applied is a Fellow on the applicants page
-    // too, so bringing one back puts their application in step.
+    // too, so bringing one back puts their application in step. A removed
+    // fellow shows as Removed there (the founder, 21 Nov 2026).
     const applicationId = (r.rows[0] as { application_id: number | null }).application_id;
     if (body.status !== "removed" && applicationId) {
       await db.execute(sql`UPDATE ugc_applications SET status = 'selected' WHERE id = ${applicationId} AND status <> 'selected'`);
+    }
+    if (body.status === "removed" && applicationId) {
+      await db.execute(sql`UPDATE ugc_applications SET status = 'removed' WHERE id = ${applicationId} AND status = 'selected'`);
     }
     return Response.json({ ok: true });
   }
