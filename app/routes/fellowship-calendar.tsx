@@ -1486,8 +1486,8 @@ function NudgeDialog({ f, post, ask, close, act, toast, today }: { f: Fellow; po
 // second click within two minutes can't send it twice and every send is logged. Fellows with no email saved are
 // shown and skipped. Paused fellows, and fellows with no post waiting on their page (so "your posts are ready"
 // would be wrong), start unticked; anyone can be ticked or unticked before it goes.
-const EVERYONE_SUBJECT = "Your fellowship posts this week";
-const EVERYONE_TEXT = "Hi {first},\n\nYour posts for this week are ready on your page. When one is due, tap Post on LinkedIn: it copies the post and opens LinkedIn for you, ready to paste. Then come back and tap I posted it.\n{page}\n\nIf anything on your page isn't working, just reply to this email.\n\nTeam Studojo";
+const EVERYONE_SUBJECT = "Your fellowship posts are ready";
+const EVERYONE_TEXT = "Hi {first},\n\nYour posts are ready on your page. When one is due, tap Post on LinkedIn: it copies the post and opens LinkedIn for you, ready to paste. Then come back and tap I posted it.\n{page}\n\nIf anything on your page isn't working, just reply to this email.\n\nTeam Studojo";
 const EMAIL_OK = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 type EveryoneRun = { total: number; done: number; sent: string[]; failed: { name: string; why: string }[]; finished: boolean };
 
