@@ -2,6 +2,7 @@ import db from "~/lib/db.server";
 import { deletePhoto, isAnalyticsRef, isPhotoRef, newPhotoRef, PHOTOS_PER_POST, proofRefs, putPhoto } from "~/lib/fellow-proof.server";
 import { sendDirectGmail } from "~/lib/gmail-direct.server";
 import { sql } from "drizzle-orm";
+import { numbersFromFiles, type FileWeek } from "./fellowship-files";
 import {
   HIRING_PIPELINE,
   MILESTONES,
@@ -60,6 +61,8 @@ export interface Post {
   analytics: PostAnalytics | null; analyticsFiles: string[];
   /** The fellow's own version, waiting for the team (the post is locked on their page meanwhile), and the team's note when they kept the original. */
   fellowVersion: { text: string; at: string } | null; versionReply: string | null;
+  /** Set when the impressions shown come from the fellow's LinkedIn file rather than typed in (fellowship-files.ts). */
+  numbersFromFile?: { uploadedAt: string; periodEnd: string | null } | null;
 }
 /** studojo.com's parse of a LinkedIn post analytics export (fellow-page side, 3 Nov 2026). */
 export interface PostAnalytics {
@@ -217,6 +220,68 @@ function readBackOf(v: unknown): { covers: number[]; usable: string[]; leaveOut:
   if (!Array.isArray(c.useful)) return null; // still being read, or not read
   const lines = (a: unknown) => (Array.isArray(a) ? a.filter((t): t is string => typeof t === "string") : []);
   return { covers: Array.isArray(c.parts) ? c.parts.map(Number).filter(Number.isInteger) : [], usable: lines(c.useful), leaveOut: lines(c.skip) };
+}
+/**
+ * When each fellow last did something on their page that isn't a post: shared a story, uploaded a LinkedIn
+ * file or updated their connections. "Last active" counts these too, not only copying and posting.
+ */
+async function lastPageActivity(ex: Exec = db) {
+  const rows = (await ex.execute(sql`
+    SELECT creator_id, max(t) AS t FROM (
+      SELECT creator_id, created_at AS t FROM ugc_creator_stories
+      UNION ALL SELECT creator_id, uploaded_at FROM ugc_creator_analytics
+      UNION ALL SELECT creator_id, recorded_at FROM ugc_creator_connections
+    ) x GROUP BY creator_id
+  `)).rows as { creator_id: number; t: unknown }[];
+  return new Map(rows.map((r) => [Number(r.creator_id), iso(r.t)] as const).filter((e): e is [number, string] => !!e[1]));
+}
+/** Every LinkedIn file each fellow uploaded, with the posts it lists: their numbers fill in the fellow's posts. */
+async function linkedInFileWeeks(ex: Exec = db) {
+  const rows = (await ex.execute(sql`
+    SELECT creator_id, uploaded_at, to_char(period_start, 'YYYY-MM-DD') AS period_start, to_char(period_end, 'YYYY-MM-DD') AS period_end, data->'posts' AS posts
+    FROM ugc_creator_analytics ORDER BY uploaded_at
+  `)).rows as Record<string, unknown>[];
+  const by = new Map<number, FileWeek[]>();
+  for (const r of rows) {
+    const list = jsonOf<unknown[]>(r.posts, []);
+    const posts = (Array.isArray(list) ? list : []).map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>) : {})).map((x) => ({
+      url: typeof x.url === "string" ? x.url : null,
+      publishedOn: typeof x.publishedOn === "string" ? x.publishedOn : null,
+      impressions: typeof x.impressions === "number" ? x.impressions : null,
+    }));
+    const id = Number(r.creator_id);
+    if (!by.has(id)) by.set(id, []);
+    by.get(id)!.push({ uploadedAt: iso(r.uploaded_at) ?? "", periodStart: (r.period_start as string) ?? null, periodEnd: (r.period_end as string) ?? null, posts });
+  }
+  return by;
+}
+/** A fellow's posts with the impressions their LinkedIn files have for them, where those are higher than what was typed in. */
+function withFileNumbers(ps: Post[], weeks: FileWeek[] | undefined): Post[] {
+  if (!weeks?.length) return ps;
+  const found = numbersFromFiles(ps, weeks);
+  return ps.map((p) => {
+    const n = found.get(p.id);
+    if (!n || (p.impressions != null && p.impressions >= n.impressions)) return p;
+    return { ...p, impressions: n.impressions, metricsAt: p.metricsAt ?? n.uploadedAt, numbersFromFile: { uploadedAt: n.uploadedAt, periodEnd: n.periodEnd } };
+  });
+}
+/** Each fellow's newest LinkedIn analytics file: when it came in, its period and the account's totals for it. */
+export interface LinkedInFile { at: string; periodStart: string | null; periodEnd: string | null; impressions: number | null; membersReached: number | null; newFollowers: number | null }
+async function latestLinkedInFiles(ex: Exec = db) {
+  const rows = (await ex.execute(sql`
+    SELECT DISTINCT ON (creator_id) creator_id, uploaded_at, to_char(period_start, 'YYYY-MM-DD') AS period_start,
+      to_char(period_end, 'YYYY-MM-DD') AS period_end, data->'totals' AS totals
+    FROM ugc_creator_analytics ORDER BY creator_id, period_end DESC NULLS LAST, uploaded_at DESC
+  `)).rows as Record<string, unknown>[];
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return new Map(rows.map((r) => {
+    const t = jsonOf<Record<string, unknown>>(r.totals, {});
+    const file: LinkedInFile = {
+      at: iso(r.uploaded_at) ?? "", periodStart: (r.period_start as string) ?? null, periodEnd: (r.period_end as string) ?? null,
+      impressions: n(t.impressions), membersReached: n(t.membersReached), newFollowers: n(t.newFollowers),
+    };
+    return [Number(r.creator_id), file] as const;
+  }));
 }
 async function latestConnections(ex: Exec = db) {
   const rows = (await ex.execute(sql`
@@ -832,9 +897,13 @@ export function standing(posts: Post[], today: string, postsPerWeek: number) {
 export async function calendarView() {
   await ensureCreatorTables();
   const today = istDate();
-  const [rules, fs, posts, drafts, stories, conns, pb, emailed] = await Promise.all([
-    programmeRules(), fellows(), postsOf(null), draftsOf(null), storiesOf(null), latestConnections(), playbook(), lastEmails(),
+  const [rules, fs, typed, drafts, stories, conns, pb, emailed, pageActivity, files, fileWeeks] = await Promise.all([
+    programmeRules(), fellows(), postsOf(null), draftsOf(null), storiesOf(null), latestConnections(), playbook(), lastEmails(), lastPageActivity(), latestLinkedInFiles(), linkedInFileWeeks(),
   ]);
+  // Numbers typed in, topped up from the fellows' LinkedIn files (until 21 Nov 2026 those were never matched to posts).
+  const typedBy = new Map<number, Post[]>();
+  for (const p of typed) { if (!typedBy.has(p.creatorId)) typedBy.set(p.creatorId, []); typedBy.get(p.creatorId)!.push(p); }
+  const posts = [...typedBy.entries()].flatMap(([id, ps]) => withFileNumbers(ps, fileWeeks.get(id))).sort((a, b) => a.due.localeCompare(b.due) || a.id - b.id);
   const earlier = new Map(((await db.execute(sql`SELECT creator_id, COUNT(*)::int AS n FROM ugc_creator_earlier_posts GROUP BY creator_id`)).rows as { creator_id: number; n: number }[]).map((r) => [Number(r.creator_id), Number(r.n)]));
   const postsBy = new Map<number, Post[]>(), draftsBy = new Map<number, Draft[]>(), storiesBy = new Map<number, number>();
   for (const p of posts) { if (!postsBy.has(p.creatorId)) postsBy.set(p.creatorId, []); postsBy.get(p.creatorId)!.push(p); }
@@ -876,7 +945,11 @@ export async function calendarView() {
         connections: conns.get(f.id) ?? null,
         stories: storiesBy.get(f.id) ?? 0,
         earlierPosts: earlier.get(f.id) ?? 0,
-        standing: standing(ps, today, rulesFor(f, rules).postsPerWeek),
+        standing: (() => {
+          const st = standing(ps, today, rulesFor(f, rules).postsPerWeek), other = pageActivity.get(f.id) ?? null;
+          return { ...st, lastActivity: [st.lastActivity, other].filter((t): t is string => !!t).sort().pop() ?? null };
+        })(),
+        linkedinFile: files.get(f.id) ?? null,
         emailed: { nudge: emailed.get(`nudge:${f.id}`) ?? null, stories: emailed.get(`stories:${f.id}`) ?? null },
         posts: ps.map((p) => ({ ...p, verdict: verdictOf(p, ps, all), numbersEmailedAt: emailed.get(`post:${p.id}`) ?? null })),
         drafts: draftsBy.get(f.id) ?? [],
@@ -961,6 +1034,7 @@ export async function programmeDashboard() {
       sentBack: drafts.filter((d) => d.status === "changes").length,
       scheduled: posts.filter((p) => p.status === "ready" && p.due >= today).length,
       overdue: posts.filter((p) => p.status === "ready" && p.due < today).length,
+      overdueThisWeek: posts.filter((p) => p.status === "ready" && p.due < today && weekOf(p.due) === thisWeek).length,
       blocked: posts.filter((p) => p.status === "blocked").length,
       posted: posts.filter(isPosted).length,
       awaitingNumbers: posts.filter((p) => isPosted(p) && p.impressions == null).length,
@@ -970,7 +1044,15 @@ export async function programmeDashboard() {
       askedForPhoto: posts.filter((p) => p.status === "ready" && !p.photos.length && p.photoHelpAt).length,
       fellowVersions: posts.filter((p) => p.status === "ready" && p.fellowVersion).length,
       measured: posts.filter(measured).length,
+      // Marked posted without a link to the post: its numbers can't come in from the fellow's LinkedIn file.
+      noLink: posts.filter((p) => isPosted(p) && !p.url).length,
     },
+    // Fellows' LinkedIn files (the whole account's numbers, every week): who sent one in the last 7 days, and its impressions.
+    files: (() => {
+      const since = addDays(today, -7);
+      const fresh = live.filter((f) => f.status === "active" && f.linkedinFile && istDate(f.linkedinFile.at) > since);
+      return { fresh: fresh.length, active: live.filter((f) => f.status === "active").length, impressions: fresh.reduce((n, f) => n + (f.linkedinFile?.impressions ?? 0), 0) };
+    })(),
     weekly, kinds,
     fellows: cal.fellows.map((f) => {
       const up = f.posts.filter(isPosted), m = up.filter(measured);
@@ -983,6 +1065,13 @@ export async function programmeDashboard() {
         lastPosted: up.map(postedOn).filter((d): d is string => !!d).sort().pop() ?? null,
         scheduled: f.posts.filter((p) => p.status === "ready" && p.due >= today).length,
         drafts: f.drafts.length, stories: f.stories, earlierPosts: f.earlierPosts,
+        written: f.posts.filter((p) => p.status !== "blocked").length,
+        studojoImpressions: up.filter((p) => p.kind === "studojo").reduce((n, p) => n + imp(p), 0),
+        noLink: up.filter((p) => !p.url).length,
+        linkedinFile: f.linkedinFile, link: f.link,
+        // This week's posts, by day, as the fellow's page shows them.
+        week: f.posts.filter((p) => weekOf(p.due) === thisWeek).sort((a, b) => a.due.localeCompare(b.due) || a.id - b.id)
+          .map((p) => ({ id: p.id, due: p.due, kind: p.kind, title: p.title, state: p.status === "blocked" ? "blocked" : isPosted(p) ? "posted" : p.due < today ? "missed" : p.due === today ? "today" : "ahead" })),
       };
     }),
   };

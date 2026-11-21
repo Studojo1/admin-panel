@@ -298,8 +298,9 @@ export function newCreatorSlug(fullName: string): string {
   return `${first}-${tail}`;
 }
 
+// Fellow pages live on app.studojo.com (studojo.com/fellowship-growth/<slug> only redirects there).
 export function studentLink(slug: string | null | undefined): string | null {
-  return slug ? `https://studojo.com/fellowship-growth/${slug}` : null;
+  return slug ? `https://app.studojo.com/fellowship-growth/${slug}` : null;
 }
 
 // ---------------------------------------------------------------------------

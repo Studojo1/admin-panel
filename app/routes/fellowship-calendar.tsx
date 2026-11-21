@@ -177,11 +177,11 @@ const SLOT: Record<string, Slot> = {
   ready: { key: "ready", label: "Ready", icon: "clock" },
   copied: { key: "copied", label: "Copied", icon: "copy" },
   posted: { key: "posted", label: "Posted", icon: "check" },
-  numbers: { key: "numbers", label: "Numbers in", icon: "chart" },
+  numbers: { key: "numbers", label: "Numbers", icon: "chart" },
   missed: { key: "missed", label: "Missed", icon: "alert" },
   paused: { key: "paused", label: "Paused", icon: "pause" },
   blocked: { key: "blocked", label: "Blocked", icon: "alert" },
-  photo: { key: "photo", label: "Needs photo", icon: "alert" },
+  photo: { key: "photo", label: "No photo", icon: "alert" },
   askedPhoto: { key: "photo", label: "No photo: offered a stock image", icon: "alert" },
   version: { key: "review", label: "Their version to approve", icon: "pen" },
 };
@@ -202,6 +202,8 @@ function fellowState(f: Fellow): [string, string, string] {
   if (f.status === "paused") return ["paused", "Paused", "pill-paused"];
   if (f.standing.atRisk) return ["at risk", "At risk", "pill-risk"];
   if (!f.posts.length && !f.drafts.length) return ["new", "New", "pill-new"];
+  // Posts on their page, and none ever marked posted: not "active" (21 Nov 2026).
+  if (!f.posts.some((p) => p.status === "posted")) return ["not posting", "Hasn't posted", "pill-risk"];
   return ["active", "Active", "pill-active"];
 }
 const StatePill = ({ f }: { f: Fellow }) => {
@@ -389,12 +391,14 @@ function Desk(P: DeskProps) {
   const fields = [...new Set(live.map((f) => f.field || "Other"))].sort();
   const cohorts = [...new Set(live.map((f) => f.cohort).filter(Boolean) as string[])].sort();
   const postedIn = (f: Fellow, w: string) => f.posts.filter((p) => p.status === "posted" && weekOf(p.due) === w).length;
+  // Posts due that week, as the fellow's own page counts them (on-hold posts left out); with none yet, their weekly plan.
+  const dueIn = (f: Fellow, w: string) => f.posts.filter((p) => p.status !== "blocked" && weekOf(p.due) === w).length || (f.plan?.postsPerWeek ?? PPW);
   const itemsOn = (f: Fellow, date: string) => [...f.drafts.filter((d) => d.due === date).map((d) => ({ d })), ...f.posts.filter((p) => p.due === date).map((p) => ({ p }))];
   const weekEmpty = (f: Fellow, w: string) => ![...f.drafts, ...f.posts].some((x) => weekOf(x.due) === w);
   // Days drawn full width: the posting days, plus any other day with a post this week (launch week's Sunday),
   // so no post shrinks to a dot.
   const WIDE = [0, 1, 2, 3, 4, 5, 6].filter((d) => POST_DAYS.includes(d) || live.some((f) => itemsOn(f, addDays(week, d)).length > 0));
-  const RISK: Record<string, number> = { "at risk": 0, new: 1, active: 2, paused: 3 };
+  const RISK: Record<string, number> = { "at risk": 0, "not posting": 1, new: 2, active: 3, paused: 4 };
   const list = useMemo(() => {
     const qq = F.q.trim().toLowerCase();
     const out = live.filter((f) =>
@@ -464,10 +468,9 @@ function Desk(P: DeskProps) {
                   <div className="gm-scale"><span>0</span><span>250K</span><span>500K</span><span>750K</span><span>1M</span></div>
                 </div>
                 <p className="gm-note">
-                  {daysLeft} days to go. Reaching {kfmt(G.impressions)} needs <b>about {num(perWeek)} Studojo post impressions a week</b> from here. Only Studojo posts count.
-                  {lastFull ? ` The last full week's Studojo posts brought ${num(lastFull.impressions)}.` : ""}
-                  {avg ? ` At ${num(avg)} impressions a Studojo post, that is about ${num(Math.round(perWeek / avg))} Studojo posts a week, and ${num(dueThisWeek)} are due this week.` : ` ${num(dueThisWeek)} posts are due this week.`}
-                  {nextCheckpoint ? ` The plan says ${num(nextCheckpoint.impressions)} impressions and ${nextCheckpoint.creators} fellows by ${fmt(nextCheckpoint.by)}.` : ""}
+                  {daysLeft ? <>{plural(daysLeft, "day")} to go: about <b>{kfmt(perWeek)} a week</b> from here.</> : null}
+                  {lastFull ? ` Last full week: ${kfmt(lastFull.impressions)}.` : ""}
+                  {` ${num(dueThisWeek)} posts due this week.`}
                 </p>
               </div>
               <WeekChart weekly={D.weekly.filter((w) => w.week >= D.programmeStart).slice(-4)} perWeek={perWeek} weekNo={weekNo} />
@@ -518,7 +521,7 @@ function Desk(P: DeskProps) {
             <label className="search"><span className="sr">Search fellows</span><Icon id="search" /><input className="input" type="search" placeholder="Search fellows, colleges, fields" value={F.q} onChange={(e) => F.setQ(e.target.value)} autoComplete="off" /></label>
             <select className="select" aria-label="Status" value={F.fStatus} onChange={(e) => F.setFStatus(e.target.value)}>
               <option value="all">All statuses</option>
-              {["at risk", "active", "new", "paused"].map((s) => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)} ({live.filter((f) => fellowState(f)[0] === s).length})</option>)}
+              {([["at risk", "At risk"], ["not posting", "Hasn't posted"], ["active", "Active"], ["new", "New"], ["paused", "Paused"]] as const).map(([s, l]) => <option key={s} value={s}>{l} ({live.filter((f) => fellowState(f)[0] === s).length})</option>)}
             </select>
             <select className="select" aria-label="Field" value={F.fField} onChange={(e) => F.setFField(e.target.value)}>
               <option value="all">All fields</option>{fields.map((f) => <option key={f}>{f}</option>)}
@@ -533,13 +536,13 @@ function Desk(P: DeskProps) {
             <table className="grid">
               <caption className="sr">Posts for week {weekNo(week)}, {range(week)}, by fellow</caption>
               <colgroup>
-                <col className="k-who" /><col className="k-st" /><col className="k-wk" /><col className="k-run" /><col className="k-done" /><col className="k-imp" /><col className="k-act" />
+                <col className="k-who" /><col className="k-st" /><col className="k-wk" /><col className="k-imp" /><col className="k-act" />
                 {[0, 1, 2, 3, 4, 5, 6].map((d) => <col key={d} className={WIDE.includes(d) ? "k-on" : addDays(week, d) === today ? "k-today" : "k-off"} />)}
               </colgroup>
               <thead>
                 <tr>
                   {sortTh("name", "Fellow", "c-who")}{sortTh("status", "Status")}{sortTh("posted", week === THIS ? "This week" : `Posted wk ${weekNo(week)}`, "num")}
-                  {sortTh("run", "Weekly run", "num")}{sortTh("completed", "Completed weeks", "num")}{sortTh("impressions", "Impressions", "num")}{sortTh("active", "Last active")}
+                  {sortTh("impressions", "Impressions", "num")}{sortTh("active", "Last active")}
                   {[0, 1, 2, 3, 4, 5, 6].map((d) => {
                     const date = addDays(week, d), on = WIDE.includes(d), isToday = date === today;
                     return <th key={d} className={`d ${on ? "d-on" : "d-off"}${isToday ? " is-today" : ""}`} scope="col"><span className="dd">{on ? DSHORT[d] : DSHORT[d][0]}</span><span className="dn">{day(date).getUTCDate()}</span>{isToday ? <span className="tdy">Today</span> : null}</th>;
@@ -587,15 +590,13 @@ function Desk(P: DeskProps) {
                     <tr key={f.id}>
                       <th className="c-who" scope="row"><button className="who-btn" type="button" onClick={() => setDrawer({ mode: "fellow", id: f.id })}><span className={`avatar sm ${avClass(f.name)}`} aria-hidden="true">{initials(f.name)}</span><span><b>{f.name}</b><small>{[f.college, f.field].filter(Boolean).join(" · ") || "No college or field yet"}</small></span></button></th>
                       <td className="cell"><StatePill f={f} />{nudgedToday(f) ? <span className="nudged"><Icon id="check" sm />Nudged</span> : null}</td>
-                      <td className="cell num"><span className="wk3"><b>{pt}</b><small>/ {PPW}</small><span className="pips" aria-hidden="true">{Array.from({ length: PPW }, (_, k) => <i key={k} className={k < pt ? "on" : ""} />)}</span></span></td>
-                      <td className="cell num">{f.standing.run}<span className="unit">wk</span></td>
-                      <td className="cell num">{f.standing.completedWeeks}</td>
+                      <td className="cell num"><span className="wk3" title={`${pt} posted of ${dueIn(f, week)} due that week`}><b>{pt}</b><small>/ {dueIn(f, week)}</small><span className="pips" aria-hidden="true">{Array.from({ length: dueIn(f, week) }, (_, k) => <i key={k} className={k < pt ? "on" : ""} />)}</span></span></td>
                       <td className="cell num">{num(f.standing.impressions)}</td>
                       <td className="cell muted">{ago(f.standing.lastActivity)}</td>
                       {days}
                     </tr>
                   );
-                }) : <tr><td colSpan={14}><div className="empty"><b>{live.length ? "No fellows match" : "No fellows yet"}</b>{live.length ? "Try a different search or clear a filter." : "Make someone a fellow from the Applicants page, or add one here."}</div></td></tr>}
+                }) : <tr><td colSpan={12}><div className="empty"><b>{live.length ? "No fellows match" : "No fellows yet"}</b>{live.length ? "Try a different search or clear a filter." : "Make someone a fellow from the Applicants page, or add one here."}</div></td></tr>}
               </tbody>
             </table>
           </div>

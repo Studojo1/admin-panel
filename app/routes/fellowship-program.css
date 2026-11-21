@@ -1,76 +1,117 @@
-/* The Growth Fellowship programme dashboard (/fellowship-program). Builds on the
-   calendar's tokens and pieces (fellowship-calendar.css); everything here is .fx .pd-*. */
+/* The Growth Fellowship programme dashboard (/fellowship-program). Builds on the calendar's tokens and pieces
+   (fellowship-calendar.css, the same look as the fellows' own page); everything here is .fx .pd-*. */
+.fx .pd { gap: 18px; max-width: 1320px; }
+.fx .pd-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; padding-top: 6px; }
+.fx .pd-top h1 { margin: 2px 0 0; font: 700 34px/1.08 var(--serif); letter-spacing: -.03em; }
+.fx .pd-date { margin: 0; color: var(--ink-3); font-size: 14px; font-weight: 500; }
+.fx .pd-updated { color: var(--ink-3); font-size: 12.5px; }
+.fx .head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .fx .pd-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px 24px; flex-wrap: wrap; }
-.fx .pd-card, .fx .pd-plan { padding: 20px 22px; display: grid; gap: 16px; align-content: start; }
-.fx .pd-muted { color: var(--ink-3); font-size: 13px; }
+.fx .pd-card { padding: 22px 24px; display: grid; gap: 14px; align-content: start; }
+.fx .pd-muted { color: var(--ink-3); }
 .fx .pd-ok { color: var(--good); }
 .fx .pd-short { color: var(--warn); }
 
-/* against the plan */
-.fx .pd-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.fx .pd-tile { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--sunk); padding: 14px 16px; display: grid; gap: 8px; align-content: start; }
-.fx .pd-big { display: flex; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; }
-.fx .pd-big b { font-size: 34px; line-height: 1; font-weight: 700; letter-spacing: -.02em; }
-.fx .pd-big span { color: var(--ink-3); font-size: 13px; }
-.fx .pd-meter { position: relative; height: 8px; border-radius: 4px; background: var(--accent-tint-2); margin: 4px 0 2px; }
-.fx .pd-fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--accent); }
-.fx .pd-pace { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
-.fx .pd-line { margin: 0; display: flex; gap: 6px 10px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-3); }
+/* the four numbers */
+.fx .pd-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.fx .pd-stat { padding: 20px 22px; display: grid; gap: 10px; align-content: start; }
+.fx .pd-label { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink-3); }
+.fx .pd-value { margin: 0; display: flex; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; }
+.fx .pd-value b { font-size: 40px; line-height: 1; font-weight: 700; letter-spacing: -.03em; }
+.fx .pd-value span { color: var(--ink-3); font-size: 13.5px; }
+.fx .pd-meter { position: relative; height: 6px; border-radius: 3px; background: #EDEDF0; margin: 2px 0; }
+.fx .pd-fill { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--accent); min-width: 0; }
+.fx .pd-pace { position: absolute; top: -5px; bottom: -5px; width: 2px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
+.fx .pd-foot { margin: 0; display: flex; gap: 6px 10px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-3); }
 
-/* tables */
-.fx .pd-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -22px; padding: 0 22px; }
-.fx .pd-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-.fx .pd-table th, .fx .pd-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }
-.fx .pd-table thead th { font-size: 12px; font-weight: 600; color: var(--ink-3); border-bottom-color: var(--line-2); }
-.fx .pd-table tbody th { font-weight: 600; }
-.fx .pd-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-.fx .pd-table small { color: var(--ink-3); font-weight: 400; font-size: 12px; }
-.fx .pd-table tbody th small { display: block; }
-.fx .pd-table tbody tr:last-child > * { border-bottom: 0; }
-.fx .pd-table tbody tr:hover > * { background: #FBFAFD; }
-.fx .pd-next > * { background: var(--accent-tint) !important; }
-.fx .pd-tag { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 650; vertical-align: 1px; }
-.fx .pd-barcol { min-width: 170px; }
-.fx .pd-cellbar { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 10px; }
-.fx .pd-cellbar > div { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
-.fx .pd-cellbar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
-
-.fx .pd-days { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
-.fx .pd-days li { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 12px; display: grid; gap: 2px; background: var(--card); }
+/* needs the team, and this week */
+.fx .pd-cols { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.fx .pd-att { list-style: none; margin: 0; padding: 0; display: grid; }
+.fx .pd-att li { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--line); }
+.fx .pd-att li:first-child { border-top: 0; padding-top: 2px; }
+.fx .pd-att-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--warn-tint); color: var(--warn); }
+.fx .pd-att li.bad .pd-att-ic { background: var(--bad-tint); color: var(--bad); }
+.fx .pd-att-main { display: grid; gap: 1px; }
+.fx .pd-att-main b { font-size: 15px; font-weight: 600; }
+.fx .pd-att-main small { font-size: 13px; color: var(--ink-3); }
+.fx .pd-calm { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--good); font-weight: 600; }
+.fx .pd-days { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+.fx .pd-days li { border-radius: var(--r-sm); padding: 10px 10px; display: grid; gap: 2px; background: var(--sunk); }
 .fx .pd-days li span { font-size: 12px; font-weight: 600; color: var(--ink-3); }
-.fx .pd-days li b { font-size: 22px; line-height: 1.1; }
+.fx .pd-days li b { font-size: 24px; line-height: 1.1; font-weight: 700; letter-spacing: -.02em; }
 .fx .pd-days li small { font-size: 11.5px; color: var(--ink-3); }
-.fx .pd-days li.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.fx .pd-days li.ahead { background: var(--sunk); }
+.fx .pd-days li.today { background: var(--accent-tint); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.fx .pd-days li.today span { color: var(--accent-ink); }
 .fx .pd-days li.ahead b { color: var(--ink-3); }
 
-/* funnel and pipeline */
-.fx .pd-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
-.fx .pd-funnel { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
-.fx .pd-f-top { display: grid; grid-template-columns: 1fr auto 44px; gap: 10px; align-items: baseline; font-size: 13.5px; }
-.fx .pd-f-top b { font-size: 16px; font-variant-numeric: tabular-nums; }
-.fx .pd-f-top small { color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums; }
-.fx .pd-f-bar { margin-top: 5px; height: 10px; border-radius: 5px; background: var(--accent-tint); overflow: hidden; }
-.fx .pd-f-bar i { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
-.fx .pd-pipe { margin: 0; display: grid; }
-.fx .pd-pipe > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
-.fx .pd-pipe > div:last-child { border-bottom: 0; }
-.fx .pd-pipe dt { font-size: 13.5px; font-weight: 600; }
-.fx .pd-pipe dt small { display: block; font-weight: 400; color: var(--ink-3); font-size: 12px; }
-.fx .pd-pipe dd { margin: 0; font-size: 20px; font-weight: 700; }
-.fx .pd-pipe .warn dd, .fx .pd-pipe .warn dt { color: var(--warn); }
-.fx .pd-kinds { margin: 0; display: flex; gap: 10px 28px; flex-wrap: wrap; }
-.fx .pd-kinds dt { font-size: 12px; color: var(--ink-3); font-weight: 600; }
-.fx .pd-kinds dd { margin: 2px 0 0; font-size: 18px; font-weight: 700; }
-.fx .pd-kinds dd small { font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+/* tables */
+.fx .pd-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -24px; padding: 0 24px; }
+.fx .pd-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.fx .pd-table th, .fx .pd-table td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }
+.fx .pd-table thead th { font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.fx .pd-table tbody th { font-weight: 600; }
+.fx .pd-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.fx .pd-table small { color: var(--ink-3); font-weight: 400; font-size: 12.5px; }
+.fx .pd-table tbody th small { display: block; }
+.fx .pd-table tbody tr:last-child > * { border-bottom: 0; }
+.fx .pd-table tbody tr:hover > * { background: #FAFAFC; }
+.fx .pd-barcol { min-width: 170px; }
+.fx .pd-cellbar { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 10px; }
+.fx .pd-cellbar > div { height: 6px; border-radius: 3px; background: #EDEDF0; overflow: hidden; }
+.fx .pd-cellbar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 
 /* fellows */
 .fx .pd-filters { display: flex; gap: 8px; flex-wrap: wrap; flex: 0 1 460px; justify-content: flex-end; }
 .fx .pd-filters .search { flex: 1 1 200px; }
 .fx .pd-who { display: flex; align-items: center; gap: 10px; }
-.fx .pd-who small { font-weight: 400; }
-.fx .pd-best { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.fx .pd-who > div { min-width: 0; }
+.fx .pd-who small { font-weight: 400; max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
+.fx .pd-who .pill-xs { margin-left: 8px; height: 20px; padding: 0 7px; font-size: 11px; vertical-align: 1px; }
+.fx .pd-week { display: flex; align-items: center; gap: 10px; }
+.fx .pd-dots { display: inline-flex; gap: 5px; }
+.fx .pd-dots i, .fx .pd-key i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; background: #E3E3E8; }
+.fx .d-posted { background: var(--good) !important; }
+.fx .d-missed { background: var(--bad) !important; }
+.fx .d-today { background: var(--accent) !important; }
+.fx .d-ahead { background: #E3E3E8; }
+.fx .d-blocked { background: #FFF; box-shadow: inset 0 0 0 2px var(--line-2); }
+.fx .pd-dots i.sj, .fx .pd-key i.sj { box-shadow: 0 0 0 1.5px #fff, 0 0 0 3px #8AB4E8; }
+.fx .pd-key { margin: 0; display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-3); }
+.fx .pd-key span { display: inline-flex; align-items: center; gap: 7px; }
+.fx .pd-open { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; text-decoration: none; color: var(--accent-ink); padding: 6px 10px; border-radius: 999px; }
+.fx .pd-open:hover { background: var(--accent-tint); }
+.fx .pd-open .i { width: 15px; height: 15px; }
 
-@media (max-width: 1200px) { .fx .pd-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 1000px) { .fx .pd-tiles, .fx .pd-two { grid-template-columns: minmax(0, 1fr); } .fx .pd-days { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-@media (max-width: 700px) { .fx .pd-card, .fx .pd-plan { padding: 16px; } .fx .pd-scroll { margin: 0 -16px; padding: 0 16px; } .fx .pd-big b { font-size: 28px; } }
+/* the detail most days don't need */
+.fx .pd-more { display: grid; gap: 10px; }
+.fx .pd-more details { padding: 0 24px; }
+.fx .pd-more summary { list-style: none; cursor: pointer; padding: 18px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fx .pd-more summary::-webkit-details-marker { display: none; }
+.fx .pd-more summary::after { content: ""; width: 9px; height: 9px; border-right: 2px solid var(--ink-3); border-bottom: 2px solid var(--ink-3); transform: rotate(45deg); transition: transform .2s; flex: none; margin-right: 4px; }
+.fx .pd-more details[open] summary::after { transform: rotate(225deg); }
+.fx .pd-more summary span { display: grid; gap: 2px; }
+.fx .pd-more summary b { font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+.fx .pd-more summary small { color: var(--ink-3); font-size: 13px; }
+.fx .pd-more details[open] { padding-bottom: 18px; }
+.fx .pd-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 24px; }
+.fx .pd-funnel { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-content: start; }
+.fx .pd-funnel li { background: var(--sunk); border-radius: var(--r-sm); padding: 12px 14px; display: grid; gap: 2px; }
+.fx .pd-funnel b { font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+.fx .pd-funnel span { font-size: 13px; color: var(--ink-2); }
+.fx .pd-funnel small { font-size: 12px; color: var(--ink-3); }
+.fx .pd-pipe { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
+.fx .pd-pipe > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.fx .pd-pipe dt { font-size: 13.5px; color: var(--ink-2); }
+.fx .pd-pipe dd { margin: 0; font-size: 15px; font-weight: 650; }
+
+@media (max-width: 1200px) { .fx .pd-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .fx .pd-cols, .fx .pd-two { grid-template-columns: minmax(0, 1fr); } .fx .pd-days { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 700px) {
+  .fx .pd-stats { grid-template-columns: minmax(0, 1fr); }
+  .fx .pd-card, .fx .pd-stat { padding: 16px; }
+  .fx .pd-more details { padding: 0 16px; }
+  .fx .pd-scroll { margin: 0 -16px; padding: 0 16px; }
+  .fx .pd-value b { font-size: 32px; }
+  .fx .pd-top h1 { font-size: 28px; }
+  .fx .pd-pipe, .fx .pd-funnel { grid-template-columns: minmax(0, 1fr); }
+}
