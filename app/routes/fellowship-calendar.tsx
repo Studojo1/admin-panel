@@ -315,6 +315,7 @@ function Desk(P: DeskProps) {
   const range = (w: string) => `${fmt(w)} to ${fmt(addDays(w, 6))}`;
   const byId = (id: number) => D.fellows.find((f) => f.id === id) ?? null;
   const live = D.fellows.filter((f) => f.status !== "removed");
+  const [everyone, setEveryone] = useState(false);
 
   // Act on the desk and take the fresh copy the server sends back.
   const act = useCallback(async (body: Record<string, unknown>, done?: string) => {
@@ -445,6 +446,7 @@ function Desk(P: DeskProps) {
           <div className="head-actions">
             <FellowshipProgramSwitch />
             <AdminTour page="fellowship-calendar" steps={TOUR} />
+            <button className="btn btn-line" type="button" onClick={() => setEveryone(true)}><Icon id="mail" />Email everyone</button>
             <button className="btn btn-line" type="button" onClick={() => setDrawer({ mode: "add-fellow" })}><Icon id="plus" />Add a fellow</button>
             <button className="btn btn-primary" type="button" data-tour="cal-review" onClick={() => setDrawer({ mode: "queue" })}><Icon id="pen" />Review posts{T.draftsWaiting + T.versionsWaiting ? ` (${T.draftsWaiting + T.versionsWaiting})` : ""}</button>
           </div>
@@ -618,6 +620,7 @@ function Desk(P: DeskProps) {
         </div>
       ) : null}
       {P.nudge && byId(P.nudge.id) ? <NudgeDialog f={byId(P.nudge.id)!} post={P.nudge.post} ask={P.nudge.ask} close={() => P.setNudge(null)} act={act} toast={toast} today={today} /> : null}
+      {everyone ? <EmailEveryoneDialog fellows={live} close={() => setEveryone(false)} reload={P.reload} toast={toast} /> : null}
     </main>
   );
 }
@@ -1473,6 +1476,134 @@ function NudgeDialog({ f, post, ask, close, act, toast, today }: { f: Fellow; po
           {!email ? <button className={`btn ${digits ? "btn-line" : "btn-primary"}`} type="button" onClick={async () => toast((await copyText(waText)) ? "Message copied. Paste it into WhatsApp." : "Select the message and copy it.")}><Icon id="copy" />Copy message</button> : null}
           {!email && !post && !ask ? <button className="btn btn-outline" type="button" onClick={async () => { const r = await act({ intent: "nudged", id: f.id }, `${f.first} marked as nudged today.`); if (r) close(); }}><Icon id="check" />Mark as nudged</button> : null}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// The founder, 21 Nov 2026: one email to every fellow in one click. Each fellow gets it on their own, with
+// {first} and {page} filled in, sent one after another through the same email as Nudge (kind "everyone"), so a
+// second click within two minutes can't send it twice and every send is logged. Fellows with no email saved are
+// shown and skipped. Paused fellows, and fellows with no post waiting on their page (so "your posts are ready"
+// would be wrong), start unticked; anyone can be ticked or unticked before it goes.
+const EVERYONE_SUBJECT = "Your fellowship posts this week";
+const EVERYONE_TEXT = "Hi {first},\n\nYour posts for this week are ready on your page. When one is due, tap Post on LinkedIn: it copies the post and opens LinkedIn for you, ready to paste. Then come back and tap I posted it.\n{page}\n\nIf anything on your page isn't working, just reply to this email.\n\nTeam Studojo";
+const EMAIL_OK = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+type EveryoneRun = { total: number; done: number; sent: string[]; failed: { name: string; why: string }[]; finished: boolean };
+
+function EmailEveryoneDialog({ fellows, close, reload, toast }: { fellows: Fellow[]; close: () => void; reload: () => Promise<void>; toast: (m: string) => void }) {
+  const [people] = useState(() => [...fellows].sort((a, b) => a.name.localeCompare(b.name)));
+  const hasEmail = (f: Fellow) => EMAIL_OK.test(f.email?.trim() ?? "");
+  const emailable = people.filter(hasEmail);
+  const waiting = (f: Fellow) => f.posts.filter((p) => p.status === "ready").length;
+  const [picked, setPicked] = useState<Set<number>>(() => new Set(emailable.filter((f) => f.status !== "paused" && waiting(f) > 0).map((f) => f.id)));
+  const [subject, setSubject] = useState(EVERYONE_SUBJECT);
+  const [text, setText] = useState(EVERYONE_TEXT);
+  const [run, setRun] = useState<EveryoneRun | null>(null);
+  const sending = !!run && !run.finished;
+  const fill = (t: string, f: Fellow) => t.split("{first}").join(f.first).split("{page}").join(f.link ?? "");
+  const chosen = emailable.filter((f) => picked.has(f.id));
+  const noPage = text.includes("{page}") ? chosen.filter((f) => !f.link) : [];
+  const ready = subject.trim().length > 0 && text.trim().length >= 20 && chosen.length > 0 && !noPage.length;
+  const toggle = (id: number) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const shut = () => { if (!sending) close(); };
+  const preview = chosen[0] ?? emailable[0] ?? null;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !sending) close(); };
+    document.addEventListener("keydown", onKey);
+    document.documentElement.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.documentElement.style.overflow = ""; };
+  }, [sending, close]);
+  // Closing the tab halfway would stop the rest going out.
+  useEffect(() => {
+    if (!sending) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [sending]);
+
+  const send = async () => {
+    if (sending || !ready) return;
+    const list = chosen.map((f) => ({ id: f.id, name: f.name, subject: fill(subject, f).trim(), text: fill(text, f) }));
+    const r: EveryoneRun = { total: list.length, done: 0, sent: [], failed: [], finished: false };
+    const show = () => setRun({ ...r, sent: [...r.sent], failed: [...r.failed] });
+    show();
+    for (const m of list) {
+      try {
+        await api<{ emailed: string }>("/api/fellowship-calendar", { intent: "email", id: m.id, kind: "everyone", subject: m.subject, text: m.text, quiet: true });
+        r.sent.push(m.name);
+      } catch (e) {
+        r.failed.push({ name: m.name, why: (e as Error).message });
+      }
+      r.done += 1;
+      show();
+    }
+    r.finished = true;
+    show();
+    toast(r.failed.length ? `Sent to ${r.sent.length} of ${r.total}. ${r.failed.length} didn't go.` : `Email sent to all ${plural(r.total, "fellow")}.`);
+    reload().catch(() => {});
+  };
+
+  return (
+    <div className="modal-wrap">
+      <div className="scrim" onClick={shut} />
+      <div className="modal ee" role="dialog" aria-modal="true" aria-labelledby="ee-title">
+        <button className="icon-btn x" type="button" aria-label="Close" onClick={shut} disabled={sending}><Icon id="x" /></button>
+        <h2 id="ee-title">Email everyone</h2>
+        {!run ? (
+          <>
+            <div className="ee-who">
+              <div className="ee-who-head">
+                <span>To <b>{chosen.length}</b> of {plural(people.length, "fellow")}</span>
+                <span><button className="btn-link" type="button" onClick={() => setPicked(new Set(emailable.map((f) => f.id)))}>All</button> · <button className="btn-link" type="button" onClick={() => setPicked(new Set())}>None</button></span>
+              </div>
+              <ul className="ee-list">
+                {people.map((f) => {
+                  const ok = hasEmail(f);
+                  return (
+                    <li key={f.id}>
+                      <label className={ok ? undefined : "off"}>
+                        <input type="checkbox" checked={ok && picked.has(f.id)} disabled={!ok} onChange={() => toggle(f.id)} />
+                        <span className="nm">{f.name}</span>
+                        <span className="em">{ok ? f.email : "No email saved"}{f.status === "paused" ? " · paused" : ""}{ok && !waiting(f) ? " · no posts" : ""}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+            <div className="mail">
+              <label className="mail-subj"><span>Subject</span><input value={subject} maxLength={150} onChange={(e) => setSubject(e.target.value)} /></label>
+              <label className="sr" htmlFor="ee-text">Message</label>
+              <textarea id="ee-text" rows={9} maxLength={3800} value={text} onChange={(e) => setText(e.target.value)} />
+            </div>
+            <p className="hint">Each fellow gets their own email: <b>{"{first}"}</b> becomes their first name and <b>{"{page}"}</b> the link to their page. It goes from Team Studojo, and replies come to info@studojo.com.</p>
+            {noPage.length ? <p className="hint ee-warn">{noPage.map((f) => f.first).join(", ")} {noPage.length === 1 ? "has" : "have"} no page link yet. Untick them, or take {"{page}"} out of the message.</p> : null}
+            {preview ? (
+              <details className="more ee-prev">
+                <summary>See what {preview.first} gets</summary>
+                <div className="ee-prev-box"><b>{fill(subject, preview)}</b><p>{fill(text, preview)}</p></div>
+              </details>
+            ) : null}
+            <div className="actions">
+              <button className="btn btn-primary" type="button" disabled={!ready} onClick={send}><Icon id="mail" />Send to {plural(chosen.length, "fellow")}</button>
+              <button className="btn btn-line" type="button" onClick={close}>Cancel</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="to" role="status" aria-live="polite">{run.finished
+              ? run.failed.length ? `Sent to ${run.sent.length} of ${run.total}.` : `Sent to all ${plural(run.total, "fellow")}.`
+              : `Sending ${Math.min(run.done + 1, run.total)} of ${run.total}. Keep this tab open until it's done.`}</p>
+            <div className="ee-bar" role="progressbar" aria-label="Emails sent" aria-valuemin={0} aria-valuemax={run.total} aria-valuenow={run.done}><span style={{ width: `${run.total ? (run.done / run.total) * 100 : 0}%` }} /></div>
+            {run.failed.length ? (
+              <div className="ee-failed"><b>Didn't go</b><ul>{run.failed.map((x) => <li key={x.name}>{x.name}: {x.why}</li>)}</ul></div>
+            ) : null}
+            {run.sent.length ? <details className="more"><summary>Sent to {plural(run.sent.length, "fellow")}</summary><p className="hint">{run.sent.join(", ")}</p></details> : null}
+            <div className="actions"><button className="btn btn-primary" type="button" disabled={sending} onClick={close}>{sending ? "Sending…" : "Done"}</button></div>
+          </>
+        )}
       </div>
     </div>
   );

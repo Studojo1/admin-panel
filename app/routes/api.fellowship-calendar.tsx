@@ -29,8 +29,8 @@ import {
 // reported directly, approve a fellow's own version of a post or keep the original,
 // change what photo fits a post or remove one of its photos,
 // the notes and lessons Claude reads, and an email to a fellow (a nudge,
-// or a request for stories or a post's numbers). Every POST answers
-// with the fresh desk. Adding fellows and hand-written posts go through
+// a request for stories or a post's numbers, or one email to everyone). Every POST answers
+// with the fresh desk, except an email sent with quiet: true. Adding fellows and hand-written posts go through
 // /api/ugc-creators.
 
 const unauthorized = () => Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -77,5 +77,7 @@ export async function action({ request }: Route.ActionArgs) {
     if (isRefused(e)) return Response.json({ error: e.message }, { status: e.status });
     throw e;
   }
+  // "Email everyone" sends one email per fellow, one after another: it doesn't need the whole desk back each time.
+  if (body.quiet === true && body.intent === "email") return Response.json(extra);
   return Response.json({ ...(await calendarView()), ...extra });
 }

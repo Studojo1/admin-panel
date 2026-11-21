@@ -700,8 +700,11 @@ export async function markNudged(fellowId: number) {
 // in one click instead of a WhatsApp message the team copies. The team reads and can edit it first. It goes
 // from the admin's Gmail (gmail-direct.server.ts) as "Team Studojo", and replies come to info@studojo.com,
 // where the team already writes to fellows from. Every send is kept in ugc_creator_emails.
-export type EmailKind = "nudge" | "stories" | "numbers";
-const EMAIL_KINDS: EmailKind[] = ["nudge", "stories", "numbers"];
+// The founder, 21 Nov 2026: one email to every fellow in one click ("Email everyone" on the calendar). The page
+// sends it to each fellow on their own, with their name and page link filled in, as kind "everyone", so the
+// two-minute double-click guard and the log work the same as for a nudge.
+export type EmailKind = "nudge" | "stories" | "numbers" | "everyone";
+const EMAIL_KINDS: EmailKind[] = ["nudge", "stories", "numbers", "everyone"];
 const EMAIL_REPLY_TO = "info@studojo.com";
 const EMAIL_SUBJECT_MAX = 160;
 const EMAIL_TEXT_MAX = 4000;

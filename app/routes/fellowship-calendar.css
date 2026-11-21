@@ -346,6 +346,27 @@
 .fx .mail-subj input { flex: 1; min-width: 0; border: 0; background: transparent; font: 600 14.5px/1.3 var(--sans); color: var(--ink); padding: 0; }
 .fx .mail textarea { display: block; width: 100%; border: 0; background: transparent; resize: vertical; font: 14.5px/1.5 var(--sans); color: var(--ink); padding: 12px; min-height: 200px; }
 .fx .mail input:focus, .fx .mail textarea:focus { outline: none; }
+/* Email everyone */
+.fx .modal.ee { width: min(560px, 100%); }
+.fx .ee-who { border: 1px solid var(--line-2); border-radius: var(--r); overflow: hidden; }
+.fx .ee-who-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13.5px; color: var(--ink-2); }
+.fx .ee-who-head b { color: var(--ink); }
+.fx .ee-list { list-style: none; margin: 0; padding: 4px 0; max-height: 210px; overflow-y: auto; }
+.fx .ee-list label { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.5fr); align-items: center; gap: 10px; padding: 6px 12px; font-size: 13.5px; cursor: pointer; }
+.fx .ee-list label:hover { background: var(--accent-tint); }
+.fx .ee-list label.off { cursor: default; color: var(--ink-3); }
+.fx .ee-list label.off:hover { background: none; }
+.fx .ee-list input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+.fx .ee-list .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx .ee-list .em { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 520px) { .fx .ee-list label { grid-template-columns: auto minmax(0, 1fr); } .fx .ee-list .em { grid-column: 2; } .fx .ee-list input { width: 20px; height: 20px; } }
+.fx .ee-warn { color: var(--warn); background: var(--warn-tint); border-radius: var(--r-sm); padding: 8px 10px; }
+.fx .ee-prev-box { margin-top: 8px; border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 12px; font-size: 13.5px; }
+.fx .ee-prev-box p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
+.fx .ee-bar { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.fx .ee-bar span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .2s; }
+.fx .ee-failed { background: var(--bad-tint); color: var(--bad); border-radius: var(--r-sm); padding: 10px 12px; font-size: 13.5px; }
+.fx .ee-failed ul { margin: 6px 0 0; padding-left: 18px; }
 
 /* ---------- applicants ---------- */
 
