@@ -90,6 +90,11 @@ export interface Fellow {
   learnings: string; teamNotes: string; nudgedAt: string | null;
   /** Their own posting plan, when the team set one (the founder, 15 Nov 2026); null means the programme's rule. */
   plan: FellowPlan | null;
+  /**
+   * A friend of the team, not a fellow (24 Nov 2026): personal posts only, no reminders or nudges, not held to
+   * the programme's rules and not counted in its numbers. Their drafts are reviewed like anyone's.
+   */
+  friend: boolean;
   /** Admin-only: taken on as a Growth intern / referred to someone hiring (set on the applicant profile). */
   internAt: string | null; referredAt: string | null;
 }
@@ -101,9 +106,14 @@ export const planOf = (v: unknown): FellowPlan | null => {
   if (!Number.isInteger(posts) || posts < 1 || posts > 7 || !Number.isInteger(studojo) || studojo < 0 || studojo > posts) return null;
   return { postsPerWeek: posts, studojoPerWeek: studojo };
 };
-/** The programme's rules with this fellow's own plan on top. */
-export const rulesFor = <R extends { postsPerWeek: number }>(f: { plan: FellowPlan | null }, rules: R): R =>
-  f.plan ? { ...rules, postsPerWeek: f.plan.postsPerWeek, studojoPerWeek: f.plan.studojoPerWeek } : rules;
+/** The programme's rules with this fellow's own plan on top. A friend never gets Studojo posts, whatever the plan says. */
+export const rulesFor = <R extends { postsPerWeek: number }>(f: { plan: FellowPlan | null; friend?: boolean }, rules: R): R => {
+  const own = f.plan ? { ...rules, postsPerWeek: f.plan.postsPerWeek, studojoPerWeek: f.plan.studojoPerWeek } : rules;
+  return f.friend ? { ...own, studojoPerWeek: 0 } : own;
+};
+/** What Claude and the team are told about a friend (Fellow.friend). */
+export const FRIEND_NOTE = "A fellow marked friend isn't in the programme: personal posts only (no Studojo), no reminders, not counted in programme numbers. Write for them like a fellow otherwise.";
+const friendOnly = (name: string) => `${name} is a friend, not a fellow: personal posts only.`;
 export interface PostInput { title?: unknown; body?: unknown; kind?: unknown; due?: unknown; angle?: unknown; photoIdea?: unknown }
 
 // Timestamps arrive as text from this app's db ("2026-10-29 08:47:00.12+00") or as Date objects; send ISO either way.
@@ -140,6 +150,7 @@ function toFellow(r: Record<string, unknown>): Fellow {
     linkedin: (r.linkedin_url as string) ?? null, joined: String(r.joined_day ?? ""),
     connectionsAtJoin: r.connections_at_join == null ? null : Number(r.connections_at_join),
     learnings: String(r.learnings ?? ""), teamNotes: String(r.team_notes ?? ""), nudgedAt: iso(r.nudged_at), plan: planOf(r.plan),
+    friend: r.friend === true || r.friend === "t" || r.friend === "true",
     internAt: iso(r.intern_at), referredAt: iso(r.referred_at),
   };
 }
@@ -165,7 +176,7 @@ function toDraft(r: Record<string, unknown>): Draft {
 }
 
 const FELLOW_COLS = sql`id, application_id, slug, full_name, email, whatsapp, linkedin_url, college, field, cohort, status,
-  connections_at_join, to_char(joined_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS joined_day, learnings, team_notes, nudged_at, plan, intern_at, referred_at`;
+  connections_at_join, to_char(joined_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS joined_day, learnings, team_notes, nudged_at, plan, friend, intern_at, referred_at`;
 const POST_COLS = sql`id, creator_id, title, body, kind, to_char(due_date, 'YYYY-MM-DD') AS due, status, copied_at, own_line, posted_at,
   post_url, impressions, reactions, comments, screenshot_url, metrics_at, review, insight, insight_at, created_at, created_by,
   photo_idea, photo_url, photo_help_at, analytics_url, analytics, rewrite_body, rewrite_at, rewrite_reply`;
@@ -310,7 +321,7 @@ export function overlap(a: Set<string>, b: Set<string>): number {
 
 export interface CheckContext {
   today: string;
-  fellow: { id: number; name: string };
+  fellow: { id: number; name: string; friend?: boolean };
   /** This fellow's posts and drafts (for one-a-day and the week's mix) and earlier posts (for repeats). */
   own: { id: string; due?: string; kind?: string; title: string; body: string }[];
   /** Other fellows' posts and drafts from the last 60 days. */
@@ -328,7 +339,8 @@ export function weekMix(rules: { postsPerWeek: number }): WeekMix {
   const studojo = studojoPerWeek(rules) ?? 2;
   return { studojo, personal: Math.max(0, rules.postsPerWeek - studojo) };
 }
-const weekRule = (rules: { postsPerWeek: number }) => `${mixLine(weekMix(rules))} A batch must leave each week that hasn't started at exactly that, so write a fellow's whole week at once.`;
+const weekRule = (rules: { postsPerWeek: number }, friend = false) =>
+  `${friend ? "This is a friend of the team, not a fellow: personal posts only, never a Studojo post. " : ""}${mixLine(weekMix(rules))} A batch must leave each week that hasn't started at exactly that, so write a fellow's whole week at once.`;
 const mixLine = (m: WeekMix) => `Every week (Wednesday to Tuesday) has exactly ${m.studojo === 0 ? `${m.personal} personal ${m.personal === 1 ? "post" : "posts"} and no Studojo posts` : `${m.studojo} Studojo and ${m.personal} personal posts`}.`;
 
 /**
@@ -361,6 +373,7 @@ export function problemWith(x: { title: string; body: string; kind: string; due:
   if (x.body.length < (o.strict ? 80 : 20)) return `${name}: the post text is missing or too short.`;
   if (x.body.length > POST_MAX) return `${name} is ${x.body.length} characters. LinkedIn allows ${POST_MAX}.`;
   if (x.kind !== "studojo" && x.kind !== "personal") return `${name}: the type must be "studojo" or "personal".`;
+  if (x.kind === "studojo" && ctx.fellow.friend) return friendOnly(ctx.fellow.name);
   // The partnership line on Studojo posts is optional (the team's decision, 4 Nov 2026).
   if (!isDay(x.due)) return `${name}: the due date must be a date like 2026-11-03.`;
   if (!o.allowPast && x.due < ctx.today) return `${name}: ${x.due} has already passed.`;
@@ -414,7 +427,7 @@ async function checkContext(fellowId: number, ex: Exec): Promise<CheckContext | 
       WHERE d.creator_id <> ${fellowId} AND d.created_at >= ${since}::date
   `)).rows as { owner: string; title: string; body: string }[];
   const otherNames = ((await ex.execute(sql`SELECT full_name FROM ugc_creators WHERE id <> ${fellowId}`)).rows as { full_name: string }[]).map((r) => r.full_name);
-  return { today: istDate(), fellow: { id: f.id, name: f.name }, own, others, otherNames, mix: weekMix(rulesFor(f, await programmeRules(ex))) };
+  return { today: istDate(), fellow: { id: f.id, name: f.name, friend: f.friend }, own, others, otherNames, mix: weekMix(rulesFor(f, await programmeRules(ex))) };
 }
 
 function readInput(x: PostInput) {
@@ -758,6 +771,9 @@ export async function setNotes(fellowId: number, b: { teamNotes?: unknown; learn
   if (b.learnings != null) await db.execute(sql`UPDATE ugc_creators SET learnings = ${str(b.learnings, 6000)} WHERE id = ${fellowId}`);
 }
 export async function markNudged(fellowId: number) {
+  await ensureCreatorTables();
+  const r = (await db.execute(sql`SELECT full_name, friend FROM ugc_creators WHERE id = ${fellowId}`)).rows[0] as { full_name: string; friend: unknown } | undefined;
+  if (r && (r.friend === true || r.friend === "t")) throw new Refused(`${firstName(String(r.full_name))} is a friend, not a fellow: they get no nudges.`, 409);
   await db.execute(sql`UPDATE ugc_creators SET nudged_at = NOW() WHERE id = ${fellowId}`);
 }
 
@@ -792,6 +808,8 @@ export async function emailFellow(fellowId: number, b: { kind?: unknown; subject
   const { logId, to, first } = await forFellow(fellowId, async (tx) => {
     const f = await fellow(fellowId, tx);
     if (!f || f.status === "removed") throw new Refused("No fellow with that id.", 404);
+    // A friend of the team isn't in the programme: no nudges, and no chasing for stories or numbers.
+    if (f.friend) throw new Refused(`${f.first} is a friend, not a fellow: no reminders or requests go to them from the desk.`, 409);
     const to = (f.email ?? "").trim();
     if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(to)) throw new Refused(`${f.first} has no email address saved.`);
     if (postId !== null && (await postOwner(postId)) !== fellowId) throw new Refused("That post isn't theirs.");
@@ -910,28 +928,32 @@ export async function calendarView() {
   for (const d of drafts) { if (!draftsBy.has(d.creatorId)) draftsBy.set(d.creatorId, []); draftsBy.get(d.creatorId)!.push(d); }
   for (const s of stories) storiesBy.set(s.creatorId, (storiesBy.get(s.creatorId) ?? 0) + 1);
   const all = posts;
-  const live = fs.filter((f) => f.status !== "removed");
-  const studojoImpressions = posts.filter((p) => isPosted(p) && p.kind === "studojo").reduce((s, p) => s + imp(p), 0);
+  // Friends of the team aren't in the programme: their posts and stories stay out of its numbers. Review work
+  // (drafts waiting, sent back, fellows' own versions) still counts everyone's.
+  const friends = new Set(fs.filter((f) => f.friend).map((f) => f.id));
+  const prog = posts.filter((p) => !friends.has(p.creatorId));
+  const live = fs.filter((f) => f.status !== "removed" && !f.friend);
+  const studojoImpressions = prog.filter((p) => isPosted(p) && p.kind === "studojo").reduce((s, p) => s + imp(p), 0);
 
   // Impressions credited to the week each post went up, for the last six weeks (India time).
   const thisWeek = weekOf(today);
   const weekly = Array.from({ length: 6 }, (_, i) => addDays(thisWeek, -7 * (5 - i))).map((w) => ({
-    week: w, impressions: posts.filter((p) => isPosted(p) && p.kind === "studojo" && p.postedAt && weekOf(istDate(p.postedAt)) === w).reduce((s, p) => s + imp(p), 0), partial: w === thisWeek,
+    week: w, impressions: prog.filter((p) => isPosted(p) && p.kind === "studojo" && p.postedAt && weekOf(istDate(p.postedAt)) === w).reduce((s, p) => s + imp(p), 0), partial: w === thisWeek,
   }));
   // Week 1 is the week the first approved posts were due (the founder, 5 Nov 2026: the fellowship's clock
   // starts when posts start going out), or the first join while there are none yet.
-  const firstDue = posts.map((p) => p.due).filter(Boolean).sort()[0];
+  const firstDue = prog.map((p) => p.due).filter(Boolean).sort()[0];
   const firstJoin = live.map((f) => f.joined).filter(Boolean).sort()[0] ?? today;
 
   return {
     today, thisWeek, rules, playbook: pb, programmeStart: weekOf(firstDue ?? firstJoin),
     totals: {
-      impressions: posts.filter(isPosted).reduce((s, p) => s + imp(p), 0), studojoImpressions,
-      measuredPosts: posts.filter(measured).length,
-      avgPerPost: (() => { const m = posts.filter(measured); return m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0; })(),
+      impressions: prog.filter(isPosted).reduce((s, p) => s + imp(p), 0), studojoImpressions,
+      measuredPosts: prog.filter(measured).length,
+      avgPerPost: (() => { const m = prog.filter(measured); return m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0; })(),
       // The goal is impressions on Studojo posts (the founder, 15 Nov 2026: 1M by 30 Nov; the rest don't count).
-      avgPerStudojoPost: (() => { const m = posts.filter((p) => measured(p) && p.kind === "studojo"); return m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0; })(),
-      storiesCollected: stories.length,
+      avgPerStudojoPost: (() => { const m = prog.filter((p) => measured(p) && p.kind === "studojo"); return m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0; })(),
+      storiesCollected: stories.filter((s) => !friends.has(s.creatorId)).length,
       draftsWaiting: drafts.filter((d) => d.status === "review").length,
       draftsSentBack: drafts.filter((d) => d.status === "changes").length,
       versionsWaiting: posts.filter((p) => p.status === "ready" && p.fellowVersion).length,
@@ -947,7 +969,8 @@ export async function calendarView() {
         earlierPosts: earlier.get(f.id) ?? 0,
         standing: (() => {
           const st = standing(ps, today, rulesFor(f, rules).postsPerWeek), other = pageActivity.get(f.id) ?? null;
-          return { ...st, lastActivity: [st.lastActivity, other].filter((t): t is string => !!t).sort().pop() ?? null };
+          // A friend isn't held to the programme's weeks, so they're never "at risk".
+          return { ...st, atRisk: f.friend ? false : st.atRisk, lastActivity: [st.lastActivity, other].filter((t): t is string => !!t).sort().pop() ?? null };
         })(),
         linkedinFile: files.get(f.id) ?? null,
         emailed: { nudge: emailed.get(`nudge:${f.id}`) ?? null, stories: emailed.get(`stories:${f.id}`) ?? null },
@@ -970,7 +993,9 @@ export async function programmeDashboard() {
   try {
     apps = Object.fromEntries(((await db.execute(sql`SELECT status, COUNT(*)::int AS n FROM ugc_applications GROUP BY status`)).rows as { status: string; n: number }[]).map((r) => [r.status, Number(r.n)]));
   } catch { /* no applications table yet */ }
-  const live = cal.fellows.filter((f) => f.status !== "removed");
+  // Friends of the team aren't in the programme: none of its numbers count them. Review work still does.
+  const everyone = cal.fellows.filter((f) => f.status !== "removed");
+  const live = everyone.filter((f) => !f.friend);
   const posts = live.flatMap((f) => f.posts);
   const postedOn = (p: Post) => (p.postedAt ? istDate(p.postedAt) : null);
   const postingBy = (end: string) => new Set(posts.filter((p) => isPosted(p) && postedOn(p) && postedOn(p)! > addDays(end, -7) && postedOn(p)! <= end).map((p) => p.creatorId)).size;
@@ -998,7 +1023,7 @@ export async function programmeDashboard() {
     const up = posts.filter((p) => isPosted(p) && p.kind === k), m = up.filter(measured);
     return { kind: k, posted: up.length, impressions: up.reduce((s, p) => s + imp(p), 0), avg: m.length ? Math.round(m.reduce((s, p) => s + imp(p), 0) / m.length) : 0 };
   });
-  const drafts = live.flatMap((f) => f.drafts);
+  const drafts = everyone.flatMap((f) => f.drafts);
   // Posts this week against the target (every active fellow's weekly posts), and day by day.
   const weekPosts = posts.filter((p) => weekOf(p.due) === thisWeek && p.status !== "blocked");
   const daily = Array.from({ length: 7 }, (_, i) => addDays(thisWeek, i)).map((d) => ({
@@ -1042,7 +1067,7 @@ export async function programmeDashboard() {
       // Approved posts the fellow can't put up yet because they have no photo, and those where they asked the team for one.
       needPhoto: posts.filter((p) => p.status === "ready" && !p.photos.length).length,
       askedForPhoto: posts.filter((p) => p.status === "ready" && !p.photos.length && p.photoHelpAt).length,
-      fellowVersions: posts.filter((p) => p.status === "ready" && p.fellowVersion).length,
+      fellowVersions: everyone.flatMap((f) => f.posts).filter((p) => p.status === "ready" && p.fellowVersion).length,
       measured: posts.filter(measured).length,
       // Marked posted without a link to the post: its numbers can't come in from the fellow's LinkedIn file.
       noLink: posts.filter((p) => isPosted(p) && !p.url).length,
@@ -1054,7 +1079,7 @@ export async function programmeDashboard() {
       return { fresh: fresh.length, active: live.filter((f) => f.status === "active").length, impressions: fresh.reduce((n, f) => n + (f.linkedinFile?.impressions ?? 0), 0) };
     })(),
     weekly, kinds,
-    fellows: cal.fellows.map((f) => {
+    fellows: cal.fellows.filter((f) => !f.friend).map((f) => {
       const up = f.posts.filter(isPosted), m = up.filter(measured);
       const best = m.length ? m.reduce((a, b) => (imp(b) > imp(a) ? b : a)) : null;
       return {
@@ -1144,12 +1169,14 @@ export async function agentRoster() {
     programme: {
       postingDays: rules.postingDays, postsPerWeek: rules.postsPerWeek, studojoPerWeek: studojoPerWeek(rules), eachWeek: weekRule(rules),
       ownPlans: "A fellow with a plan below has their own weekly numbers instead of these. Their plan's eachWeek is the rule for them.",
+      friends: FRIEND_NOTE,
     },
     fellows: fs.filter((f) => f.status !== "removed").map((f) => {
       const ps = posts.filter((p) => p.creatorId === f.id), ds = drafts.filter((d) => d.creatorId === f.id);
       return {
         id: f.id, name: f.name, college: f.college, field: f.field, cohort: f.cohort, paused: f.status === "paused", joined: f.joined,
-        plan: f.plan ? { ...f.plan, eachWeek: weekRule(rulesFor(f, rules)) } : null,
+        plan: f.plan ? { ...f.plan, studojoPerWeek: studojoPerWeek(rulesFor(f, rules)) ?? 0, eachWeek: weekRule(rulesFor(f, rules), f.friend) } : null,
+        ...(f.friend ? { friend: true, eachWeek: weekRule(rulesFor(f, rules), true) } : {}),
         waitingForReview: ds.filter((d) => d.status === "review").length, sentBack: ds.filter((d) => d.status === "changes").length,
         approvedNotUpYet: ps.filter((p) => p.status === "ready").length, posted: ps.filter(isPosted).length,
         takenDays: [...ps.map((p) => p.due), ...ds.map((d) => d.due)].filter((d) => d >= today).sort(),
@@ -1295,6 +1322,7 @@ export async function agentFellow(id: number) {
       "Every draft needs photoIdea: one sentence on which of the fellow's own photos to post with it, written to them (\"A photo of you at your desk\"), since they read it on their page. Suggest a photo they very likely already have on their phone. No post goes up without a photo; if they have none, their page offers a free photo.",
       "A post's fellowRewrote is the fellow rewriting it in their own words, and what the team approved: write their next posts closer to how they write. fellowVersionWaitingForTeam is one the team hasn't decided yet.",
       "A story's readBack is their page's quick read of one talk (covers lists the saved parts it read): usable is what can become a post, leaveOut is what to skip. answers names the story a follow-up answer belongs to. What they said wins over the readBack.",
+      ...(f.friend ? [`${f.name} is a friend of the team, not a fellow. ${FRIEND_NOTE} The admin panel refuses a Studojo post for them.`] : []),
     ],
     fellow: { id: f.id, name: f.name, firstName: f.first, college: f.college, field: f.field, cohort: f.cohort, paused: f.status === "paused", linkedin: f.linkedin, joined: f.joined, connectionsAtJoin: f.connectionsAtJoin },
     application,
@@ -1328,7 +1356,8 @@ export async function agentFellow(id: number) {
     drafts: ds.map(agentDraft),
     takenDays: [...own.map((p) => p.due), ...ds.map((d) => d.due)].filter((d) => d >= today).sort(),
     programme: {
-      postingDays: rules.postingDays, postsPerWeek: rulesFor(f, rules).postsPerWeek, studojoPerWeek: studojoPerWeek(rulesFor(f, rules)), eachWeek: weekRule(rulesFor(f, rules)),
+      postingDays: rules.postingDays, postsPerWeek: rulesFor(f, rules).postsPerWeek, studojoPerWeek: studojoPerWeek(rulesFor(f, rules)), eachWeek: weekRule(rulesFor(f, rules), f.friend),
+      ...(f.friend ? { friend: `${f.name} is a friend of the team, not a fellow: personal posts only, no Studojo posts. Not counted in the programme's numbers.` } : {}),
       ownPlan: f.plan ? "These numbers are this fellow's own plan, set by the team; they replace the programme's." : null,
       postsWithNumbers: all.filter(measured).length, usualImpressions: usual(), usualStudojoPost: usual("studojo"), usualPersonalPost: usual("personal"),
     },

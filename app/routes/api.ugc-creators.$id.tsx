@@ -89,14 +89,18 @@ export async function action({ request, params }: Route.ActionArgs) {
   await ensureCreatorTables();
   const id = parseId(params.id);
   if (!id) return Response.json({ error: "Invalid id" }, { status: 400 });
-  const exists = (await db.execute(sql`SELECT 1 FROM ugc_creators WHERE id = ${id}`)).rows.length > 0;
-  if (!exists) return Response.json({ error: "Creator not found" }, { status: 404 });
+  const who = (await db.execute(sql`SELECT full_name, friend FROM ugc_creators WHERE id = ${id}`)).rows[0] as { full_name: string; friend: unknown } | undefined;
+  if (!who) return Response.json({ error: "Creator not found" }, { status: 404 });
+  // A friend of the team, not a fellow, gets personal posts only.
+  const friend = who.friend === true || who.friend === "t";
+  const friendOnly = () => Response.json({ error: `${who.full_name} is a friend, not a fellow: personal posts only.` }, { status: 400 });
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") return Response.json({ error: "Invalid JSON" }, { status: 400 });
 
   if (body.intent === "add-post") {
     const f = postFields(body);
     if ("error" in f) return Response.json({ error: f.error }, { status: 400 });
+    if (friend && f.kind === "studojo") return friendOnly();
     await db.execute(sql`
       INSERT INTO ugc_creator_posts (creator_id, title, body, kind, due_date, created_by)
       VALUES (${id}, ${f.title}, ${f.body}, ${f.kind}, ${f.dueDate}::date, ${admin.email})
@@ -116,6 +120,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     } else {
       const f = postFields(body);
       if ("error" in f) return Response.json({ error: f.error }, { status: 400 });
+      if (friend && f.kind === "studojo") return friendOnly();
       await db.execute(sql`
         UPDATE ugc_creator_posts
         SET title = ${f.title}, body = ${f.body}, kind = ${f.kind}, due_date = ${f.dueDate}::date, updated_at = NOW()

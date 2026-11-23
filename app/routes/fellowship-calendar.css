@@ -104,6 +104,7 @@
 .fx .pill-new { color: var(--accent-ink); background: var(--accent-tint); }
 .fx .pill-short { color: var(--good); background: var(--good-tint); }
 .fx .pill-meet { color: #0D5E7A; background: #DDF1F8; }
+.fx .pill-friend { color: #6A3D9A; background: #F1E9FA; }
 .fx .pill-rej { color: var(--ink-3); background: #EDEDF0; }
 .fx .dotc { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 

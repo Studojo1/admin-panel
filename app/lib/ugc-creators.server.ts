@@ -128,6 +128,10 @@ async function createTables() {
   // A fellow's own weekly plan ({postsPerWeek, studojoPerWeek}) in place of the programme's, when the team sets
   // one (the founder, 15 Nov 2026: fewer posts for a fellow who doesn't want promotional ones). NULL = the programme's.
   await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS plan JSONB`);
+  // A friend of the team, not a fellow (24 Nov 2026): someone the team writes LinkedIn posts for from what they
+  // tell us. Personal posts only (never a Studojo post), no reminders or nudges, not held to the programme's rules
+  // and not counted in its numbers. Their drafts are reviewed and approved like anyone's. Set on their desk.
+  await db.execute(sql`ALTER TABLE ugc_creators ADD COLUMN IF NOT EXISTS friend BOOLEAN NOT NULL DEFAULT false`);
   // What a fellow went on to, marked by the team on their applicant profile:
   // the growth internship at Studojo, or a referral to someone hiring in our
   // network. These fill the last two stages of the applicants' pipeline.

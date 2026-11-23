@@ -53,6 +53,8 @@ interface Fellow {
   learnings: string; teamNotes: string; nudgedAt: string | null; internAt: string | null; referredAt: string | null; stories: number; earlierPosts: number; standing: Standing; posts: Post[]; drafts: Draft[];
   /** Their own weekly plan (posts a week, and how many are Studojo posts), or null for the programme's rule. */
   plan: { postsPerWeek: number; studojoPerWeek: number } | null;
+  /** A friend of the team, not a fellow: personal posts only, no reminders, not in the programme's numbers. */
+  friend: boolean;
   /** When the team last emailed them a nudge or a request for stories, from the desk. */
   emailed: { nudge: string | null; stories: string | null };
 }
@@ -186,10 +188,11 @@ const SLOT: Record<string, Slot> = {
   version: { key: "review", label: "Their version to approve", icon: "pen" },
 };
 const LEGEND = ["review", "back", "photo", "ready", "copied", "posted", "numbers", "missed", "blocked", "paused"];
-function postSlot(p: Post, today: string, paused: boolean): Slot {
+function postSlot(p: Post, today: string, paused: boolean, friend = false): Slot {
   if (p.status === "blocked") return SLOT.blocked;
   if (p.status === "posted") return p.impressions != null ? SLOT.numbers : SLOT.posted;
-  if (p.due < today) return SLOT.missed;
+  // A friend isn't held to the programme's days: a late post is just not up yet.
+  if (p.due < today && !friend) return SLOT.missed;
   if (paused) return SLOT.paused;
   // The fellow rewrote it: locked on their page until the team decides.
   if (p.fellowVersion) return SLOT.version;
@@ -200,6 +203,8 @@ function postSlot(p: Post, today: string, paused: boolean): Slot {
 const draftSlot = (d: Draft) => (d.status === "changes" ? SLOT.back : SLOT.review);
 function fellowState(f: Fellow): [string, string, string] {
   if (f.status === "paused") return ["paused", "Paused", "pill-paused"];
+  // A friend of the team isn't held to the programme's rules, so never "at risk" or "hasn't posted".
+  if (f.friend) return ["friend", "Friend, not a fellow", "pill-friend"];
   if (f.standing.atRisk) return ["at risk", "At risk", "pill-risk"];
   if (!f.posts.length && !f.drafts.length) return ["new", "New", "pill-new"];
   // Posts on their page, and none ever marked posted: not "active" (21 Nov 2026).
@@ -210,6 +215,8 @@ const StatePill = ({ f }: { f: Fellow }) => {
   const [k, label, cls] = fellowState(f);
   return <span className={`pill ${cls}`}>{k === "at risk" ? <Icon id="alert" /> : k === "paused" ? <Icon id="pause" /> : <span className="dotc" />}{label}</span>;
 };
+/** Always shown on a friend's desk, even while paused (when the state pill says Paused). */
+const FriendBadge = ({ f }: { f: Fellow }) => (f.friend && f.status === "paused" ? <span className="pill pill-friend" style={{ marginLeft: 6 }}><span className="dotc" />Friend, not a fellow</span> : null);
 const VERDICT: Record<string, [string, string]> = { good: ["Good", "v-good"], okay: ["Okay", "v-okay"], bad: ["Bad", "v-bad"], ugly: ["Ugly", "v-ugly"] };
 const VerdictPill = ({ v }: { v: Verdict | null }) => {
   if (!v) return null;
@@ -317,6 +324,9 @@ function Desk(P: DeskProps) {
   const range = (w: string) => `${fmt(w)} to ${fmt(addDays(w, 6))}`;
   const byId = (id: number) => D.fellows.find((f) => f.id === id) ?? null;
   const live = D.fellows.filter((f) => f.status !== "removed");
+  // Friends of the team (not fellows) stay on the calendar for review, but out of the programme's numbers and reminders.
+  const prog = live.filter((f) => !f.friend);
+  const friendCount = live.length - prog.length;
 
   // Act on the desk and take the fresh copy the server sends back.
   const act = useCallback(async (body: Record<string, unknown>, done?: string) => {
@@ -361,11 +371,11 @@ function Desk(P: DeskProps) {
   const perWeek = Math.round(Math.max(0, G.impressions - got) / weeksLeft / 1000) * 1000;
   const fullWeeks = D.weekly.filter((w) => !w.partial);
   const lastFull = fullWeeks[fullWeeks.length - 1];
-  const dueThisWeek = live.reduce((s, f) => s + f.standing.thisWeek.due, 0);
-  const postedThisWeek = live.reduce((s, f) => s + f.standing.thisWeek.posted, 0);
-  const activeThisWeek = live.filter((f) => f.standing.thisWeek.posted > 0).length;
-  const atRisk = live.filter((f) => f.status !== "paused" && f.standing.atRisk).length;
-  const numbersAwaiting = live.reduce((s, f) => s + f.standing.awaitingNumbers, 0);
+  const dueThisWeek = prog.reduce((s, f) => s + f.standing.thisWeek.due, 0);
+  const postedThisWeek = prog.reduce((s, f) => s + f.standing.thisWeek.posted, 0);
+  const activeThisWeek = prog.filter((f) => f.standing.thisWeek.posted > 0).length;
+  const atRisk = prog.filter((f) => f.status !== "paused" && f.standing.atRisk).length;
+  const numbersAwaiting = prog.reduce((s, f) => s + f.standing.awaitingNumbers, 0);
 
   // ------------------------------------------------ needs attention
   const reviewList = live.filter((f) => f.drafts.some((d) => d.status === "review")).sort((a, b) => a.drafts[0].due.localeCompare(b.drafts[0].due));
@@ -376,15 +386,15 @@ function Desk(P: DeskProps) {
     else if (s.lastWeek.due - s.lastWeek.posted >= 2) r.push(`missed ${s.lastWeek.due - s.lastWeek.posted} of ${s.lastWeek.due} last week`);
     return r;
   };
-  const nudgeList = live.filter((f) => f.status !== "paused" && nudgeReason(f).length)
+  const nudgeList = prog.filter((f) => f.status !== "paused" && nudgeReason(f).length)
     .sort((a, b) => nudgeReason(b).length - nudgeReason(a).length || a.name.localeCompare(b.name));
-  const numbersList = live.flatMap((f) => f.posts.filter((p) => p.status === "posted" && p.impressions == null && p.postedAt && Date.parse(p.postedAt) < Date.now() - 7 * 86400000).map((p) => ({ f, p })))
+  const numbersList = prog.flatMap((f) => f.posts.filter((p) => p.status === "posted" && p.impressions == null && p.postedAt && Date.parse(p.postedAt) < Date.now() - 7 * 86400000).map((p) => ({ f, p })))
     .sort((a, b) => String(a.p.postedAt).localeCompare(String(b.p.postedAt)));
   const storyList = D.stories.filter((s) => byId(s.creatorId));
   // Approved posts the team took back: the fellow sees a warning until someone fixes and releases them.
   const blockedList = live.flatMap((f) => f.posts.filter((p) => p.status === "blocked").map((p) => ({ f, p }))).sort((a, b) => a.p.due.localeCompare(b.p.due));
   // Posts are written from what fellows tell us: ask anyone with little shared so far.
-  const askList = live.filter((f) => f.status === "active" && f.stories < 3).sort((a, b) => a.stories - b.stories || a.name.localeCompare(b.name));
+  const askList = prog.filter((f) => f.status === "active" && f.stories < 3).sort((a, b) => a.stories - b.stories || a.name.localeCompare(b.name));
   const nudgedToday = (f: Fellow) => !!f.nudgedAt && istDay(f.nudgedAt) === today;
 
   // ------------------------------------------------ calendar rows
@@ -398,7 +408,7 @@ function Desk(P: DeskProps) {
   // Days drawn full width: the posting days, plus any other day with a post this week (launch week's Sunday),
   // so no post shrinks to a dot.
   const WIDE = [0, 1, 2, 3, 4, 5, 6].filter((d) => POST_DAYS.includes(d) || live.some((f) => itemsOn(f, addDays(week, d)).length > 0));
-  const RISK: Record<string, number> = { "at risk": 0, "not posting": 1, new: 2, active: 3, paused: 4 };
+  const RISK: Record<string, number> = { "at risk": 0, "not posting": 1, new: 2, active: 3, friend: 4, paused: 5 };
   const list = useMemo(() => {
     const qq = F.q.trim().toLowerCase();
     const out = live.filter((f) =>
@@ -444,7 +454,7 @@ function Desk(P: DeskProps) {
         <div className="page-head">
           <div>
             <h1>Editorial calendar</h1>
-            <p>{cohorts.length ? `${cohorts.length === 1 ? `Cohort ${cohorts[0]}` : `${cohorts.length} cohorts`} · ` : ""}{plural(live.length, "fellow")} · Week {weekNo(THIS)} of the fellowship · {DOWL[day(today).getUTCDay()]} {fmt(today)}</p>
+            <p>{cohorts.length ? `${cohorts.length === 1 ? `Cohort ${cohorts[0]}` : `${cohorts.length} cohorts`} · ` : ""}{plural(prog.length, "fellow")}{friendCount ? ` (and ${plural(friendCount, "friend")}, not fellows)` : ""} · Week {weekNo(THIS)} of the fellowship · {DOWL[day(today).getUTCDay()]} {fmt(today)}</p>
           </div>
           <div className="head-actions">
             <FellowshipProgramSwitch />
@@ -477,8 +487,8 @@ function Desk(P: DeskProps) {
             </div>
             <dl className="stats">
               <div className="stat"><dt>Posts this week</dt><dd>{postedThisWeek} <small>of {dueThisWeek}</small></dd><div className="bar"><i style={{ width: `${dueThisWeek ? (postedThisWeek / dueThisWeek) * 100 : 0}%` }} /></div></div>
-              <div className="stat"><dt>Fellows</dt><dd>{live.length} <small>of {nextCheckpoint?.creators ?? G.creators} by {fmt(nextCheckpoint?.by ?? G.by)}</small></dd><div className="bar"><i style={{ width: `${Math.min(100, (live.length / (nextCheckpoint?.creators || G.creators)) * 100)}%` }} /></div></div>
-              <div className="stat"><dt>Active this week</dt><dd>{activeThisWeek} <small>of {live.length}</small></dd></div>
+              <div className="stat"><dt>Fellows</dt><dd>{prog.length} <small>of {nextCheckpoint?.creators ?? G.creators} by {fmt(nextCheckpoint?.by ?? G.by)}</small></dd><div className="bar"><i style={{ width: `${Math.min(100, (prog.length / (nextCheckpoint?.creators || G.creators)) * 100)}%` }} /></div></div>
+              <div className="stat"><dt>Active this week</dt><dd>{activeThisWeek} <small>of {prog.length}</small></dd></div>
               <div className={`stat${atRisk ? " warn" : ""}`}><dt>At risk</dt><dd>{atRisk}</dd></div>
               <div className="stat"><dt>Numbers awaiting</dt><dd>{numbersAwaiting}</dd></div>
               <div className="stat"><dt>Studojo-post impressions</dt><dd>{kfmt(T.studojoImpressions)}</dd></div>
@@ -521,7 +531,7 @@ function Desk(P: DeskProps) {
             <label className="search"><span className="sr">Search fellows</span><Icon id="search" /><input className="input" type="search" placeholder="Search fellows, colleges, fields" value={F.q} onChange={(e) => F.setQ(e.target.value)} autoComplete="off" /></label>
             <select className="select" aria-label="Status" value={F.fStatus} onChange={(e) => F.setFStatus(e.target.value)}>
               <option value="all">All statuses</option>
-              {([["at risk", "At risk"], ["not posting", "Hasn't posted"], ["active", "Active"], ["new", "New"], ["paused", "Paused"]] as const).map(([s, l]) => <option key={s} value={s}>{l} ({live.filter((f) => fellowState(f)[0] === s).length})</option>)}
+              {([["at risk", "At risk"], ["not posting", "Hasn't posted"], ["active", "Active"], ["new", "New"], ["paused", "Paused"], ...(friendCount ? [["friend", "Friends, not fellows"] as const] : [])] as const).map(([s, l]) => <option key={s} value={s}>{l} ({live.filter((f) => fellowState(f)[0] === s).length})</option>)}
             </select>
             <select className="select" aria-label="Field" value={F.fField} onChange={(e) => F.setFField(e.target.value)}>
               <option value="all">All fields</option>{fields.map((f) => <option key={f}>{f}</option>)}
@@ -573,7 +583,7 @@ function Desk(P: DeskProps) {
                         return <td key={d} className={`d d-on${isToday}`} aria-label={`${label}: nothing planned`} />;
                       }
                       const it = items[0];
-                      const s = "d" in it && it.d ? draftSlot(it.d) : postSlot((it as { p: Post }).p, today, f.status === "paused");
+                      const s = "d" in it && it.d ? draftSlot(it.d) : postSlot((it as { p: Post }).p, today, f.status === "paused", f.friend);
                       const title = "d" in it && it.d ? it.d.title : (it as { p: Post }).p.title;
                       const kind = "d" in it && it.d ? it.d.kind : (it as { p: Post }).p.kind;
                       const open = () => ("d" in it && it.d ? setDrawer({ mode: "review", id: f.id, draftId: it.d.id }) : setDrawer({ mode: "post", id: f.id, postId: (it as { p: Post }).p.id }));
@@ -618,7 +628,7 @@ function Desk(P: DeskProps) {
           </aside>
         </div>
       ) : null}
-      {P.nudge && byId(P.nudge.id) ? <NudgeDialog f={byId(P.nudge.id)!} post={P.nudge.post} ask={P.nudge.ask} close={() => P.setNudge(null)} act={act} toast={toast} today={today} /> : null}
+      {P.nudge && byId(P.nudge.id) && !byId(P.nudge.id)!.friend ? <NudgeDialog f={byId(P.nudge.id)!} post={P.nudge.post} ask={P.nudge.ask} close={() => P.setNudge(null)} act={act} toast={toast} today={today} /> : null}
     </main>
   );
 }
@@ -821,7 +831,8 @@ function Attention(p: {
 
 // ---------------------------------------------------------------- results + lessons
 function Results({ D, act }: { D: Desk; act: (b: Record<string, unknown>, done?: string) => Promise<Desk | null> }) {
-  const posts = D.fellows.flatMap((f) => f.posts).filter((p) => p.status === "posted" && p.impressions != null);
+  // The programme's posts: a friend of the team's posts aren't in its numbers.
+  const posts = D.fellows.filter((f) => !f.friend).flatMap((f) => f.posts).filter((p) => p.status === "posted" && p.impressions != null);
   const n = (k: string) => posts.filter((p) => p.verdict?.level === k).length;
   const avg = (k: Kind) => { const ps = posts.filter((p) => p.kind === k); return ps.length ? Math.round(ps.reduce((s, p) => s + (p.impressions ?? 0), 0) / ps.length) : null; };
   const sj = avg("studojo"), ps = avg("personal");
@@ -868,10 +879,12 @@ function NotesBox({ saved, label, placeholder, meta, onSave }: { saved: string; 
 // A fellow's own weekly plan (the founder, 15 Nov 2026): fewer posts, or none about Studojo, for a fellow who
 // wants that. Claude writes to it and the desk counts against it; the programme's rule stays for everyone else.
 function PlanBox({ f, rules, creatorApi }: { f: Fellow; rules: Rules; creatorApi: (path: string, body: Record<string, unknown>, done?: string) => Promise<unknown> }) {
-  const base = { posts: rules.postsPerWeek, studojo: rules.studojoPerWeek ?? 2 };
+  // A friend of the team gets personal posts only, whatever the plan says (the server holds them to 0 Studojo posts too).
+  const base = { posts: rules.postsPerWeek, studojo: f.friend ? 0 : rules.studojoPerWeek ?? 2 };
+  const own = f.plan ? { postsPerWeek: f.plan.postsPerWeek, studojoPerWeek: f.friend ? 0 : f.plan.studojoPerWeek } : null;
   const [edit, setEdit] = useState(false);
-  const [posts, setPosts] = useState(f.plan?.postsPerWeek ?? base.posts);
-  const [studojo, setStudojo] = useState(f.plan?.studojoPerWeek ?? base.studojo);
+  const [posts, setPosts] = useState(own?.postsPerWeek ?? base.posts);
+  const [studojo, setStudojo] = useState(own?.studojoPerWeek ?? base.studojo);
   const [busy, setBusy] = useState(false);
   const line = (n: number, s: number) => `${n} a week: ${s === 0 ? `${n === 1 ? "their own story" : "all their own stories"}, no Studojo posts` : `${s} Studojo and ${n - s} their own`}`;
   const save = async (plan: { postsPerWeek: number; studojoPerWeek: number } | null) => {
@@ -885,17 +898,40 @@ function PlanBox({ f, rules, creatorApi }: { f: Fellow; rules: Rules; creatorApi
     <div className="field" data-tour="fellow-plan">
       <span className="label">Posting plan</span>
       {!edit ? (
-        <p className="hint">{f.plan ? <><b>Their own plan: </b>{line(f.plan.postsPerWeek, f.plan.studojoPerWeek)}.</> : <>The programme's: {line(base.posts, base.studojo)}.</>}
+        <p className="hint">{own ? <><b>Their own plan: </b>{line(own.postsPerWeek, own.studojoPerWeek)}.</> : <>The programme's: {line(base.posts, base.studojo)}.</>}
           {" "}<button className="btn-link" type="button" onClick={() => setEdit(true)}>Change</button>
           {f.plan ? <> · <button className="btn-link" type="button" disabled={busy} onClick={() => save(null)}>Use the programme's</button></> : null}</p>
       ) : (
         <div className="numrow">
           <div className="field"><label htmlFor="plan-n">Posts a week</label><input className="input" id="plan-n" inputMode="numeric" value={posts} onChange={(e) => { const n = Math.max(1, Math.min(7, Number(e.target.value) || 1)); setPosts(n); if (studojo > n) setStudojo(n); }} /></div>
-          <div className="field"><label htmlFor="plan-s">Of them, Studojo posts</label><input className="input" id="plan-s" inputMode="numeric" value={studojo} onChange={(e) => setStudojo(Math.max(0, Math.min(posts, Number(e.target.value) || 0)))} /></div>
-          <div className="stack-actions"><button className="btn btn-primary btn-sm" type="button" disabled={busy} onClick={() => save({ postsPerWeek: posts, studojoPerWeek: studojo })}><Icon id="check" />Save plan</button>
+          {f.friend ? null : <div className="field"><label htmlFor="plan-s">Of them, Studojo posts</label><input className="input" id="plan-s" inputMode="numeric" value={studojo} onChange={(e) => setStudojo(Math.max(0, Math.min(posts, Number(e.target.value) || 0)))} /></div>}
+          <div className="stack-actions"><button className="btn btn-primary btn-sm" type="button" disabled={busy} onClick={() => save({ postsPerWeek: posts, studojoPerWeek: f.friend ? 0 : studojo })}><Icon id="check" />Save plan</button>
             <button className="btn btn-quiet btn-sm" type="button" onClick={() => setEdit(false)}>Cancel</button></div>
         </div>
       )}
+    </div>
+  );
+}
+
+// A friend of the team, not a fellow (24 Nov 2026): someone we write posts for from what they tell us. Personal posts
+// only, no nudges or requests, not held to the programme's rules or counted in its numbers. Review stays the same.
+function FriendBox({ f, creatorApi }: { f: Fellow; creatorApi: (path: string, body: Record<string, unknown>, done?: string) => Promise<unknown> }) {
+  const [busy, setBusy] = useState(false);
+  const set = async (on: boolean) => {
+    setBusy(true);
+    await creatorApi("/api/ugc-creators", { intent: "set-friend", id: f.id, friend: on },
+      on ? `${f.first} is a friend, not a fellow: personal posts only, no reminders, not in the programme's numbers.` : `${f.first} is a fellow again.`);
+    setBusy(false);
+  };
+  return (
+    <div className="field">
+      <span className="label">Friend, not a fellow</span>
+      <label className="hint" style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: busy ? "wait" : "pointer" }}>
+        <input type="checkbox" checked={f.friend} disabled={busy} onChange={(e) => set(e.target.checked)} style={{ marginTop: 2 }} />
+        <span>{f.friend
+          ? <><b>On.</b> {f.first} is a friend of the team: personal posts only (no Studojo posts), no nudges or requests, and not counted in the programme's numbers. Drafts are reviewed here as usual.</>
+          : <>Switch on for someone who isn't in the fellowship and just wants posts written from what they tell us: personal posts only, no reminders, not counted in the programme's numbers.</>}</span>
+      </label>
     </div>
   );
 }
@@ -915,16 +951,16 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
   const left = s.thisWeek.due - s.thisWeek.posted;
   return (
     <>
-      <div className="sheet-head"><span className="crumb">Fellow</span>
+      <div className="sheet-head"><span className="crumb">{f.friend ? "Friend, not a fellow" : "Fellow"}</span>
         {f.status === "active" ? <button className="btn btn-quiet btn-sm" type="button" onClick={() => setConfirmPause(true)}><Icon id="pause" />Pause</button> : null}
         <CloseBtn onClick={() => setDrawer(null)} /></div>
       <div className="sheet-body">
         <div className="prof"><span className={`avatar lg ${avClass(f.name)}`} aria-hidden="true">{initials(f.name)}</span>
-          <div><h2 id="sheet-title">{f.name}</h2><p>{[f.college, f.field, f.cohort ? `Cohort ${f.cohort}` : null].filter(Boolean).join(" · ")}</p><p>Joined {f.joined ? fmt(f.joined) : "–"} · Last active {ago(s.lastActivity).toLowerCase()}</p><StatePill f={f} />{f.internAt ? <span className="pill pill-new" style={{ marginLeft: 6 }}>Growth intern since {fmt(istDay(f.internAt))}</span> : null}{f.referredAt ? <span className="pill pill-new" style={{ marginLeft: 6 }}>Referred {fmt(istDay(f.referredAt))}</span> : null}</div></div>
+          <div><h2 id="sheet-title">{f.name}</h2><p>{[f.college, f.field, f.cohort ? `Cohort ${f.cohort}` : null].filter(Boolean).join(" · ")}</p><p>Joined {f.joined ? fmt(f.joined) : "–"} · Last active {ago(s.lastActivity).toLowerCase()}</p><StatePill f={f} /><FriendBadge f={f} />{f.internAt ? <span className="pill pill-new" style={{ marginLeft: 6 }}>Growth intern since {fmt(istDay(f.internAt))}</span> : null}{f.referredAt ? <span className="pill pill-new" style={{ marginLeft: 6 }}>Referred {fmt(istDay(f.referredAt))}</span> : null}</div></div>
         <div className="actions">
           {f.status === "paused" ? <button className="btn btn-primary" type="button" onClick={() => creatorApi("/api/ugc-creators", { intent: "set-status", id: f.id, status: "active" }, `${f.first} is back on the calendar.`)}><Icon id="play" />Resume</button> : null}
           {f.drafts.some((d) => d.status === "review") ? <button className="btn btn-primary" type="button" onClick={() => setDrawer({ mode: "review", id: f.id })}><Icon id="pen" />Review {plural(f.drafts.filter((d) => d.status === "review").length, "draft")}</button> : null}
-          {f.status === "active" && left > 0 ? <button className="btn btn-outline" type="button" onClick={() => nudge(f.id)}><Icon id={f.email ? "mail" : "chat"} />Nudge</button> : null}
+          {f.status === "active" && left > 0 && !f.friend ? <button className="btn btn-outline" type="button" onClick={() => nudge(f.id)}><Icon id={f.email ? "mail" : "chat"} />Nudge</button> : null}
           {f.status === "active" && !hasNext ? <button className="btn btn-line" type="button" onClick={() => copyPlan([f.name], addDays(THIS, 7))}><Icon id="wand" />Plan next week</button> : null}
         </div>
         {confirmPause ? <div className="confirm" role="alert"><p><b>Pause {f.first}?</b> Their open posts stop showing as due, and they drop out of nudges until you resume.</p><div className="actions">
@@ -938,6 +974,7 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
             <p className="hint">{[f.whatsapp ? `WhatsApp ${f.whatsapp}` : "No WhatsApp number", f.email].filter(Boolean).join(" · ")}{safeUrl(f.linkedin) ? <> · <a href={safeUrl(f.linkedin)!} target="_blank" rel="noopener noreferrer">LinkedIn profile</a></> : null}</p></div>
         ) : null}
         <PlanBox f={f} rules={D.rules} creatorApi={creatorApi} />
+        <FriendBox f={f} creatorApi={creatorApi} />
         <dl className="kv">
           <div><dt>This week</dt><dd>{s.thisWeek.posted} of {s.thisWeek.due}</dd></div>
           <div><dt>Weekly run</dt><dd>{s.run} wk</dd></div>
@@ -945,7 +982,7 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
           <div><dt>Impressions</dt><dd>{num(s.impressions)}</dd></div>
           <div><dt>Connections</dt><dd>{f.connections != null ? num(f.connections) : "–"}{grew != null ? <small>{grew >= 0 ? "+" : ""}{grew} since joining</small> : null}</dd></div>
         </dl>
-        <div className="ms" aria-label="Milestones">{D.rules.milestones.map((m) => <span key={m.id} className={s.milestonesReached.includes(m.id) ? "on" : ""}>{s.milestonesReached.includes(m.id) ? <Icon id="check" sm /> : null}{m.name} · {m.weeks} wk</span>)}</div>
+        {f.friend ? null : <div className="ms" aria-label="Milestones">{D.rules.milestones.map((m) => <span key={m.id} className={s.milestonesReached.includes(m.id) ? "on" : ""}>{s.milestonesReached.includes(m.id) ? <Icon id="check" sm /> : null}{m.name} · {m.weeks} wk</span>)}</div>}
 
         <section aria-labelledby="pw-h"><div className="sec-h"><h3 id="pw-h">Posts by week</h3><span>Select a post to open it</span></div>
           {weeks.map((w) => {
@@ -956,7 +993,7 @@ function FellowView({ f, D, act, creatorApi, setDrawer, nudge, copyPlan, toast }
             return (
               <div className="wkb" key={w}><div className="wkb-h"><b>Week of {fmt(w)}</b><span>{label}</span></div>
                 {items.length ? items.map((x) => {
-                  const sl = "d" in x && x.d ? draftSlot(x.d) : postSlot((x as { p: Post }).p, today, f.status === "paused");
+                  const sl = "d" in x && x.d ? draftSlot(x.d) : postSlot((x as { p: Post }).p, today, f.status === "paused", f.friend);
                   const t = "d" in x && x.d ? x.d.title : (x as { p: Post }).p.title;
                   const p = "p" in x ? (x as { p: Post }).p : null;
                   const meta = p ? [p.kind === "studojo" ? "Studojo" : "Their story", p.impressions != null ? `${num(p.impressions)} impressions` : null].filter(Boolean).join(" · ") : `${("d" in x && x.d?.kind === "studojo") ? "Studojo" : "Their story"} · Claude's draft`;
@@ -1186,7 +1223,7 @@ function DraftCard({ d, f, today, act }: { d: Draft; f: Fellow; today: string; a
   return (
     <article className={`dcard${dirty ? " is-dirty" : ""}${busy ? " is-busy" : ""}`} aria-label={title}>
       <div className="dtop">
-        <select className="select" aria-label="Post type" value={kind} onChange={(e) => setKind(e.target.value as Kind)}><option value="personal">Their story</option><option value="studojo">Studojo</option></select>
+        <select className="select" aria-label="Post type" value={kind} onChange={(e) => setKind(e.target.value as Kind)}><option value="personal">Their story</option><option value="studojo" disabled={f.friend && kind !== "studojo"}>{f.friend ? "Studojo (not for a friend)" : "Studojo"}</option></select>
         <input className="input" type="date" aria-label="Due date" value={due} min={today} onChange={(e) => setDue(e.target.value)} />
         <span className="ver">{ver}</span>
       </div>
@@ -1304,8 +1341,8 @@ function PostEditor({ D, state, byId, act, upload, creatorApi, setDrawer, postDa
         <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}><legend className="label" style={{ marginBottom: 6 }}>Type</legend>
           <div className="typeseg">
             <label><input type="radio" name="pe-kind" value="personal" checked={kind === "personal"} onChange={() => setKind("personal")} />Their story</label>
-            <label><input type="radio" name="pe-kind" value="studojo" checked={kind === "studojo"} onChange={() => setKind("studojo")} /><span className="mk" aria-hidden="true">S</span>Studojo post</label>
-          </div></fieldset>
+            <label><input type="radio" name="pe-kind" value="studojo" checked={kind === "studojo"} disabled={!!f?.friend && kind !== "studojo"} onChange={() => setKind("studojo")} /><span className="mk" aria-hidden="true">S</span>Studojo post</label>
+          </div>{f?.friend ? <p className="hint">{f.first} is a friend, not a fellow: personal posts only.</p> : null}</fieldset>
         <div className="field"><label htmlFor="pe-date">Post date</label>
           <div className="date-row"><input className="input" id="pe-date" type="date" min={today} value={date} onChange={(e) => setDate(e.target.value)} />
             {sugg.length ? <div className="sugg"><span className="lbl">Free:</span>{sugg.map((s) => <button key={s} type="button" aria-pressed={date === s} onClick={() => setDate(s)}>{dow(s)} {fmt(s)}</button>)}</div> : null}</div>
