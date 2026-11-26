@@ -9,8 +9,9 @@ export function welcomeWhatsapp(name: string, whatsapp: string | null, link: str
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
 
-/** wa.me link reminding a creator about this week's posts. */
-export function nudgeWhatsapp(name: string, whatsapp: string | null, link: string, left: number): string | null {
+/** wa.me link reminding a creator about this week's posts. A friend of the team (not a fellow) gets no reminders: null. */
+export function nudgeWhatsapp(name: string, whatsapp: string | null, link: string, left: number, friend = false): string | null {
+  if (friend) return null;
   const digits = (whatsapp || "").replace(/\D/g, "");
   if (digits.length < 10) return null;
   const first = name.trim().split(/\s+/)[0] || "there";

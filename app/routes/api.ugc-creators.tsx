@@ -165,6 +165,15 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ ok: true, plan });
   }
 
+  // A friend of the team, not a fellow: { intent: "set-friend", id, friend: true | false }. Personal posts only, no
+  // reminders, not counted in the programme's numbers (fellowship.server.ts, Fellow.friend). Review stays the same.
+  if (body.intent === "set-friend") {
+    if (typeof body.friend !== "boolean") return Response.json({ error: "friend must be true or false" }, { status: 400 });
+    const r = await db.execute(sql`UPDATE ugc_creators SET friend = ${body.friend}::boolean WHERE id = ${id} RETURNING id, friend`);
+    if (!r.rows.length) return Response.json({ error: "Creator not found" }, { status: 404 });
+    return Response.json({ ok: true, friend: body.friend });
+  }
+
   // What they went on to: { outcome: "intern" | "referred", on }. Turning one on
   // keeps the first date it was set.
   if (body.intent === "set-outcome") {
