@@ -22,8 +22,10 @@ export function linkedInId(url: string | null | undefined): bigint | null {
 /**
  * LinkedIn ids carry the moment they were made in their top bits (milliseconds). One post has an activity id and a
  * share (or ugcPost) id made within moments of each other, so a link of either kind finds the same post.
+ * Usually under a second apart, but Varad's "A search bar assumes..." (11 Nov 2026) had its two ids 12 seconds apart,
+ * so the window is a minute (27 Nov 2026). Nobody puts up two different posts within the same minute.
  */
-export const SAME_POST_MS = 3000n;
+export const SAME_POST_MS = 60_000n;
 export function sameLinkedInPost(a: bigint | null, b: bigint | null): boolean {
   if (a == null || b == null) return false;
   if (a === b) return true;
